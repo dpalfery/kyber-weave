@@ -7,6 +7,7 @@ using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Repositories;
@@ -15,9 +16,10 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <see cref="SqliteRelationalStore.SessionListFigures"/> must batch its per-session reads:
 /// one <c>sqlite3</c> batch for sessions, one for the content-free record scalars, one for all
 /// projections, and at most one fallback batch for turns of sessions without a projection,
-/// regardless of session count.
+/// regardless of session count up to one chunk of 240 sessions; past that, each further chunk adds
+/// the same fixed number of statements, never one per session.
 /// </summary>
-public class SqliteRelationalStoreListAggregatesTests : IDisposable
+public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
 {
     private const string HarnessId = "perf-harness";
 
@@ -45,13 +47,13 @@ public class SqliteRelationalStoreListAggregatesTests : IDisposable
 
         store.ResetCount();
         IReadOnlyList<SessionListFigure> figures = store.SessionListFigures(HarnessId);
-        int batches = store.ExecuteSqliteCoreCount;
+        int batches = store.QueryRowsCount;
 
         Assert.Equal(5, figures.Count);
         Assert.Equal(
             ["sess-agg-0", "sess-agg-1", "sess-agg-2", "sess-agg-3", "sess-agg-4"],
             figures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
-        Assert.True(batches <= 5, $"Expected at most 5 sqlite3 batches, observed {batches}.");
+        Assert.Equal(BatchesFor(240), batches);
 
         foreach (SessionListFigure figure in figures)
         {
@@ -76,12 +78,59 @@ public class SqliteRelationalStoreListAggregatesTests : IDisposable
         Assert.Equal(1, figures.Single(static figure => figure.SessionKey == "sess-agg-2").TurnCount);
     }
 
-    private static void SeedSessions(SqliteRelationalStore store)
+    /// <summary>
+    /// Verifies the list read's query count is flat within one 240-session chunk and grows by the
+    /// same step for each further chunk: a per-session query would grow with every session instead.
+    /// </summary>
+    [Fact]
+    public void SessionListFigures_IssueAFixedQueryCountPerChunkOfSessions()
+    {
+        // Two of the seeded sessions have a projection, so the fallback-turn read covers two fewer
+        // keys; 242, 482 and 722 sessions put both key lists at a chunk boundary together.
+        int few = BatchesFor(5);
+        int oneChunk = BatchesFor(240);
+        int twoChunks = BatchesFor(242);
+        int threeChunks = BatchesFor(482);
+        int fourChunks = BatchesFor(722);
+
+        Assert.Equal(few, oneChunk);
+        Assert.True(twoChunks > oneChunk, $"A second chunk issued no extra statement ({twoChunks}).");
+        Assert.Equal(threeChunks - twoChunks, fourChunks - threeChunks);
+    }
+
+    /// <summary>
+    /// Verifies a keyed read of more sessions than one chunk answers every session in storage order,
+    /// the order one statement over all of them returns.
+    /// </summary>
+    [Fact]
+    public void SessionListFigures_ForMoreKeysThanOneChunkKeepStorageOrder()
+    {
+        string dbPath = Path.Combine(directory.Path, "list-figures-keyed", "canon.db");
+        CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        SeedSessions(store, 300);
+        IReadOnlyList<SessionListFigure> scoped = store.SessionListFigures(HarnessId);
+
+        IReadOnlyList<SessionListFigure> keyed = store.SessionListFigures([.. scoped.Select(static figure => figure.SessionKey).Reverse()]);
+
+        Assert.Equal(scoped.Select(static figure => figure.SessionKey), keyed.Select(static figure => figure.SessionKey));
+    }
+
+    private int BatchesFor(int sessionCount)
+    {
+        string dbPath = Path.Combine(directory.Path, $"list-figures-{sessionCount}", "canon.db");
+        CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        SeedSessions(store, sessionCount);
+        store.ResetCount();
+        Assert.Equal(sessionCount, store.SessionListFigures(HarnessId).Count);
+        return store.QueryRowsCount;
+    }
+
+    private static void SeedSessions(SqliteRelationalStore store, int sessionCount = 5)
     {
         DateTimeOffset t0 = new(2026, 11, 19, 10, 0, 0, TimeSpan.Zero);
         List<CollectedSession> sessions = [];
         List<CollectedRecord> records = [];
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < sessionCount; i++)
         {
             string sessionKey = $"sess-agg-{i}";
             sessions.Add(new CollectedSession(sessionKey, HarnessId, $"native-{i}", null, null, []));
@@ -151,14 +200,17 @@ public class SqliteRelationalStoreListAggregatesTests : IDisposable
         {
         }
 
-        public int ExecuteSqliteCoreCount { get; private set; }
+        public int QueryRowsCount { get; private set; }
 
-        public void ResetCount() => ExecuteSqliteCoreCount = 0;
+        public void ResetCount() => QueryRowsCount = 0;
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
         {
-            ExecuteSqliteCoreCount++;
-            return base.ExecuteSqliteCore(sql);
+            QueryRowsCount++;
+            return base.QueryRows(sql, parameters, map);
         }
     }
 }

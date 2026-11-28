@@ -22,9 +22,12 @@ public sealed partial class MarkdownAgentParser(IPathResolver paths, IProcessEnv
     // free-form tools lists) still surfaces author/version/license and description.
     private static readonly Regex TopLevelScalarRegex = MyRegex();
 
-    public bool CanParse(string filePath) =>
-        filePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
-        filePath.EndsWith(".agent.md", StringComparison.OrdinalIgnoreCase);
+    public bool CanParse(string filePath)
+    {
+        ArgumentNullException.ThrowIfNull(filePath);
+        return filePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
+            filePath.EndsWith(".agent.md", StringComparison.OrdinalIgnoreCase);
+    }
 
     public AgentModel Parse(string content, string filePath, HarnessKind harness)
     {

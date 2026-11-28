@@ -18,7 +18,7 @@ namespace KyberDash.Data.Tests;
 /// behind once starved a parallel reader of rates for <c>claude-sonnet-4-5</c>.
 /// </remarks>
 [Collection(Repositories.CanonPricingStatics.Name)]
-public class PricingRepositoryTests : IDisposable
+public sealed class PricingRepositoryTests : IDisposable
 {
     private readonly (Func<PricingTables>? Provider, PricingTables? Cache) savedPricingProvider;
 
@@ -30,14 +30,13 @@ public class PricingRepositoryTests : IDisposable
             PricingField("_cachedTables").GetValue(null) as PricingTables);
     }
 
-    /// <inheritdoc />
+    /// <summary>Restores the process-wide pricing provider the constructor replaced when disposing.</summary>
     public void Dispose()
     {
         // Restore the process-wide provider so other tests are not left with a repository-backed
         // one (or with empty tables that would price ambient reads as having no rate).
         PricingField("_pricingProvider").SetValue(null, savedPricingProvider.Provider);
         PricingField("_cachedTables").SetValue(null, savedPricingProvider.Cache);
-        GC.SuppressFinalize(this);
     }
 
     private static FieldInfo PricingField(string name) =>

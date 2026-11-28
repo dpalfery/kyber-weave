@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 /// dry run applies nothing, and that a refusal lands on the same console as the rest of the output. The exit codes are
 /// the contract the integration suite pins; these cases pin that the same codes follow from the seams alone.
 /// </remarks>
-public sealed class UtilitiesStatusLineCommandSeamTests
+public sealed class UtilitiesStatusLineCommandSeamTests : IDisposable
 {
     /// <summary>A fully qualified anchor the path seam accepts on every platform.</summary>
     private static readonly string Anchor = OperatingSystem.IsWindows() ? @"C:\kw" : "/kw";
@@ -39,6 +39,11 @@ public sealed class UtilitiesStatusLineCommandSeamTests
 
     private static UtilitiesStatusLineProcessRunner UnreachableProbe => (_, _) =>
         throw new InvalidOperationException("This case must not probe a harness.");
+
+    public void Dispose()
+    {
+        _console.Dispose();
+    }
 
     // -----------------------------------------------------------------------------------------
     // status

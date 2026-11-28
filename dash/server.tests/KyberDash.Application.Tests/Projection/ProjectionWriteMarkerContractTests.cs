@@ -14,7 +14,7 @@ namespace KyberDash.Application.Tests.Projection;
 /// <see cref="CanonProjectionService.ProjectIncremental"/> pass rebuilds exactly those sessions,
 /// on both <see cref="InMemoryRelationalStore"/> and <see cref="SqliteRelationalStore"/>.
 /// </summary>
-public class ProjectionWriteMarkerContractTests : IDisposable
+public sealed class ProjectionWriteMarkerContractTests : IDisposable
 {
     private static readonly DateTimeOffset TurnBase = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
 

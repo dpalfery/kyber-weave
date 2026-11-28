@@ -14,7 +14,7 @@ namespace KyberWeave.Tests;
 /// The agent commands write to the console they were constructed with, so their output is read here without a
 /// terminal and without the process-wide console.
 /// </summary>
-public sealed class AgentCommandsConsoleTests
+public sealed class AgentCommandsConsoleTests : IDisposable
 {
     private const string Root = "/kw/agents";
 
@@ -22,6 +22,8 @@ public sealed class AgentCommandsConsoleTests
     private readonly StubAgentGovernance _agents = new();
 
     public AgentCommandsConsoleTests() => _console.Profile.Width = 200;
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void Validate_WithAnError_WritesTheFindingToTheConsoleAndReturnsOne()

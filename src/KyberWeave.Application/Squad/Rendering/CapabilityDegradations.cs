@@ -116,6 +116,8 @@ public static class CapabilityDegradations
         string profileName,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
+        ArgumentNullException.ThrowIfNull(capabilityProfiles);
+
         // An unresolvable profile allows nothing. Reading a missing profile as permission would
         // turn a source error into silent widening, so the rule stays fail-closed. The name can be
         // absent rather than merely unknown — a hand-built or partially deserialised agent carries
@@ -328,6 +330,8 @@ public static class CapabilityDegradations
     public static IReadOnlyList<string> DeclaredMcpServerNames(
         IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools)
     {
+        ArgumentNullException.ThrowIfNull(requiredMcpTools);
+
         return [.. requiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
     }
 
@@ -405,6 +409,8 @@ public static class CapabilityDegradations
         IReadOnlyList<string> grantedShellTools,
         IReadOnlyList<string> withheldWriteTools)
     {
+        ArgumentNullException.ThrowIfNull(grantedShellTools);
+
         // The gap applies only when execute is allow and write is NOT allow
         if (executeDecision != SquadPermissionDecision.Allow || writeDecision == SquadPermissionDecision.Allow)
         {
@@ -443,6 +449,9 @@ public static class CapabilityDegradations
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(capabilityProfiles);
+
         capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile);
 
         return string.Join(

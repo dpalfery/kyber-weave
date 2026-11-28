@@ -44,7 +44,8 @@ An id in brackets names the analyzer that enforces the rule. Until the codebase 
   table or column name, environment variable, flag or meaningful number is a `const`, `enum` or
   `nameof()` in one place. Code that matches the fact uses that source, never a re-typed string or pattern.
 - **KW-STD-CS-002 One responsibility.** One reason to change per class and per method; split a class
-  that does two jobs. Guard clauses return or throw early instead of nesting. [CA1502, CA1506]
+  that does two jobs. Guard clauses return or throw early instead of nesting. [CA1502, CA1506;
+  product code only, the analyzers are off for test code]
 - **KW-STD-CS-003 Encapsulated and immutable.** `private` fields, `init` properties, records for
   values, `IReadOnly*` collections exposed and no public collection setter. [CA2227]
 - **KW-STD-CS-004 Null-safe.** Check with `is null` / `is not null`; guard public arguments with

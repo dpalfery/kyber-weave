@@ -98,6 +98,8 @@ public static class CanonRecordVocabulary
     /// <returns>A problem key not already present in <paramref name="usedKeys"/>.</returns>
     public static string UniqueProblemKey(HashSet<string> usedKeys, string keyPrefix, string id, string code, int index)
     {
+        ArgumentNullException.ThrowIfNull(usedKeys);
+
         string baseKey = string.Create(CultureInfo.InvariantCulture, $"{keyPrefix}{id}:{code}");
         if (usedKeys.Add(baseKey))
         {

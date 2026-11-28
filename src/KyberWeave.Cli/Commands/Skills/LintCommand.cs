@@ -26,6 +26,7 @@ public sealed class LintCommand(ISkillGovernanceService skills, IAnsiConsole ans
     /// <inheritdoc />
     public override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         SkillLintResult linted = skills.Lint(settings.Path, settings.MinDescriptionScore);
         DiagnosticReport report = linted.Report;
         SkillSet set = linted.Skills;

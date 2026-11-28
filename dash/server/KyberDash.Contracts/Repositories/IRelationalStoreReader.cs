@@ -533,7 +533,7 @@ public record SessionReportFigure(
     /// <param name="summary">The summary figures to project from.</param>
     public SessionReportFigure(SessionSummaryFigure summary)
         : this(
-            summary.SessionKey,
+            Require(summary).SessionKey,
             summary.TotalInput,
             summary.TotalCacheRead,
             summary.ToolsOffered,
@@ -541,6 +541,14 @@ public record SessionReportFigure(
             summary.ReportedCost,
             summary.PublishedCost)
     {
+    }
+
+    // The chained projection runs before the constructor body, so the null
+    // validation that guards it must run inside the chain as well (CA1062).
+    private static SessionSummaryFigure Require(SessionSummaryFigure summary)
+    {
+        ArgumentNullException.ThrowIfNull(summary);
+        return summary;
     }
 }
 

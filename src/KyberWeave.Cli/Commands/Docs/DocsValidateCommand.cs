@@ -23,6 +23,7 @@ public sealed class DocsValidateCommand(
     public override int Execute(CommandContext context, DocsValidateSettings settings,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config,
                 out OntologyConfig ontology))

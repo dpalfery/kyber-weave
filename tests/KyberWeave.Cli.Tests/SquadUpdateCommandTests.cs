@@ -9,7 +9,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What <c>squad update</c> resolves, asks and prints for a project, over the shared console, path, config and state fakes.</summary>
-public sealed class SquadUpdateCommandTests
+public sealed class SquadUpdateCommandTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
@@ -18,6 +18,12 @@ public sealed class SquadUpdateCommandTests
     private readonly FakeSquadStateMigration _migration = new();
     private readonly FakeSquadTargetResolver _targets = new();
     private readonly FakeKyberWeaveConfigRepository _configs = new();
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     [Fact]
     public void Execute_NoDeployment_SaysWhereAndHowToCreateOne()

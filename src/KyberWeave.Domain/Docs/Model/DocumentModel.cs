@@ -17,8 +17,13 @@ public enum DocStatus
 /// Frontmatter as authored, before validation. Every field is nullable so that a missing
 /// or malformed key is reported as a diagnostic rather than throwing during parse.
 /// </summary>
-public sealed class DocumentFrontmatter
+public sealed record DocumentFrontmatter
 {
+    /// <summary>Creates an empty frontmatter; deserialization starts here, so every field stays nullable.</summary>
+    public DocumentFrontmatter()
+    {
+    }
+
     public string? Id { get; init; }
     public string? Title { get; init; }
     public string? DocType { get; init; }
@@ -56,21 +61,21 @@ public sealed class DocumentFrontmatter
     /// Heading slug of the leaf an exact document-id query returns; default is the preamble
     /// (<c>{doc-id}#</c>).
     /// </summary>
-    public string? Lead { get; set; }
+    public string? Lead { get; init; }
 
     /// <summary>
     /// Per-section keywords and code-refs keyed by heading slug; preamble uses
     /// <c>#</c>.
     /// </summary>
-    public Dictionary<string, DocumentSectionVocabulary>? Sections { get; set; }
+    public Dictionary<string, DocumentSectionVocabulary>? Sections { get; init; }
 }
 
 /// <summary>Keywords and code-refs declared for one section slug.</summary>
 public sealed class DocumentSectionVocabulary
 {
-    public Collection<string>? Keywords { get; set; }
+    public Collection<string>? Keywords { get; init; }
 
-    public Collection<string>? CodeRefs { get; set; }
+    public Collection<string>? CodeRefs { get; init; }
 }
 
 /// <summary>One <c>##</c> section of a document body.</summary>

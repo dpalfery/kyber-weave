@@ -31,6 +31,8 @@ public static class ReviewCycleView
     /// <param name="error">Why none could be chosen.</param>
     public static bool TryChooseTask(IReviewCycleStore cycles, IGitChangeReader git, string root, string scratchpad, string? given, out string task, out string? note, out string? error)
     {
+        ArgumentNullException.ThrowIfNull(cycles);
+
         note = null;
         error = null;
         if (!string.IsNullOrWhiteSpace(given))
@@ -121,6 +123,8 @@ public static class ReviewCycleView
     /// <summary>The current branch, or an empty string when git cannot say.</summary>
     public static string CurrentBranch(IGitChangeReader git, string root)
     {
+        ArgumentNullException.ThrowIfNull(git);
+
         try
         {
             return git.CurrentBranch(root);
@@ -135,6 +139,8 @@ public static class ReviewCycleView
     /// <summary>The paths the working tree changed since <paramref name="commit"/>, or null when git cannot list them.</summary>
     public static IReadOnlyList<string>? TryChangedSince(IGitChangeReader git, string root, string commit)
     {
+        ArgumentNullException.ThrowIfNull(git);
+
         try
         {
             return git.ResolveSince(root, commit);
@@ -161,6 +167,11 @@ public static class ReviewCycleView
         Severity unreadableSeverity,
         string subject)
     {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(prior);
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(recheck);
+
         try
         {
             FindingsReport findings = ReviewJson.ReadFindings(files.ReadAllText(prior.FindingsPath));
@@ -184,6 +195,9 @@ public static class ReviewCycleView
     /// <summary>The lines that describe a verifier cycle: the prior cycle, the findings to re-check and what each gate does.</summary>
     public static IEnumerable<string> VerifierLines(ReviewCyclePlan plan, IReadOnlyList<ReviewFinding> recheck)
     {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(recheck);
+
         if (plan.Prior is not { } prior)
             yield break;
 
@@ -225,6 +239,9 @@ public static class ReviewCycleView
     /// </summary>
     public static string GatesCommand(string root, string gatesPath, string? baseRef)
     {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(gatesPath);
+
         string command = $"kyber-weave review gates {Quote(root)} --council --out {Quote(gatesPath)}";
         return string.IsNullOrWhiteSpace(baseRef) ? command : $"{command} --base {Quote(baseRef.Trim())}";
     }
@@ -232,7 +249,11 @@ public static class ReviewCycleView
     private static string Quote(string value) => value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
 
     /// <summary><c>full</c> for the first cycle, <c>verifier</c> for any later one.</summary>
-    public static string Mode(ReviewCyclePlan plan) => plan.IsVerifier ? "verifier" : "full";
+    public static string Mode(ReviewCyclePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return plan.IsVerifier ? "verifier" : "full";
+    }
 
     /// <summary>A path relative to the repository root, with forward slashes.</summary>
     public static string Relative(string root, string path) =>

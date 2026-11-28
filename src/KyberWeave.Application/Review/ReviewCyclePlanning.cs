@@ -294,12 +294,15 @@ public static partial class ReviewCyclePlanning
         }
     }
 
-    public static int? TryNumber(string name) =>
-        name.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
+    public static int? TryNumber(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return name.StartsWith(ScratchLayout.CycleFolderPrefix, StringComparison.Ordinal)
         && int.TryParse(name.AsSpan(ScratchLayout.CycleFolderPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int number)
         && number > 0
             ? number
             : null;
+    }
 
     [GeneratedRegex("^[0-9a-f]{7,64}$", RegexOptions.CultureInvariant)]
     private static partial Regex CommitId();

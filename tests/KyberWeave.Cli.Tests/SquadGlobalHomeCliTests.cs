@@ -32,7 +32,7 @@ namespace KyberWeave.Tests;
 /// system's mutex — is proven by <c>MutexLeaseContractTests</c> in the integration project, and a real
 /// permission denial on the home guidance file is proven by <c>SquadDeployTimeGuidanceWiringTests</c> there.
 /// </remarks>
-public sealed class SquadGlobalHomeCliTests
+public sealed class SquadGlobalHomeCliTests : IDisposable
 {
     private const string InstalledVersion = "1.2.3";
     private const string UpdatedVersion = "1.2.4";
@@ -56,6 +56,8 @@ public sealed class SquadGlobalHomeCliTests
             _state.Paths,
             _state.Environment);
     }
+
+    public void Dispose() => _release.Dispose();
 
     [Fact]
     public void UpdateGlobalFromTwoUnrelatedDirectoriesFindsTheSameGlobalReceipt()

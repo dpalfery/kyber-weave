@@ -45,6 +45,7 @@ public static class ReportRenderer
         string? displayRoot = null)
     {
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(report);
         string root = displayRoot ?? DisplayRoot;
 
         switch (format)
@@ -220,6 +221,7 @@ public static class ReportRenderer
     public static void RenderSummary(IAnsiConsole console, DiagnosticReport report)
     {
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(report);
 
         console.MarkupLine(
             $"[red]{report.Count(Severity.Critical)} critical[/], " +

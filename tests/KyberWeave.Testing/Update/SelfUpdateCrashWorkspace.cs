@@ -51,7 +51,15 @@ public abstract class SelfUpdateCrashWorkspace : IDisposable
     public abstract IReadOnlyDictionary<string, byte[]> CaptureInstall();
 
     /// <inheritdoc />
-    public abstract void Dispose();
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Releases the managed resources the workspace owns.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose"/>.</param>
+    protected abstract void Dispose(bool disposing);
 
     /// <summary>Gets the same capture rule for both implementations, over a raw file system.</summary>
     /// <param name="files">A file system that is not faulting.</param>
@@ -131,7 +139,7 @@ public sealed class InMemorySelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
     public override IReadOnlyDictionary<string, byte[]> CaptureInstall() => Capture(_memory, Install);
 
     /// <inheritdoc />
-    public override void Dispose()
+    protected override void Dispose(bool disposing)
     {
     }
 }
@@ -203,11 +211,14 @@ public sealed class PhysicalSelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
     public override IReadOnlyDictionary<string, byte[]> CaptureInstall() => Capture(_disk, Install);
 
     /// <inheritdoc />
-    public override void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        foreach (string temporary in _control.TemporaryDirectories)
+        if (disposing)
         {
-            _disk.DeleteTreeNoFollow(temporary);
+            foreach (string temporary in _control.TemporaryDirectories)
+            {
+                _disk.DeleteTreeNoFollow(temporary);
+            }
         }
     }
 }

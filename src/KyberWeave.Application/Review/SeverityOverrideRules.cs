@@ -146,22 +146,31 @@ public static partial class SeverityOverrideRules
         return new SeverityOverrides(rows, problems, ReadOnly(globs));
     }
     /// <summary>The row with this id, or null.</summary>
-    public static SeverityOverrideRow? Find(this SeverityOverrides overrides, string id) =>
-        overrides.Rows.FirstOrDefault(row => string.Equals(row.Id, id.Trim(), StringComparison.OrdinalIgnoreCase));
+    public static SeverityOverrideRow? Find(this SeverityOverrides overrides, string id)
+    {
+        ArgumentNullException.ThrowIfNull(overrides);
+        return overrides.Rows.FirstOrDefault(row => string.Equals(row.Id, id.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// The rows a seat of <paramref name="lens"/> is given: rows with no scope, rows scoped to the lens, and rows scoped
     /// to a technology a changed file belongs to. A null changed list counts every technology as present.
     /// </summary>
-    public static IReadOnlyList<SeverityOverrideRow> RowsFor(this SeverityOverrides overrides, string lens, IReadOnlyList<string>? changedPaths) =>
-        [.. overrides.Rows.Where(row => LensMatches(row, lens)
+    public static IReadOnlyList<SeverityOverrideRow> RowsFor(this SeverityOverrides overrides, string lens, IReadOnlyList<string>? changedPaths)
+    {
+        ArgumentNullException.ThrowIfNull(overrides);
+        return [.. overrides.Rows.Where(row => LensMatches(row, lens)
                                && (row.Technologies.Count == 0 || changedPaths is null
                                    || row.Technologies.Any(technology => changedPaths.Any(path => BelongsTo(overrides, technology, path)))))];
+    }
 
     /// <summary>The rows a finding of <paramref name="lens"/> in <paramref name="file"/> can be matched against.</summary>
-    public static IReadOnlyList<SeverityOverrideRow> RowsForFinding(this SeverityOverrides overrides, string lens, string file) =>
-        [.. overrides.Rows.Where(row => LensMatches(row, lens)
+    public static IReadOnlyList<SeverityOverrideRow> RowsForFinding(this SeverityOverrides overrides, string lens, string file)
+    {
+        ArgumentNullException.ThrowIfNull(overrides);
+        return [.. overrides.Rows.Where(row => LensMatches(row, lens)
                                && (row.Technologies.Count == 0 || row.Technologies.Any(technology => BelongsTo(overrides, technology, file))))];
+    }
 
 
     /// <summary>

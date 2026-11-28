@@ -1,7 +1,5 @@
 using KyberWeave.Core.FileSystem;
 using System.Buffers.Binary;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -10,15 +8,16 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Processes;
+using Microsoft.Data.Sqlite;
+using SQLitePCL;
 
 namespace KyberWeave.Core.Docs.Analysis.Persistence;
 
 /// <summary>
-/// Stores local analysis evidence through the system <c>sqlite3</c> executable.
+/// Stores local analysis evidence in a process-local SQLite database.
 /// </summary>
 /// <remarks>
-/// The CLI boundary avoids adding a native SQLite package with its transitive advisory.
-/// Every caller-controlled value is encoded as a SQLite BLOB literal, so prose cannot
+/// Every caller-controlled value is bound as a named SQL parameter, so prose cannot
 /// become SQL even when it contains quotes, newlines, or SQL-looking text.
 /// </remarks>
 public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
@@ -26,19 +25,10 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     public const int SchemaVersion = 1;
 
     private const double NormalizedVectorTolerance = 0.0001;
-    private const int BusyTimeoutMilliseconds = 250;
     private const int BusyAttempts = 3;
+    private const int BusyAttemptTimeoutSeconds = 1;
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
-
-    /// <summary>
-    ///     The bound for one sqlite3 batch, reads and writes alike. A healthy batch, even a large review import,
-    ///     finishes far inside this; a hung child is killed at it and the operation fails.
-    /// </summary>
-    private static readonly TimeSpan SqliteBatchTimeout = TimeSpan.FromSeconds(120);
-
-    /// <summary>The bound for the sqlite3 version probe that decides whether the cache can be opened.</summary>
-    private static readonly TimeSpan SqliteVersionProbeTimeout = TimeSpan.FromSeconds(30);
 
     // Generated so a hostile sqlite message cannot hang the retry classifier.
     [GeneratedRegex(@"\blocked\b", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
@@ -46,20 +36,18 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
 
     [GeneratedRegex(@"\bbusy\b", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex BusyWordRegex();
-
-    [GeneratedRegex(@"SQLITE_(BUSY|LOCKED)", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
-    private static partial Regex SqliteBusyOrLockedRegex();
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.General);
+    private static readonly Lock SqliteProviderGate = new();
+    private static volatile bool SqliteProviderInitialized;
     private readonly string _repositoryRoot;
     private readonly IWritableFileSystem _files;
-    private readonly IBoundedProcessExecutor _processes;
 
     /// <summary>Opens the cache under <paramref name="repositoryRoot"/>, creating it when the repository's state is safe to cache in.</summary>
     /// <param name="repositoryRoot">The repository root.</param>
     /// <param name="files">Creates the cache folder and inspects the path components for links.</param>
     /// <param name="paths">Resolves the repository root to a full path.</param>
     /// <param name="environment">Supplies the directory a relative root resolves against.</param>
-    /// <param name="processes">Runs the <c>sqlite3</c> executable under a time limit.</param>
+    /// <param name="processes">Retained so existing composition roots and seam tests keep compiling; the cache no longer starts a process.</param>
     /// <param name="safety">Decides whether the cache is protected from accidental commits.</param>
     public SqliteAnalysisPersistence(
         string repositoryRoot,
@@ -76,7 +64,6 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         ArgumentNullException.ThrowIfNull(processes);
         ArgumentNullException.ThrowIfNull(safety);
         _files = files;
-        _processes = processes;
 
         string fullRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _repositoryRoot = fullRoot;
@@ -196,49 +183,57 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         string[] contextualHashes = keys.Select(k => k.ContextualHash).Distinct(StringComparer.Ordinal).ToArray();
         Dictionary<EmbeddingCacheKey, StoredEmbedding> loaded = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
 
-        const int batchSize = 500;
-        for (int i = 0; i < contextualHashes.Length; i += batchSize)
-        {
-            string[] chunk = contextualHashes.Skip(i).Take(batchSize).ToArray();
-            string inClause = string.Join(", ", chunk.Select(Blob));
-            string output = ExecuteSqlite(
-                ".mode tabs\n" +
-                ".headers off\n" +
-                "SELECT hex(contextual_hash), hex(provider_fingerprint), hex(model), " +
-                $"dimensions, hex(encoding), hex(vector) FROM analysis_embeddings WHERE contextual_hash IN ({inClause});");
+        ExecuteSqlite(connection => ReadEmbeddingRows(connection, contextualHashes, requested, loaded));
+        return loaded;
+    }
 
-            foreach (string line in Lines(output))
+    private static void ReadEmbeddingRows(
+        SqliteConnection connection,
+        IReadOnlyList<string> contextualHashes,
+        IReadOnlySet<EmbeddingCacheKey> requested,
+        IDictionary<EmbeddingCacheKey, StoredEmbedding> loaded)
+    {
+        {
+            // One statement for every requested hash: the hashes travel as one JSON array parameter, so the
+            // statement binds one variable however many there are. Keys are stored as UTF-8 BLOBs.
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT contextual_hash, provider_fingerprint, model, dimensions, encoding, vector " +
+                "FROM analysis_embeddings WHERE contextual_hash IN " +
+                "(SELECT CAST(value AS BLOB) FROM json_each($contextual_hashes));";
+            command.Parameters.AddWithValue("$contextual_hashes", JsonSerializer.Serialize(contextualHashes));
+
+            using SqliteDataReader reader = command.ExecuteReader();
+            int contextualHashOrdinal = reader.GetOrdinal("contextual_hash");
+            int providerFingerprintOrdinal = reader.GetOrdinal("provider_fingerprint");
+            int modelOrdinal = reader.GetOrdinal("model");
+            int dimensionsOrdinal = reader.GetOrdinal("dimensions");
+            int encodingOrdinal = reader.GetOrdinal("encoding");
+            int vectorOrdinal = reader.GetOrdinal("vector");
+            while (reader.Read())
             {
                 try
                 {
-                    string[] fields = line.Split('\t');
-                    if (fields.Length != 6
-                        || !int.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int storedDimensions))
-                    {
-                        throw new InvalidDataException("An embedding row has an invalid shape.");
-                    }
-
+                    int storedDimensions = reader.GetInt32(dimensionsOrdinal);
                     EmbeddingCacheKey key = new EmbeddingCacheKey(
-                        Text(fields[0]),
-                        Text(fields[1]),
-                        Text(fields[2]),
+                        Encoding.UTF8.GetString(reader.GetFieldValue<byte[]>(contextualHashOrdinal)),
+                        Encoding.UTF8.GetString(reader.GetFieldValue<byte[]>(providerFingerprintOrdinal)),
+                        Encoding.UTF8.GetString(reader.GetFieldValue<byte[]>(modelOrdinal)),
                         storedDimensions < 0 ? null : storedDimensions,
-                        Text(fields[4]));
+                        Encoding.UTF8.GetString(reader.GetFieldValue<byte[]>(encodingOrdinal)));
                     if (!requested.Contains(key)) continue;
 
-                    IReadOnlyList<float> vector = DecodeVector(fields[5]);
+                    IReadOnlyList<float> vector = DecodeVector(reader.GetFieldValue<byte[]>(vectorOrdinal));
                     Validate(new StoredEmbedding(key, vector));
                     loaded[key] = new StoredEmbedding(key, vector);
                 }
                 catch (Exception exception) when (
-                    exception is FormatException or ArgumentException or InvalidDataException)
+                    exception is FormatException or ArgumentException or InvalidDataException or InvalidCastException)
                 {
                     throw CorruptCache("An embedding row is invalid.", exception);
                 }
             }
         }
-
-        return loaded;
     }
 
     public void SaveEmbeddings(IReadOnlyCollection<StoredEmbedding> embeddings)
@@ -247,63 +242,162 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         EnsureAvailable();
         foreach (StoredEmbedding embedding in embeddings) Validate(embedding);
 
-        ExecuteWriteTransaction(embeddings.Select(embedding =>
-        {
-            int dimensions = embedding.Key.Dimensions ?? -1;
-            return "INSERT INTO analysis_embeddings(" +
-                   "contextual_hash, provider_fingerprint, model, dimensions, encoding, vector) VALUES (" +
-                   $"{Blob(embedding.Key.ContextualHash)}, " +
-                   $"{Blob(embedding.Key.ProviderFingerprint)}, " +
-                   $"{Blob(embedding.Key.Model)}, " +
-                   $"{dimensions.ToString(CultureInfo.InvariantCulture)}, " +
-                   $"{Blob(embedding.Key.Encoding)}, " +
-                   $"{Blob(EncodeVector(embedding.Vector))}) " +
-                   "ON CONFLICT(contextual_hash, provider_fingerprint, model, dimensions, encoding) " +
-                   "DO UPDATE SET vector = excluded.vector;";
-        }));
+        ExecuteWriteTransaction(embeddings.Select(EmbeddingUpsert));
     }
+
+    private static Action<SqliteConnection, SqliteTransaction> EmbeddingUpsert(StoredEmbedding embedding) =>
+        (connection, transaction) =>
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                "INSERT INTO analysis_embeddings(" +
+                "contextual_hash, provider_fingerprint, model, dimensions, encoding, vector) VALUES (" +
+                "$contextual_hash, $provider_fingerprint, $model, $dimensions, $encoding, $vector) " +
+                "ON CONFLICT(contextual_hash, provider_fingerprint, model, dimensions, encoding) " +
+                "DO UPDATE SET vector = excluded.vector;";
+            command.Parameters.AddWithValue(
+                "$contextual_hash",
+                Encoding.UTF8.GetBytes(embedding.Key.ContextualHash));
+            command.Parameters.AddWithValue(
+                "$provider_fingerprint",
+                Encoding.UTF8.GetBytes(embedding.Key.ProviderFingerprint));
+            command.Parameters.AddWithValue("$model", Encoding.UTF8.GetBytes(embedding.Key.Model));
+            command.Parameters.AddWithValue("$dimensions", embedding.Key.Dimensions ?? -1);
+            command.Parameters.AddWithValue("$encoding", Encoding.UTF8.GetBytes(embedding.Key.Encoding));
+            command.Parameters.AddWithValue("$vector", EncodeVector(embedding.Vector));
+            command.ExecuteNonQuery();
+        };
 
     private void InitializeSchema()
     {
-        string versionText = ExecuteSqlite("PRAGMA user_version;").Trim();
-        if (!int.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out int version))
-            throw CorruptCache("The analysis cache schema version is not an integer.");
+        int version = ExecuteSqlite(ReadSchemaVersion);
         if (version > SchemaVersion)
             throw CorruptCache(
                 $"The analysis cache uses schema version {version}, newer than supported version {SchemaVersion}.");
 
         if (version == 0)
         {
-            ExecuteSqlite(
-                "PRAGMA foreign_keys = ON;\n" +
-                "BEGIN IMMEDIATE;\n" +
-                "CREATE TABLE IF NOT EXISTS analysis_claims (" +
-                "id BLOB PRIMARY KEY NOT NULL, payload BLOB NOT NULL);\n" +
-                "CREATE TABLE IF NOT EXISTS analysis_candidates (" +
-                "candidate_id BLOB PRIMARY KEY NOT NULL, payload BLOB NOT NULL);\n" +
-                "CREATE TABLE IF NOT EXISTS analysis_verdicts (" +
-                "candidate_id BLOB PRIMARY KEY NOT NULL, payload BLOB NOT NULL, " +
-                "FOREIGN KEY(candidate_id) REFERENCES analysis_candidates(candidate_id) ON DELETE CASCADE);\n" +
-                "CREATE TABLE IF NOT EXISTS analysis_embeddings (" +
-                "contextual_hash BLOB NOT NULL, provider_fingerprint BLOB NOT NULL, " +
-                "model BLOB NOT NULL, dimensions INTEGER NOT NULL, encoding BLOB NOT NULL, " +
-                "vector BLOB NOT NULL, PRIMARY KEY(" +
-                "contextual_hash, provider_fingerprint, model, dimensions, encoding));\n" +
-                SchemaValidationSql() +
-                $"PRAGMA user_version = {SchemaVersion.ToString(CultureInfo.InvariantCulture)};\n" +
-                "COMMIT;");
+            ExecuteSqlite(connection =>
+            {
+                using (SqliteCommand foreignKeys = connection.CreateCommand())
+                {
+                    foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
+                    foreignKeys.ExecuteNonQuery();
+                }
+
+                using SqliteTransaction transaction =
+                    connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+
+                using (SqliteCommand claims = connection.CreateCommand())
+                {
+                    claims.Transaction = transaction;
+                    claims.CommandText =
+                        "CREATE TABLE IF NOT EXISTS analysis_claims (" +
+                        "id BLOB PRIMARY KEY NOT NULL, payload BLOB NOT NULL);";
+                    claims.ExecuteNonQuery();
+                }
+
+                using (SqliteCommand candidates = connection.CreateCommand())
+                {
+                    candidates.Transaction = transaction;
+                    candidates.CommandText =
+                        "CREATE TABLE IF NOT EXISTS analysis_candidates (" +
+                        "candidate_id BLOB PRIMARY KEY NOT NULL, payload BLOB NOT NULL);";
+                    candidates.ExecuteNonQuery();
+                }
+
+                using (SqliteCommand verdicts = connection.CreateCommand())
+                {
+                    verdicts.Transaction = transaction;
+                    verdicts.CommandText =
+                        "CREATE TABLE IF NOT EXISTS analysis_verdicts (" +
+                        "candidate_id BLOB PRIMARY KEY NOT NULL, payload BLOB NOT NULL, " +
+                        "FOREIGN KEY(candidate_id) REFERENCES analysis_candidates(candidate_id) ON DELETE CASCADE);";
+                    verdicts.ExecuteNonQuery();
+                }
+
+                using (SqliteCommand embeddings = connection.CreateCommand())
+                {
+                    embeddings.Transaction = transaction;
+                    embeddings.CommandText =
+                        "CREATE TABLE IF NOT EXISTS analysis_embeddings (" +
+                        "contextual_hash BLOB NOT NULL, provider_fingerprint BLOB NOT NULL, " +
+                        "model BLOB NOT NULL, dimensions INTEGER NOT NULL, encoding BLOB NOT NULL, " +
+                        "vector BLOB NOT NULL, PRIMARY KEY(" +
+                        "contextual_hash, provider_fingerprint, model, dimensions, encoding));";
+                    embeddings.ExecuteNonQuery();
+                }
+
+                ValidateSchema(connection, transaction);
+                using (SqliteCommand schemaVersion = connection.CreateCommand())
+                {
+                    schemaVersion.Transaction = transaction;
+                    // The stamp repeats SchemaVersion: a pragma value cannot be a bound parameter, and the command text
+                    // stays a literal. Change both together; AnalysisPersistenceTests fails when they differ.
+                    schemaVersion.CommandText = "PRAGMA user_version = 1;";
+                    schemaVersion.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+            });
             return;
         }
 
-        ExecuteSqlite("PRAGMA foreign_keys = ON;\n" + SchemaValidationSql());
+        ExecuteSqlite(connection =>
+        {
+            using (SqliteCommand foreignKeys = connection.CreateCommand())
+            {
+                foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
+                foreignKeys.ExecuteNonQuery();
+            }
+
+            ValidateSchema(connection, transaction: null);
+        });
     }
 
-    private static string SchemaValidationSql() =>
-        "SELECT id, payload FROM analysis_claims LIMIT 0;\n" +
-        "SELECT candidate_id, payload FROM analysis_candidates LIMIT 0;\n" +
-        "SELECT candidate_id, payload FROM analysis_verdicts LIMIT 0;\n" +
-        "SELECT contextual_hash, provider_fingerprint, model, dimensions, encoding, vector " +
-        "FROM analysis_embeddings LIMIT 0;\n";
+    private static int ReadSchemaVersion(SqliteConnection connection)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        object? value = command.ExecuteScalar();
+        if (value is not long version || version < int.MinValue || version > int.MaxValue)
+            throw CorruptCache("The analysis cache schema version is not an integer.");
+        return (int)version;
+    }
+
+    private static void ValidateSchema(SqliteConnection connection, SqliteTransaction? transaction)
+    {
+        using (SqliteCommand claims = connection.CreateCommand())
+        {
+            claims.Transaction = transaction;
+            claims.CommandText = "SELECT id, payload FROM analysis_claims LIMIT 0;";
+            claims.ExecuteNonQuery();
+        }
+
+        using (SqliteCommand candidates = connection.CreateCommand())
+        {
+            candidates.Transaction = transaction;
+            candidates.CommandText = "SELECT candidate_id, payload FROM analysis_candidates LIMIT 0;";
+            candidates.ExecuteNonQuery();
+        }
+
+        using (SqliteCommand verdicts = connection.CreateCommand())
+        {
+            verdicts.Transaction = transaction;
+            verdicts.CommandText = "SELECT candidate_id, payload FROM analysis_verdicts LIMIT 0;";
+            verdicts.ExecuteNonQuery();
+        }
+
+        using (SqliteCommand embeddings = connection.CreateCommand())
+        {
+            embeddings.Transaction = transaction;
+            embeddings.CommandText =
+                "SELECT contextual_hash, provider_fingerprint, model, dimensions, encoding, vector " +
+                "FROM analysis_embeddings LIMIT 0;";
+            embeddings.ExecuteNonQuery();
+        }
+    }
 
     private IReadOnlyDictionary<string, T> ReadPayloadRows<T>(
         string table,
@@ -316,151 +410,246 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         }
 
         Dictionary<string, T> loaded = new Dictionary<string, T>(StringComparer.Ordinal);
-        const int batchSize = 500;
         string[] distinctKeys = requestedKeys.Distinct(StringComparer.Ordinal).ToArray();
+        ExecuteSqlite(connection => ReadPayloadRowsBatch(connection, table, keyColumn, distinctKeys, loaded));
+        return loaded;
+    }
 
-        for (int i = 0; i < distinctKeys.Length; i += batchSize)
+    private static void ReadPayloadRowsBatch<T>(
+        SqliteConnection connection,
+        string table,
+        string keyColumn,
+        IReadOnlyList<string> requestedKeys,
+        IDictionary<string, T> loaded)
+    {
         {
-            string[] chunk = distinctKeys.Skip(i).Take(batchSize).ToArray();
-            string inClause = string.Join(", ", chunk.Select(Blob));
-            string output = ExecuteSqlite(
-                ".mode tabs\n" +
-                ".headers off\n" +
-                $"SELECT hex({keyColumn}), hex(payload) FROM {table} WHERE {keyColumn} IN ({inClause});");
-
-            foreach (string line in Lines(output))
+            // One statement for every requested key, passed as one JSON array parameter (see ReadEmbeddingRows).
+            using SqliteCommand command = connection.CreateCommand();
+            if (table == "analysis_claims")
             {
-                string[] fields = line.Split('\t');
-                if (fields.Length != 2) throw CorruptCache($"Table '{table}' contains an invalid row.");
+                command.CommandText =
+                    "SELECT id, payload FROM analysis_claims WHERE id IN " +
+                    "(SELECT CAST(value AS BLOB) FROM json_each($keys));";
+            }
+            else if (table == "analysis_candidates")
+            {
+                command.CommandText =
+                    "SELECT candidate_id, payload FROM analysis_candidates WHERE candidate_id IN " +
+                    "(SELECT CAST(value AS BLOB) FROM json_each($keys));";
+            }
+            else
+            {
+                command.CommandText =
+                    "SELECT candidate_id, payload FROM analysis_verdicts WHERE candidate_id IN " +
+                    "(SELECT CAST(value AS BLOB) FROM json_each($keys));";
+            }
 
+            command.Parameters.AddWithValue("$keys", JsonSerializer.Serialize(requestedKeys));
+
+            using SqliteDataReader reader = command.ExecuteReader();
+            int keyOrdinal = reader.GetOrdinal(keyColumn);
+            int payloadOrdinal = reader.GetOrdinal("payload");
+            while (reader.Read())
+            {
                 try
                 {
-                    string key = Text(fields[0]);
-                    T value = JsonSerializer.Deserialize<T>(Convert.FromHexString(fields[1]), SerializerOptions)
+                    string key = Encoding.UTF8.GetString(reader.GetFieldValue<byte[]>(keyOrdinal));
+                    T value = JsonSerializer.Deserialize<T>(
+                        reader.GetFieldValue<byte[]>(payloadOrdinal),
+                        SerializerOptions)
                         ?? throw CorruptCache($"Table '{table}' contains an empty payload.");
                     ValidateLoadedPayload(table, key, value);
                     loaded[key] = value;
                 }
                 catch (Exception exception) when (
-                    exception is FormatException or JsonException or NotSupportedException or ArgumentException)
+                    exception is FormatException or JsonException or NotSupportedException or ArgumentException
+                        or InvalidCastException)
                 {
                     throw CorruptCache($"Table '{table}' contains an invalid payload.", exception);
                 }
             }
         }
-
-        return loaded;
     }
 
-    private void ExecuteWriteTransaction(IEnumerable<string> statements)
+    private void ExecuteWriteTransaction(IEnumerable<Action<SqliteConnection, SqliteTransaction>> statements)
     {
-        StringBuilder script = new StringBuilder("PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n");
-        foreach (string statement in statements) script.AppendLine(statement);
-        script.AppendLine("COMMIT;");
-        ExecuteSqlite(script.ToString());
+        ExecuteSqlite(connection =>
+        {
+            using (SqliteCommand foreignKeys = connection.CreateCommand())
+            {
+                foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
+                foreignKeys.ExecuteNonQuery();
+            }
+
+            using SqliteTransaction transaction =
+                connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            foreach (Action<SqliteConnection, SqliteTransaction> statement in statements)
+                statement(connection, transaction);
+            transaction.Commit();
+        });
     }
 
-    private string ExecuteSqlite(string input)
+    private T ExecuteSqlite<T>(Func<SqliteConnection, T> operation)
     {
-        EnsureSafePersistencePath(_repositoryRoot, DatabasePath);
-        string boundedInput = $".timeout {BusyTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}\n{input}";
         for (int attempt = 1; attempt <= BusyAttempts; attempt++)
         {
-            ProcessStartInfo startInfo = CreateStartInfo();
-            startInfo.ArgumentList.Add("-batch");
-            startInfo.ArgumentList.Add("-bail");
-            startInfo.ArgumentList.Add(DatabasePath);
-
-            ProcessResult result;
+            EnsureSafePersistencePath(_repositoryRoot, DatabasePath);
             try
             {
-                result = _processes.Run(startInfo, boundedInput, SqliteBatchTimeout);
+                using SqliteConnection connection = OpenConnection();
+                return operation(connection);
             }
-            catch (Win32Exception exception)
-            {
-                throw new InvalidOperationException("The 'sqlite3' executable is unavailable.", exception);
-            }
-            catch (TimeoutException exception)
-            {
-                throw new InvalidOperationException(
-                    "The documentation analysis cache did not answer within the time limit, so the sqlite3 batch was stopped.",
-                    exception);
-            }
-
-            if (result.ExitCode == 0) return result.StandardOutput;
-
-            if (IsBusy(result))
+            catch (SqliteException exception) when (IsBusy(exception))
             {
                 if (attempt < BusyAttempts) continue;
                 throw new InvalidOperationException(
                     $"The documentation analysis cache remained locked after {BusyAttempts} bounded attempts. " +
-                    FailureDetail(result));
+                    FailureDetail(exception) + " Another process holds the cache; retry when it finishes.",
+                    exception);
             }
-
-            if (IsOperationalFailure(result))
+            catch (SqliteException exception) when (IsOperationalFailure(exception))
             {
                 throw new InvalidOperationException(
-                    "The documentation analysis cache could not be accessed. " + FailureDetail(result));
+                    "The documentation analysis cache could not be accessed. " + FailureDetail(exception) +
+                    " " + OperationalRemedy(exception),
+                    exception);
             }
-
-            throw CorruptCache(FailureDetail(result));
+            catch (SqliteException exception)
+            {
+                throw CorruptCache(
+                    FailureDetail(exception) + " Delete the cache file to rebuild it on the next run.",
+                    exception);
+            }
         }
 
         throw new InvalidOperationException("The documentation analysis cache operation did not complete.");
     }
 
-    private bool CanStartSqlite()
+    private void ExecuteSqlite(Action<SqliteConnection> operation) =>
+        ExecuteSqlite(connection =>
+        {
+            operation(connection);
+            return true;
+        });
+
+    private SqliteConnection OpenConnection()
     {
-        ProcessStartInfo startInfo = CreateStartInfo();
-        startInfo.ArgumentList.Add("--version");
+        SqliteConnectionStringBuilder builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            // Microsoft.Data.Sqlite retries a busy database for the command timeout, overriding any
+            // busy_timeout pragma, so this is the per-attempt bound: three attempts wait about 3 s in all.
+            DefaultTimeout = BusyAttemptTimeoutSeconds
+        };
+        SqliteConnection connection = new SqliteConnection(builder.ToString());
         try
         {
-            return _processes.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;
+            connection.Open();
+            using (SqliteCommand foreignKeys = connection.CreateCommand())
+            {
+                foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
+                foreignKeys.ExecuteNonQuery();
+            }
+
+            return connection;
         }
-        catch (Win32Exception)
+        catch (Exception exception) when (
+            exception is SqliteException
+                or InvalidOperationException
+                or DllNotFoundException
+                or EntryPointNotFoundException
+                or TypeInitializationException
+                or BadImageFormatException)
         {
-            return false;
+            connection.Dispose();
+            throw;
         }
-        catch (TimeoutException)
+    }
+
+    private static bool CanStartSqlite()
+    {
+        if (!EnsureSqliteProviderRegistered()) return false;
+        try
         {
-            // A version probe that never answers means the cache cannot be opened; the availability check reports it.
+            using SqliteConnection connection = new SqliteConnection("Data Source=:memory:");
+            connection.Open();
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is SqliteException
+                or InvalidOperationException
+                or DllNotFoundException
+                or EntryPointNotFoundException
+                or TypeInitializationException
+                or BadImageFormatException)
+        {
             return false;
         }
     }
 
-    private static ProcessStartInfo CreateStartInfo() =>
-        new("sqlite3")
+    private static bool EnsureSqliteProviderRegistered()
+    {
+        if (SqliteProviderInitialized) return true;
+        lock (SqliteProviderGate)
         {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
+            if (SqliteProviderInitialized) return true;
+            try
+            {
+                raw.SetProvider(new SQLite3Provider_sqlite3());
+                SqliteProviderInitialized = true;
+                return true;
+            }
+            catch (Exception exception) when (
+                exception is DllNotFoundException
+                    or EntryPointNotFoundException
+                    or TypeInitializationException
+                    or InvalidOperationException
+                    or BadImageFormatException)
+            {
+                return false;
+            }
+        }
+    }
+
+    private static Action<SqliteConnection, SqliteTransaction> ClaimUpsert(PersistedClaim claim) =>
+        (connection, transaction) =>
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                "INSERT INTO analysis_claims(id, payload) VALUES ($id, $payload) " +
+                "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload;";
+            command.Parameters.AddWithValue("$id", Encoding.UTF8.GetBytes(claim.Id));
+            command.Parameters.AddWithValue("$payload", JsonSerializer.SerializeToUtf8Bytes(claim, SerializerOptions));
+            command.ExecuteNonQuery();
         };
 
-    private static IEnumerable<string> Lines(string output) =>
-        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private static Action<SqliteConnection, SqliteTransaction> CandidateUpsert(PersistedCandidateFingerprint candidate) =>
+        (connection, transaction) =>
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                "INSERT INTO analysis_candidates(candidate_id, payload) VALUES ($candidate_id, $payload) " +
+                "ON CONFLICT(candidate_id) DO UPDATE SET payload = excluded.payload;";
+            command.Parameters.AddWithValue("$candidate_id", Encoding.UTF8.GetBytes(candidate.CandidateId));
+            command.Parameters.AddWithValue("$payload", JsonSerializer.SerializeToUtf8Bytes(candidate, SerializerOptions));
+            command.ExecuteNonQuery();
+        };
 
-    private static string JsonBlob<T>(T value) => Blob(JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions));
-
-    private static string ClaimUpsert(PersistedClaim claim) =>
-        $"INSERT INTO analysis_claims(id, payload) VALUES ({Blob(claim.Id)}, {JsonBlob(claim)}) " +
-        "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload;";
-
-    private static string CandidateUpsert(PersistedCandidateFingerprint candidate) =>
-        "INSERT INTO analysis_candidates(candidate_id, payload) VALUES " +
-        $"({Blob(candidate.CandidateId)}, {JsonBlob(candidate)}) " +
-        "ON CONFLICT(candidate_id) DO UPDATE SET payload = excluded.payload;";
-
-    private static string VerdictUpsert(AnalysisVerdict verdict) =>
-        "INSERT INTO analysis_verdicts(candidate_id, payload) VALUES " +
-        $"({Blob(verdict.CandidateId)}, {JsonBlob(verdict)}) " +
-        "ON CONFLICT(candidate_id) DO UPDATE SET payload = excluded.payload;";
-
-    private static string Blob(string value) => Blob(Encoding.UTF8.GetBytes(value));
-
-    private static string Blob(byte[] value) => $"X'{Convert.ToHexString(value)}'";
-
-    private static string Text(string hex) => Encoding.UTF8.GetString(Convert.FromHexString(hex));
+    private static Action<SqliteConnection, SqliteTransaction> VerdictUpsert(AnalysisVerdict verdict) =>
+        (connection, transaction) =>
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                "INSERT INTO analysis_verdicts(candidate_id, payload) VALUES ($candidate_id, $payload) " +
+                "ON CONFLICT(candidate_id) DO UPDATE SET payload = excluded.payload;";
+            command.Parameters.AddWithValue("$candidate_id", Encoding.UTF8.GetBytes(verdict.CandidateId));
+            command.Parameters.AddWithValue("$payload", JsonSerializer.SerializeToUtf8Bytes(verdict, SerializerOptions));
+            command.ExecuteNonQuery();
+        };
 
     private static byte[] EncodeVector(IReadOnlyList<float> vector)
     {
@@ -470,18 +659,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         return bytes;
     }
 
-    private static IReadOnlyList<float> DecodeVector(string hex)
+    private static IReadOnlyList<float> DecodeVector(byte[] bytes)
     {
-        byte[] bytes;
-        try
-        {
-            bytes = Convert.FromHexString(hex);
-        }
-        catch (FormatException exception)
-        {
-            throw CorruptCache("An embedding vector is not valid hexadecimal.", exception);
-        }
-
         if (bytes.Length == 0 || bytes.Length % sizeof(float) != 0)
             throw CorruptCache("An embedding vector has an invalid byte length.");
 
@@ -664,72 +843,62 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         }
     }
 
-    private static bool IsBusy(ProcessResult result)
+    private static bool IsBusy(SqliteException exception)
     {
-        // The sqlite3 CLI reports lock contention as free text on either stream, with
-        // wording that shifts between builds, so classify on both streams, the SQLite
-        // result code suffix ("(5)" SQLITE_BUSY, "(6)" SQLITE_LOCKED), and the phrases
-        // the lock fixture and production retries have been observed to emit. An empty
-        // failure that carries only the busy result code must not read as corruption:
-        // there is no corrupt payload to point at, only a lock that outlasted retries.
-        string output = CombinedOutput(result);
-        if (output.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
+        // SQLite reports lock contention as a result code and free text whose wording
+        // shifts between builds, so classify on both. A busy result must not read as
+        // corruption: there is no corrupt payload to point at, only a lock that
+        // outlasted the bounded retries.
+        string output = exception.Message;
+        return exception.SqliteErrorCode == SqliteBusyResultCode
+            || exception.SqliteErrorCode == SqliteLockedResultCode
+            || output.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
             || output.Contains("database is busy", StringComparison.OrdinalIgnoreCase)
             || LockedWordRegex().IsMatch(output)
-            || BusyWordRegex().IsMatch(output)
-            || (HasResultCodeSuffix(output, SqliteBusyResultCode)
-                && (SqliteBusyOrLockedRegex().IsMatch(output) || SuffixOnSqliteLine(output, SqliteBusyResultCode)))
-            || (HasResultCodeSuffix(output, SqliteLockedResultCode)
-                && (SqliteBusyOrLockedRegex().IsMatch(output) || SuffixOnSqliteLine(output, SqliteLockedResultCode))))
-        {
-            return true;
-        }
-
-        return result.ExitCode == SqliteBusyResultCode
-            || result.ExitCode == SqliteLockedResultCode;
+            || BusyWordRegex().IsMatch(output);
     }
 
-    private static bool IsOperationalFailure(ProcessResult result)
+    /// <summary>The cause of an operational cache failure, or null for a failure that is not operational.</summary>
+    /// <param name="exception">The SQLite failure.</param>
+    /// <returns>The one cause the remedy is chosen by; one list serves both the catch filter and the remedy.</returns>
+    internal static OperationalCause? OperationalCauseOf(SqliteException exception)
     {
-        string reason = CombinedOutput(result);
-        return reason.Contains("readonly", StringComparison.OrdinalIgnoreCase)
+        ArgumentNullException.ThrowIfNull(exception);
+        string reason = exception.Message;
+        if (exception.SqliteErrorCode == 13 || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase))
+            return OperationalCause.DiskFull;
+        if (exception.SqliteErrorCode == 10 || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase))
+            return OperationalCause.DiskIo;
+        if (exception.SqliteErrorCode == 9 || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase))
+            return OperationalCause.Interrupted;
+        if (exception.SqliteErrorCode is 3 or 8 or 14
+            || reason.Contains("readonly", StringComparison.OrdinalIgnoreCase)
             || reason.Contains("read-only", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase)
             || reason.Contains("unable to open database", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase);
+            || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
+            return OperationalCause.Access;
+        return null;
     }
 
-    private static string FailureDetail(ProcessResult result)
+    private static bool IsOperationalFailure(SqliteException exception) => OperationalCauseOf(exception) is not null;
+
+    /// <summary>The remedy for an operational failure, by its cause.</summary>
+    /// <param name="exception">A failure <see cref="IsOperationalFailure"/> accepted.</param>
+    /// <returns>One sentence naming what to fix.</returns>
+    internal static string OperationalRemedy(SqliteException exception) => OperationalCauseOf(exception) switch
     {
-        string reason = CombinedOutput(result).Trim();
+        OperationalCause.DiskFull => "Free disk space on the volume that holds the cache.",
+        OperationalCause.DiskIo => "The disk reported an I/O error; check the volume that holds the cache.",
+        OperationalCause.Interrupted => "The operation was interrupted; run the command again.",
+        _ => "Check that the cache file and its folder are readable and writable.",
+    };
+
+    private static string FailureDetail(SqliteException exception)
+    {
+        string reason = exception.Message.Trim();
         return reason.Length == 0
-            ? $"sqlite3 exited with code {result.ExitCode}."
-            : $"sqlite3 exited with code {result.ExitCode}: {reason}";
-    }
-
-    private static string CombinedOutput(ProcessResult result) =>
-        result.StandardOutput + "\n" + result.StandardError;
-
-    private static bool HasResultCodeSuffix(string output, int resultCode) =>
-        output.Contains(
-            $"({resultCode.ToString(CultureInfo.InvariantCulture)})",
-            StringComparison.Ordinal);
-
-    private static bool SuffixOnSqliteLine(string output, int resultCode)
-    {
-        string suffix = $"({resultCode.ToString(CultureInfo.InvariantCulture)})";
-        foreach (string line in Lines(output))
-        {
-            if (line.Contains(suffix, StringComparison.Ordinal)
-                && line.Contains("sqlite", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+            ? $"SQLite error {exception.SqliteErrorCode} on the cache file."
+            : $"SQLite error {exception.SqliteErrorCode} on the cache file: {reason}";
     }
 
     private void EnsureAvailable()
@@ -737,7 +906,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable)
         {
             throw new InvalidOperationException(
-                "Analysis persistence is disabled until .kyber-weave/.gitignore contains the exact 'cache/' entry and sqlite3 is available.");
+                "Analysis persistence is disabled until .kyber-weave/.gitignore contains the exact 'cache/' entry and the SQLite library can load.");
         }
     }
 

@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// the report, the messages and the JSON document reach the consoles the command was given, and nothing here reads
 /// the host's console or a repository.
 /// </summary>
-public sealed class RunStartCommandConsoleTests
+public sealed class RunStartCommandConsoleTests : IDisposable
 {
     private const string Repository = "/kw/work/repo";
 
@@ -28,6 +28,12 @@ public sealed class RunStartCommandConsoleTests
     private readonly StubConfigs _configs = new();
 
     public RunStartCommandConsoleTests() => _markup.Profile.Width = 400;
+
+    public void Dispose()
+    {
+        _markup.Dispose();
+        _standard.Dispose();
+    }
 
     [Fact]
     public void Execute_ANonConventionalType_RefusesOnTheConsoleWithExitCodeTwo()

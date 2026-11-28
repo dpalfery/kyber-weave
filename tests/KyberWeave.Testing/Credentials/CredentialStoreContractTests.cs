@@ -48,30 +48,40 @@ public abstract class CredentialStoreContractTests : IDisposable
     /// <summary>Deletes every origin the test wrote, so the real store is left as it was found.</summary>
     public void Dispose()
     {
-        foreach (ICredentialStore store in _stores)
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Deletes every origin the test wrote, so the real store is left as it was found.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            foreach (string origin in _origins)
+            foreach (ICredentialStore store in _stores)
             {
-                try
+                foreach (string origin in _origins)
                 {
-                    store.Delete(origin);
-                }
-                catch (InvalidOperationException)
-                {
-                    // Cleanup runs after the result is recorded, so a refusal here must not mask the test's outcome.
-                }
-                catch (PlatformNotSupportedException)
-                {
-                }
-                catch (System.ComponentModel.Win32Exception)
-                {
+                    try
+                    {
+                        store.Delete(origin);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Cleanup runs after the result is recorded, so a refusal here must not mask the test's outcome.
+                    }
+                    catch (PlatformNotSupportedException)
+                    {
+                    }
+                    catch (System.ComponentModel.Win32Exception)
+                    {
+                    }
                 }
             }
-        }
 
-        _stores.Clear();
-        _origins.Clear();
-        GC.SuppressFinalize(this);
+            _stores.Clear();
+            _origins.Clear();
+        }
     }
 
     [Fact]

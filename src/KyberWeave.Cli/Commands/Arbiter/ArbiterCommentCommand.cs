@@ -36,6 +36,8 @@ public sealed class ArbiterCommentCommand(
     /// <summary>Prints the class and the decision id. Exits 2 on a usage error, and 1 when the document or the configured provider cannot be used.</summary>
     public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         if (settings.Body is null)
         {
             return UsageError("--body is required.");

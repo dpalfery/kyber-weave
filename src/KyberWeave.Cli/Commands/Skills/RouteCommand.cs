@@ -50,6 +50,7 @@ public sealed class RouteCommand(ISkillGovernanceService skills, IAnsiConsole an
     /// <inheritdoc />
     public override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         SkillSet set = skills.LoadSet(settings.SkillsPath);
         if (set.Count == 0)
         {

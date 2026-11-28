@@ -22,7 +22,7 @@ namespace KyberWeave.Tests;
 ///     the missing preset.
 ///     - 5.3: squad status SHALL show the active preset per target, or that none is active.
 /// </summary>
-public sealed class SquadPresetStatusDoctorTests
+public sealed class SquadPresetStatusDoctorTests : IDisposable
 {
     private const string SamplePresetYaml = """
                                             schema: kyber-squad.model-preset/v1
@@ -47,6 +47,12 @@ public sealed class SquadPresetStatusDoctorTests
     private readonly FakeConsole _streams = new();
 
     public SquadPresetStatusDoctorTests() => _ansi.Profile.Width = 200;
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     private InMemoryFileSystem Files => _state.Files;
 

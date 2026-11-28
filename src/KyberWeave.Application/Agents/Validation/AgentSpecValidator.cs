@@ -22,6 +22,8 @@ public sealed class AgentSpecValidator(IFileSystem files, IPathResolver paths)
 
     public DiagnosticReport Validate(AgentModel agent)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+
         DiagnosticReport report = new DiagnosticReport();
 
         // 1. Role Name Check

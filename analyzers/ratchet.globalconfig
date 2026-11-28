@@ -13,23 +13,14 @@
 #
 # global_level 200 outranks the SDK's AnalysisMode=all config and analyzers/rules.globalconfig.
 # .editorconfig outranks this file, so a ratcheted id must not be set above suggestion there.
-# The deliberate exception is CA1062 set to none for test code
-# ([{tests,dash/server.tests}/**.cs]): the test runner calls those methods, and a caller cannot pass null.
+# The deliberate exceptions are set to none for test code ([{tests,dash/server.tests}/**.cs]):
+# CA1062, because the test runner calls those methods and a caller cannot pass null; and CA1502
+# and CA1506, because KW-STD-CS-002's complexity and coupling limits cover product code only.
 is_global = true
 global_level = 200
 
 # KW-STD-CS-006 catch discipline: catch named types; bare Exception only to log and rethrow.
 dotnet_diagnostic.CA1031.severity = suggestion
-
-# KW-STD-CS-012 disposal: a type that owns a disposable field is disposable, implemented correctly.
-dotnet_diagnostic.CA1001.severity = suggestion
-dotnet_diagnostic.CA1063.severity = suggestion
-
-# KW-STD-CS-004 nullability: public arguments are guarded with ArgumentNullException.ThrowIfNull.
-dotnet_diagnostic.CA1062.severity = suggestion
-
-# KW-STD-CS-003 immutability: collection properties have no public setter.
-dotnet_diagnostic.CA2227.severity = suggestion
 
 # KW-STD-CS-002 single responsibility: method complexity and class coupling stay under the limits.
 dotnet_diagnostic.CA1502.severity = suggestion

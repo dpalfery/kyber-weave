@@ -42,18 +42,21 @@ public sealed class KernelProcessRunnerContractTests : ProcessRunnerContractTest
         File.WriteAllText(Path.Combine(_workingDirectory, name), content);
 
     /// <inheritdoc />
-    public override void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        try
+        if (disposing)
         {
-            Directory.Delete(_workingDirectory, recursive: true);
-        }
-        catch (DirectoryNotFoundException)
-        {
-            // The suite never removed it; nothing is left to clean.
+            try
+            {
+                Directory.Delete(_workingDirectory, recursive: true);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // The suite never removed it; nothing is left to clean.
+            }
         }
 
-        base.Dispose();
+        base.Dispose(disposing);
     }
 
     /// <summary>The host's environment plus the marker the contract checks.</summary>

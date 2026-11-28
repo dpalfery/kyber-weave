@@ -19,7 +19,7 @@ namespace KyberWeave.Tests;
 /// Where <c>arbiter uninstall</c> looks, what it removes and what it says, over the shared path, file-system,
 /// environment, credential and console fakes: nothing here touches the disk or the host's console.
 /// </summary>
-public sealed class ArbiterUninstallCommandSeamTests
+public sealed class ArbiterUninstallCommandSeamTests : IDisposable
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Home = "/kw/home";
@@ -36,6 +36,8 @@ public sealed class ArbiterUninstallCommandSeamTests
         _files.CreateDirectory(Home);
         _files.CreateDirectory(WorkingDirectory);
     }
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void Execute_GlobalAndProject_RefusesWithExitCodeTwo()

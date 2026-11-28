@@ -98,6 +98,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     {
         _host.Dispose();
         _console.Dispose();
+        _streams.Dispose();
     }
 
     // The command and the real uninstaller resolve the injected home, file system, config, state and store, never the

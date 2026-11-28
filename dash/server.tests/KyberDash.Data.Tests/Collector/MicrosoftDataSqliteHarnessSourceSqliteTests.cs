@@ -12,7 +12,7 @@ namespace KyberDash.Data.Tests.Collector;
 /// directory, copy reuse and replacement, the refusal codes, URI escaping of the immutable path, and the
 /// busy and permission-denied classifications.
 /// </summary>
-public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
+public sealed class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
 {
     private const string Ddl = "CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT NOT NULL, body TEXT);";
 
@@ -20,7 +20,7 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
     private readonly List<string> sealedDirectories = [];
     private readonly List<string> unreadableFiles = [];
 
-    /// <inheritdoc />
+    /// <summary>Restores the permissions the tests changed and deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
         foreach (string unreadableFile in unreadableFiles)
@@ -40,7 +40,6 @@ public class MicrosoftDataSqliteHarnessSourceSqliteTests : IDisposable
         }
 
         directory.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

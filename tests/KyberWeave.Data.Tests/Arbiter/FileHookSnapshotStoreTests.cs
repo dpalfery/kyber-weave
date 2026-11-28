@@ -7,7 +7,7 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>The snapshot documents, written under a lock in an in-memory file system and a controlled clock.</summary>
-public sealed class FileHookSnapshotStoreTests
+public sealed class FileHookSnapshotStoreTests : IDisposable
 {
     private const string DocumentName = "snapshots.json";
 
@@ -22,6 +22,11 @@ public sealed class FileHookSnapshotStoreTests
     {
         _files = new InMemoryFileSystem(_time);
         _store = new FileHookSnapshotStore(_files, _time, new FakeIdGenerator());
+    }
+
+    public void Dispose()
+    {
+        _time.Dispose();
     }
 
     [Fact]

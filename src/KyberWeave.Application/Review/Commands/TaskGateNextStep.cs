@@ -36,8 +36,10 @@ public static class TaskGateNextStep
     /// <param name="paths">The files the task changed, as given with <c>--paths</c>.</param>
     /// <param name="task">The task id, or null when none was given.</param>
     /// <param name="fromPlan">Whether the files came from the plan's task, so the short command finds them again.</param>
-    public static IReadOnlyList<string> AfterFailingRun(bool accepted, string agent, IReadOnlyList<string> paths, string? task, bool fromPlan = false) =>
-        accepted
+    public static IReadOnlyList<string> AfterFailingRun(bool accepted, string agent, IReadOnlyList<string> paths, string? task, bool fromPlan = false)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return accepted
             ? [
                 NextPrefix + "the failing run is recorded; do not paste its lines into the digest. Implement the task, " +
                 "then run the passing run:",
@@ -49,6 +51,7 @@ public static class TaskGateNextStep
                 NextPrefix + "fix what RED_REJECTED names, without adding a stub to make the tests compile, and run " +
                 "this command again before implementing.",
             ];
+    }
 
     /// <summary>The lines after a run without <c>--red</c>.</summary>
     /// <param name="report">The gate report the run wrote.</param>
@@ -69,6 +72,7 @@ public static class TaskGateNextStep
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(declared);
+        ArgumentNullException.ThrowIfNull(paths);
 
         List<GateResult> failed = [.. report.Gates.Where(gate => !gate.Passed && !gate.NotApplicable)];
         if (failed.Count > 0)
@@ -98,8 +102,11 @@ public static class TaskGateNextStep
     /// <param name="paths">The files the task changed.</param>
     /// <param name="reportPath">Where the empty report was written, or null.</param>
     /// <param name="runCount">The ordinal of this task-gate run, counting from 1.</param>
-    public static IReadOnlyList<string> NoneDeclared(string agent, IReadOnlyList<string> paths, string? reportPath, int runCount) =>
-        Digest(new GateReport(GateReport.CurrentSchema, []), agent, paths, reportPath, runCount);
+    public static IReadOnlyList<string> NoneDeclared(string agent, IReadOnlyList<string> paths, string? reportPath, int runCount)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return Digest(new GateReport(GateReport.CurrentSchema, []), agent, paths, reportPath, runCount);
+    }
 
     private static IReadOnlyList<string> Digest(
         GateReport report, string agent, IReadOnlyList<string> paths, string? reportPath, int runCount)

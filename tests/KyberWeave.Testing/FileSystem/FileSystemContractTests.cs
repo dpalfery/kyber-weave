@@ -46,19 +46,28 @@ public abstract class FileSystemContractTests : IDisposable
     /// <summary>Removes every scratch directory the test created.</summary>
     public void Dispose()
     {
-        foreach ((IWritableFileSystem files, string path) in _scratch)
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Removes every scratch directory the test created.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            try
+            foreach ((IWritableFileSystem files, string path) in _scratch)
             {
-                files.DeleteTreeNoFollow(path);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // Best effort: a leftover sits under the system temporary directory.
+                try
+                {
+                    files.DeleteTreeNoFollow(path);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // Best effort: a leftover sits under the system temporary directory.
+                }
             }
         }
-
-        GC.SuppressFinalize(this);
     }
 
     private string NewScratch(IWritableFileSystem files, string prefix)

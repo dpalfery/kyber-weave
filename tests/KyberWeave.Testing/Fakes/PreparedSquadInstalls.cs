@@ -151,10 +151,20 @@ public class PreparedSquadInstall : IDisposable
     public string TemplatePath => _directory.Path;
 
     /// <inheritdoc />
-    public virtual void Dispose()
+    public void Dispose()
     {
-        _directory.Dispose();
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Removes the directory the install holds.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _directory.Dispose();
+        }
     }
 }
 

@@ -16,6 +16,9 @@ public static class DocsAnalysisConfigResolution
     }
 
     /// <summary>Returns this analysis configuration with ontology-derived paths resolved.</summary>
-    public static DocsAnalysisConfig ResolveFor(this DocsAnalysisConfig config, OntologyConfig ontology) =>
-        config.Clone(resolvedGlossaryPath: config.ResolveGlossaryPath(ontology));
+    public static DocsAnalysisConfig ResolveFor(this DocsAnalysisConfig config, OntologyConfig ontology)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.Clone(resolvedGlossaryPath: config.ResolveGlossaryPath(ontology));
+    }
 }

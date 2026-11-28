@@ -22,6 +22,8 @@ public sealed class DocsExportGraphCommand(
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryCreateLoader(
                 configs,

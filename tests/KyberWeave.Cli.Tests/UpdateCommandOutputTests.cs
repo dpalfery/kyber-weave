@@ -7,9 +7,14 @@ using KyberWeave.Domain.Update;
 namespace KyberWeave.Tests;
 
 /// <summary><c>kyber-weave update</c> writes its step lines and its outcome to the console it is given.</summary>
-public sealed class UpdateCommandOutputTests
+public sealed class UpdateCommandOutputTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+    }
 
     /// <summary>A successful update prints each step line and the outcome line on the injected console.</summary>
     [Fact]

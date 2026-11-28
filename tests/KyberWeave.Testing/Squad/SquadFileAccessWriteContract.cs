@@ -35,20 +35,29 @@ public abstract class SquadFileAccessWriteContract : IDisposable
     /// <summary>Removes every scratch directory the test created.</summary>
     public void Dispose()
     {
-        foreach ((ISquadFileAccess files, string path) in _scratch)
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Removes every scratch directory the test created.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            try
+            foreach ((ISquadFileAccess files, string path) in _scratch)
             {
-                if (files.DirectoryExists(path))
-                    files.DeleteDirectory(path);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // Best effort: a leftover sits under the system temporary directory.
+                try
+                {
+                    if (files.DirectoryExists(path))
+                        files.DeleteDirectory(path);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // Best effort: a leftover sits under the system temporary directory.
+                }
             }
         }
-
-        GC.SuppressFinalize(this);
     }
 
     /// <summary>A write to a path whose parent directories do not exist creates them and the file.</summary>

@@ -299,6 +299,8 @@ public sealed class SquadPacker(IWritableFileSystem files, ISquadCompanionSkills
         IList<(string RelativePath, byte[] Content)> entries,
         Action<string>? beforeEntry = null)
     {
+        ArgumentNullException.ThrowIfNull(entries);
+
         using MemoryStream buffer = new();
         WriteDeterministicZip(buffer, entries, beforeEntry);
         files.WriteAllBytesAtomic(archivePath, buffer.ToArray());

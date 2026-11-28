@@ -13,6 +13,8 @@ public sealed class FileArbiterModelTargetsReader(IFileSystem fileSystem) : IArb
     /// <inheritdoc />
     public ArbiterModelTargets? TryRead(string arbiterDirectory, string harness)
     {
+        ArgumentNullException.ThrowIfNull(harness);
+
         if (harness.Length == 0 || harness.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             return null;
 

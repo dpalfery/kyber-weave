@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 /// target root resolves, which scope a flag selects, and that each of the store, probe and transaction
 /// factories builds the object it names. No test here reads the process environment or the disk.
 /// </summary>
-public sealed class SquadCommandCompositionInMemoryTests
+public sealed class SquadCommandCompositionInMemoryTests : IDisposable
 {
     private readonly InMemoryFileSystem _files = new();
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
@@ -24,6 +24,12 @@ public sealed class SquadCommandCompositionInMemoryTests
     {
         _workingDirectory = Path.Combine(_files.Root, "work");
         _files.CreateDirectory(_workingDirectory);
+    }
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _standardStreams.Dispose();
     }
 
     [Fact]

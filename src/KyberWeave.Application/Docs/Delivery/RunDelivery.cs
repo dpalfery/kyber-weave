@@ -266,6 +266,7 @@ public sealed partial class RunDelivery
     /// <summary>Splits a run branch, <c>[&lt;owner&gt;.&lt;agent&gt;.]&lt;harness&gt;/&lt;type&gt;/&lt;slug&gt;</c>, into its parts.</summary>
     public static bool TryParseRunBranch(string branch, out string harness, out string type, out string slug)
     {
+        ArgumentNullException.ThrowIfNull(branch);
         harness = type = slug = string.Empty;
         string[] parts = branch.Split('/', 3);
         if (parts.Length != 3)

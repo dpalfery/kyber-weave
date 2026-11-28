@@ -10,6 +10,7 @@ public sealed class ValidateCommand(ISkillGovernanceService skills, IAnsiConsole
     /// <inheritdoc />
     public override int Execute(CommandContext context, AnalysisSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = skills.Validate(settings.Path);
 
         CommandHelpers.Finish(console, report, settings, "skill validate", "Skill");

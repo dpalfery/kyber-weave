@@ -26,7 +26,7 @@ namespace KyberWeave.Tests;
 /// output writing with SHA256 checksums, and exclusion of raw Squad corpus from CLI/MCP binary builds.
 /// Covers Test Contract K9 from docs/plans/2026-08-14-kyber-squad-unified-agent-skill-deployment.md.
 /// </summary>
-public sealed class SquadPackAndReleaseTests
+public sealed class SquadPackAndReleaseTests : IDisposable
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
@@ -41,6 +41,8 @@ public sealed class SquadPackAndReleaseTests
         _files.CreateDirectory(_work);
         _services = new InMemorySquadServices(_files);
     }
+
+    public void Dispose() => _console.Dispose();
 
     private static readonly string[] CanonicalAgents =
     [

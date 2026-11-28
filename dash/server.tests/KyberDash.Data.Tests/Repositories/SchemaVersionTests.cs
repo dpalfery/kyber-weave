@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using KyberDash.Contracts.Services;
+using KyberDash.Core.Repositories;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain.Schema;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Repositories;
@@ -95,9 +98,8 @@ public class SchemaVersionTests
         Assert.False(store.HasPendingRebuildReingest);
         Assert.False(store.TryTakePendingRebuildReingest());
 
-        Assert.Equal(6, store.ExecutedSql.Count);
+        Assert.Equal(7, store.ExecutedSql.Count);
         string probeSql = NormalizeLineEndings(store.ExecutedSql[0]);
-        Assert.StartsWith(".headers off\n.mode tabs\n", probeSql, StringComparison.Ordinal);
         Assert.Contains("sqlite_master", probeSql, StringComparison.Ordinal);
         Assert.DoesNotContain("PRAGMA", probeSql, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("CREATE TABLE", probeSql, StringComparison.OrdinalIgnoreCase);
@@ -112,7 +114,7 @@ public class SchemaVersionTests
         string claimSql = NormalizeLineEndings(store.ExecutedSql[3]);
         Assert.Contains("UPDATE source_checkpoint SET last_status = 'invalidated';", claimSql, StringComparison.Ordinal);
 
-        string ddlSql = NormalizeLineEndings(store.ExecutedSql[5]);
+        string ddlSql = NormalizeLineEndings(store.ExecutedSql[6]);
         Assert.DoesNotContain("UPDATE store_state", ddlSql, StringComparison.Ordinal);
     }
 
@@ -199,8 +201,6 @@ public class SchemaVersionTests
             onRebuiltFromOlderSchema: () => rebuildCallbackInvoked = true);
         store.EnqueueResponse(discoveredTable);
         store.EnqueueResponse(versionQueryResponse);
-        store.EnqueueResponse(string.Empty);
-        store.EnqueueResponse(string.Empty);
 
         store.EnsureInitialized();
 
@@ -214,7 +214,7 @@ public class SchemaVersionTests
         Assert.NotNull(store.LastRebuildInfo);
         Assert.Equal(expectedOldVersion, store.LastRebuildInfo.OldSchemaVersion);
         Assert.Equal(SqliteRelationalStore.SchemaVersion, store.LastRebuildInfo.NewSchemaVersion);
-        Assert.Equal(4, store.ExecutedSql.Count);
+        Assert.Equal(5, store.ExecutedSql.Count);
     }
 
     [Fact]
@@ -233,14 +233,17 @@ public class SchemaVersionTests
         Assert.NotEmpty(fakeFs.CreatedDirectories);
         Assert.All(fakeFs.CreatedDirectories, dir => Assert.Equal(Path.GetDirectoryName(dbPath)!, dir));
         Assert.Empty(fakeFs.DeletedFiles);
-        Assert.Equal(3, store.ExecutedSql.Count);
+        Assert.Equal(4, store.ExecutedSql.Count);
 
         string pragmaSql = NormalizeLineEndings(store.ExecutedSql[0]);
-        Assert.Contains($"PRAGMA journal_size_limit = {SqliteRelationalStore.WalSizeLimitBytes.ToString(CultureInfo.InvariantCulture)};", pragmaSql, StringComparison.Ordinal);
+        Assert.Contains("PRAGMA journal_mode = WAL;", pragmaSql, StringComparison.Ordinal);
+        // The per-connection settings run on every connection the store opens, not once here.
+        string perConnection = string.Join("\n", store.PragmasPerConnection.Select(static pragma => pragma.Sql));
+        Assert.Contains($"PRAGMA journal_size_limit = {SqliteRelationalStore.WalSizeLimitBytes.ToString(CultureInfo.InvariantCulture)};", perConnection, StringComparison.Ordinal);
         string expectedStoreStateDdl = NormalizeLineEndings(SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"))).Trim();
-        Assert.Contains(expectedStoreStateDdl, pragmaSql, StringComparison.Ordinal);
+        Assert.Contains(expectedStoreStateDdl, NormalizeLineEndings(store.ExecutedSql[1]), StringComparison.Ordinal);
 
-        string ddlSql = NormalizeLineEndings(store.ExecutedSql[2]);
+        string ddlSql = NormalizeLineEndings(store.ExecutedSql[3]);
         Assert.Contains(
             $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {SqliteRelationalStore.SchemaVersion.ToString(CultureInfo.InvariantCulture)}, {SqliteRelationalStore.DetectorVersion.ToString(CultureInfo.InvariantCulture)});",
             ddlSql,
@@ -263,9 +266,9 @@ public class SchemaVersionTests
 
         store.DeleteSource("src-1");
 
-        Assert.Equal(6, store.ExecutedSql.Count);
+        Assert.Equal(7, store.ExecutedSql.Count);
         Assert.Contains("sqlite_master", store.ExecutedSql[0], StringComparison.Ordinal);
-        Assert.Contains("DELETE FROM source WHERE source_id =", store.ExecutedSql[5], StringComparison.Ordinal);
+        Assert.Contains("DELETE FROM source WHERE source_id =", store.ExecutedSql[6], StringComparison.Ordinal);
 
         store.ClearRecordedSql();
         store.DeleteSource("src-2");
@@ -303,7 +306,7 @@ public class SchemaVersionTests
         foreach (string sql in store.ExecutedSql)
         {
             string normalized = NormalizeLineEndings(sql);
-            Assert.StartsWith(".headers off\n.mode tabs\n", normalized, StringComparison.Ordinal);
+            Assert.DoesNotContain(".headers off", normalized, StringComparison.Ordinal);
             Assert.DoesNotContain("PRAGMA", normalized, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("CREATE TABLE", normalized, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("BEGIN IMMEDIATE", normalized, StringComparison.OrdinalIgnoreCase);
@@ -345,6 +348,8 @@ public class SchemaVersionTests
 
     private class ScriptedSqliteRelationalStore : SqliteRelationalStore
     {
+        public IReadOnlyList<SqlStatement> PragmasPerConnection => ConnectionPragmas;
+
         private readonly List<string> executedSql = [];
         private readonly Queue<string> queuedResponses = new();
 
@@ -375,15 +380,81 @@ public class SchemaVersionTests
 
         public void ClearRecordedSql() => executedSql.Clear();
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
+        {
+            executedSql.Add(sql);
+            if (sql.Contains("PRAGMA", StringComparison.OrdinalIgnoreCase))
+            {
+                return [];
+            }
+
+            if (queuedResponses.Count > 0)
+            {
+                string response = queuedResponses.Dequeue();
+                if (typeof(T) == typeof(string))
+                {
+                    return response.Length == 0
+                        ? []
+                        : (IReadOnlyList<T>)(object)new List<string> { response };
+                }
+            }
+
+            return [];
+        }
+
+        protected override void ExecuteStatements(IReadOnlyList<SqlStatement> statements)
         {
             if (!FileSystem.FileExists(DatabasePath))
             {
                 EnsureDatabaseDirectory();
             }
 
-            executedSql.Add(sql);
-            return queuedResponses.Count > 0 ? queuedResponses.Dequeue() : string.Empty;
+            StringBuilder script = new();
+            script.Append("BEGIN IMMEDIATE;\n");
+            foreach (SqlStatement statement in statements)
+            {
+                script.Append(RenderStatement(statement));
+            }
+
+            script.Append("COMMIT;\n");
+            executedSql.Add(script.ToString());
         }
+
+        protected override void ExecuteStatementsWithoutTransaction(IReadOnlyList<SqlStatement> statements)
+        {
+            StringBuilder script = new();
+            foreach (SqlStatement statement in statements)
+            {
+                script.Append(RenderStatement(statement));
+            }
+
+            executedSql.Add(script.ToString());
+        }
+
+        private static string RenderStatement(SqlStatement statement)
+        {
+            string sql = statement.Sql;
+            string[] names = [.. statement.Parameters.Keys];
+            Array.Sort(names, static (left, right) => right.Length.CompareTo(left.Length));
+            foreach (string name in names)
+            {
+                sql = sql.Replace(name, RenderParameterLiteral(statement.Parameters[name]), StringComparison.Ordinal);
+            }
+
+            return sql;
+        }
+
+        private static string RenderParameterLiteral(object? value) => value switch
+        {
+            null => "NULL",
+            string text => $"X'{Convert.ToHexString(Encoding.UTF8.GetBytes(text))}' || ''",
+            byte[] bytes => $"X'{Convert.ToHexString(bytes)}'",
+            double real => real.ToString("G17", CultureInfo.InvariantCulture),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString() ?? "NULL",
+        };
     }
 }

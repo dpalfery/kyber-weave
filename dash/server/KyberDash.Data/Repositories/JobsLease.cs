@@ -57,8 +57,16 @@ public class JobsLease : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        Release();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Release();
+        }
     }
 
     /// <summary>True when a process with <paramref name="candidatePid"/> is still running.</summary>

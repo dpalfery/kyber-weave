@@ -28,6 +28,8 @@ public sealed class ArbiterSectionsCommand(
     /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
     public override int Execute(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         // A missing or empty --path is a usage error, the same as a missing required option elsewhere in Arbiter.
         if (string.IsNullOrWhiteSpace(settings.Path))
         {

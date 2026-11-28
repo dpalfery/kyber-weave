@@ -18,6 +18,8 @@ public sealed class LexicalRoutingStrategy : IRoutingStrategy
 
     public RoutingResult Route(string prompt, SkillSet skills)
     {
+        ArgumentNullException.ThrowIfNull(skills);
+
         Dictionary<string, double> promptVec = TextVectorizer.Vectorize(prompt);
 
         List<RoutingCandidate> ranked = skills.Skills

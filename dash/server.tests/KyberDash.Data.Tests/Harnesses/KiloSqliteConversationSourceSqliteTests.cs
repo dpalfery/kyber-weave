@@ -15,7 +15,7 @@ namespace KyberDash.Data.Tests.Harnesses;
 /// selection, the subagent tree, archived rows, the revision token and the export round trip through
 /// <see cref="KiloMapper"/>.
 /// </summary>
-public class KiloSqliteConversationSourceSqliteTests : IDisposable
+public sealed class KiloSqliteConversationSourceSqliteTests : IDisposable
 {
     private const string Ddl = """
         CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT,
@@ -30,11 +30,10 @@ public class KiloSqliteConversationSourceSqliteTests : IDisposable
 
     private readonly TempDirectory directory = new();
 
-    /// <inheritdoc />
+    /// <summary>Deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
         directory.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

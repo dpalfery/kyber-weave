@@ -83,8 +83,11 @@ public sealed class FileWorkerSessionStore(IWritableFileSystem files) : IWorkerS
     }
 
     /// <inheritdoc/>
-    public void AppendParent(string home, string key, string parentSessionId) =>
+    public void AppendParent(string home, string key, string parentSessionId)
+    {
+        ArgumentNullException.ThrowIfNull(parentSessionId);
         Append(home, key, ParentPrefix + " " + OneLine(parentSessionId));
+    }
 
     /// <inheritdoc/>
     public void AppendGuess(string home, string key, string agentType)
@@ -120,6 +123,7 @@ public sealed class FileWorkerSessionStore(IWritableFileSystem files) : IWorkerS
     /// <inheritdoc/>
     public void AppendPending(string home, string key, string entry)
     {
+        ArgumentNullException.ThrowIfNull(entry);
         using Stream append = files.OpenAppendShared(WorkerSessionPaths.PendingPathOf(home, key));
         append.Write(Encoding.UTF8.GetBytes(OneLine(entry) + "\n"));
     }

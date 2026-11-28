@@ -3,7 +3,7 @@ using KyberWeave.Contracts.Host;
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>The one fake for <see cref="IConsole"/>: it captures what was written and scripts the lines to read.</summary>
-public sealed class FakeConsole : IConsole
+public sealed class FakeConsole : IConsole, IDisposable
 {
     private readonly StringWriter _output = new();
     private readonly StringWriter _error = new();
@@ -65,5 +65,12 @@ public sealed class FakeConsole : IConsole
         }
 
         return this;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _output.Dispose();
+        _error.Dispose();
     }
 }

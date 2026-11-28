@@ -18,7 +18,7 @@ namespace KyberDash.Data.Tests;
 /// is left in place.
 /// </summary>
 [Collection(HomeEnvironmentStatics.Name)]
-public class ServiceCollectionExtensionsTests : IDisposable
+public sealed class ServiceCollectionExtensionsTests : IDisposable
 {
     private readonly TempDirectory directory = new();
 

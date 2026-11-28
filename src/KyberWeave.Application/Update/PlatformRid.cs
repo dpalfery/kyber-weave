@@ -61,8 +61,11 @@ public static class PlatformRid
         return rid;
     }
 
-    public static bool IsWindowsRid(string rid) =>
-        rid.StartsWith("win-", StringComparison.Ordinal);
+    public static bool IsWindowsRid(string rid)
+    {
+        ArgumentNullException.ThrowIfNull(rid);
+        return rid.StartsWith("win-", StringComparison.Ordinal);
+    }
 
     /// <summary>Maps a Kyber-Weave RID to the KyberDash Node SEA RID for the same platform.</summary>
     /// <remarks>

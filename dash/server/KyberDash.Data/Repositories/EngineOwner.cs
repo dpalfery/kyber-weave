@@ -117,14 +117,22 @@ public class EngineOwner : IEngineOwnerLease
     /// </summary>
     public void Dispose()
     {
-        if (disposed)
-            return;
-
-        disposed = true;
-        shutdown.Cancel();
-        listener.Dispose();
-        shutdown.Dispose();
+        Dispose(true);
         GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            if (disposed)
+                return;
+
+            disposed = true;
+            shutdown.Cancel();
+            listener.Dispose();
+            shutdown.Dispose();
+        }
     }
 
     /// <summary>Stops the accept loop, waits for it, and closes the listener, leaving the files for the next owner.</summary>

@@ -16,7 +16,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// basis. No rate for a model, or a total-only figure for a model whose rates differ by class, is
 /// not measured with a reason; no rate is derived. Both stores answer the same figures.
 /// </summary>
-public class SessionUsageCostTests : IDisposable
+public sealed class SessionUsageCostTests : IDisposable
 {
     private const string DroidHarness = DroidSessionMapper.DroidHarnessId;
     private const string SessionKey = "sess-usage-cost";
@@ -30,11 +30,10 @@ public class SessionUsageCostTests : IDisposable
     /// <summary>Both stores the dashboard reads costs from.</summary>
     public static TheoryData<string> Stores => new() { "sqlite", "memory" };
 
-    /// <inheritdoc />
+    /// <summary>Deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
         directory.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     [Theory]

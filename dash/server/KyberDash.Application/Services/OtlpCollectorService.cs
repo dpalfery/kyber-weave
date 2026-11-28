@@ -23,7 +23,7 @@ namespace KyberDash.Application;
 /// the process exited, invisible to every reader of the store.
 /// </para>
 /// </remarks>
-public class OtlpCollectorService : IOtlpCollectorService
+public class OtlpCollectorService : IOtlpCollectorService, IDisposable
 {
     /// <summary><c>Retry-After</c> seconds advertised while ingestion is administratively paused.</summary>
     public const int PauseRetryAfterSeconds = 5;
@@ -282,6 +282,27 @@ public class OtlpCollectorService : IOtlpCollectorService
         await FlushPendingAsync(CancellationToken.None).ConfigureAwait(false);
         flushWake.Dispose();
         flushShutdown.Dispose();
+    }
+
+    /// <summary>Releases the wait handles the service owns.</summary>
+    /// <remarks>
+    /// <see cref="StopAsync"/> is the shutdown path: it stops the flush loop, writes the last batch,
+    /// and releases the same handles, whose second disposal is a no-op. A collector whose loop was
+    /// never started releases its handles through this instead.
+    /// </remarks>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            flushWake.Dispose();
+            flushShutdown.Dispose();
+        }
     }
 
     /// <summary>Wakes the flush loop without blocking the request that admitted the telemetry.</summary>

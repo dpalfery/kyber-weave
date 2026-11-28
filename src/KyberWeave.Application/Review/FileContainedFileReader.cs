@@ -10,6 +10,8 @@ public sealed class FileContainedFileReader(IFileSystem files) : IContainedFileR
     /// <inheritdoc />
     public bool IsContainedFile(string repositoryRoot, string relativePath)
     {
+        ArgumentNullException.ThrowIfNull(relativePath);
+
         string[] segments = relativePath
             .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
             .Where(segment => segment != ".")

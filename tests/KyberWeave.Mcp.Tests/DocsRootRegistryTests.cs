@@ -119,7 +119,7 @@ public sealed class DocsRootRegistryTests
         FakeKyberWeaveConfigRepository config = new();
         config.WriteRepositoryConfig(Server, "stop-on-tool-failure: true\n");
         using IDisposable failing = config.FailReads(FakeKyberWeaveConfigRepository.RepositoryConfigPath(Server));
-        FakeConsole console = new();
+        using FakeConsole console = new();
         ServiceCollection services = new();
         services.AddSingleton<IKyberWeaveConfigRepository>(config);
         services.AddSingleton<IConsole>(console);

@@ -94,6 +94,8 @@ public static class ArbiterLedgerQueries
         IReadOnlySet<string>? notDispatched = null,
         ArbiterRunScope? run = null)
     {
+        ArgumentNullException.ThrowIfNull(events);
+
         HashSet<string> paired = events
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)

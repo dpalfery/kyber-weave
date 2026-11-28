@@ -535,8 +535,11 @@ public static partial class RedClassifier
     /// Whether a gate runs tests: its command is a known test runner, or the host named it a tests gate. A host that
     /// wraps its runner in a script (<c>bash run-task-tests.sh</c>) is recognised by the gate's id.
     /// </summary>
-    public static bool IsTestGate(string id, string command) =>
-        IsTestCommand(command) || id.Contains("test", StringComparison.OrdinalIgnoreCase);
+    public static bool IsTestGate(string id, string command)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        return IsTestCommand(command) || id.Contains("test", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>The reason recorded for a test gate skipped after a build accepted as RED on missing symbols.</summary>
     public static string BuildSkipReason(IReadOnlyList<string> symbols) =>

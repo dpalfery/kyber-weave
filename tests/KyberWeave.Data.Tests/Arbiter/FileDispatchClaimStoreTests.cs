@@ -8,7 +8,7 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>The dispatch claims through the in-memory file system and a controlled clock.</summary>
-public sealed class FileDispatchClaimStoreTests
+public sealed class FileDispatchClaimStoreTests : IDisposable
 {
     private const string Project = "/project";
 
@@ -20,6 +20,11 @@ public sealed class FileDispatchClaimStoreTests
     {
         _files = new InMemoryFileSystem(_time);
         _store = new FileDispatchClaimStore(_files, _time, new FakeIdGenerator());
+    }
+
+    public void Dispose()
+    {
+        _time.Dispose();
     }
 
     [Fact]

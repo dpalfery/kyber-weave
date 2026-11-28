@@ -8,12 +8,19 @@ public static class BriefAssembler
     /// <summary>Gets the name a harness that scans its agents directory for <c>*.md</c> installs a reference file under.</summary>
     /// <param name="file">The name the brief map gives the file.</param>
     /// <returns>The <c>.markdown</c> spelling of an <c>.md</c> name, or the name unchanged.</returns>
-    public static string GuardedName(string file) =>
-        file.EndsWith(".md", StringComparison.Ordinal) ? string.Concat(file.AsSpan(0, file.Length - 3), ".markdown") : file;
+    public static string GuardedName(string file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        return file.EndsWith(".md", StringComparison.Ordinal) ? string.Concat(file.AsSpan(0, file.Length - 3), ".markdown") : file;
+    }
 
     /// <summary>Selects the sections of one file's <paramref name="text"/> that apply to <paramref name="facts"/>.</summary>
     public static BriefPart BuildPart(BriefFileRule rule, string readFrom, string text, BriefFacts facts)
     {
+        ArgumentNullException.ThrowIfNull(rule);
+        ArgumentNullException.ThrowIfNull(text);
+
         if (!rule.When.Holds(facts))
         {
             return new BriefPart(rule.File, readFrom, rule.When.Spell(), [], [], [], string.Empty, text.Length);

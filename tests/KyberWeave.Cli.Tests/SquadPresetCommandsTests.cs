@@ -13,7 +13,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What the <c>squad preset</c> verbs print, read and record, over an in-memory disk, fake stores and a test console.</summary>
-public sealed class SquadPresetCommandsTests
+public sealed class SquadPresetCommandsTests : IDisposable
 {
     private const string Work = "/kw/work";
     private const string Home = "/kw/home";
@@ -30,6 +30,12 @@ public sealed class SquadPresetCommandsTests
     public SquadPresetCommandsTests()
     {
         _state = new FakeSquadStateStore(_paths);
+    }
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
     }
 
     [Fact]

@@ -69,6 +69,9 @@ internal sealed class MemoryDocsHost
     /// <summary>Gets the captured Spectre console.</summary>
     public TestConsole Console { get; }
 
+    /// <summary>Gets the console the host captures the standard streams on; MemoryDocsHost keeps the console for the test's lifetime and never disposes it, which is safe because FakeConsole only wraps in-memory string writers.</summary>
+    public FakeConsole Streams { get; } = new();
+
     /// <summary>Gets the repository folder, under the file system's root.</summary>
     public string Repo { get; }
 
@@ -158,7 +161,7 @@ internal sealed class MemoryDocsHost
         services.AddSingleton<IProgramRunner>(Processes);
         services.AddSingleton<IProcessExecutor>(Processes);
         services.AddSingleton<TimeProvider>(Clock);
-        services.AddSingleton<IConsole>(new FakeConsole());
+        services.AddSingleton<IConsole>(Streams);
         services.AddSingleton<Spectre.Console.IAnsiConsole>(Console);
         services.AddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
     }

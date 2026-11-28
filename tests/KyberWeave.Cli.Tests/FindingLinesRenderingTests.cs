@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 /// When output is not a terminal the findings are written one per line and never wrapped, so an agent can grep a rule id
 /// and read the whole message and its fix on the same line. A terminal, and an explicit <c>--format</c>, keep the table.
 /// </summary>
-public sealed class FindingLinesRenderingTests
+public sealed class FindingLinesRenderingTests : IDisposable
 {
     private const string LongMessage =
         "'2026-11-13-job-status-cards.md' does not exist under the plans folder and no active plan has that name, " +
@@ -40,6 +40,8 @@ public sealed class FindingLinesRenderingTests
         // rule id and the message, which is the wrapping the Lines format exists to avoid.
         _console.Profile.Width = 200;
     }
+
+    public void Dispose() => _console.Dispose();
 
     private static DiagnosticReport Report()
     {

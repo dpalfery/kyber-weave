@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 /// The commands that took the process working directory straight from the framework resolve a relative argument against
 /// the environment seam through the path seam, so each answer follows the directory a test names.
 /// </summary>
-public sealed class CliPathSeamTests
+public sealed class CliPathSeamTests : IDisposable
 {
     private const string Work = "/kw/work";
     private const string Repo = "/kw/work/repo";
@@ -36,6 +36,8 @@ public sealed class CliPathSeamTests
         _files.CreateDirectory(Work);
         _files.CreateDirectory(Repo);
     }
+
+    public void Dispose() => _console.Dispose();
 
     [Fact]
     public void RunDeliver_ARelativePath_IsDeliveredFromTheDirectoryUnderTheEnvironmentsWorkingDirectory()

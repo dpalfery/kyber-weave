@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// A console that reports whether its output is a terminal, which <see cref="TestConsole"/> never does, so a test can
 /// reach the branch a person at a terminal takes.
 /// </summary>
-public sealed class TerminalTestConsole : IAnsiConsole
+public sealed class TerminalTestConsole : IAnsiConsole, IDisposable
 {
     private readonly TestConsole _inner = new();
 
@@ -54,6 +54,9 @@ public sealed class TerminalTestConsole : IAnsiConsole
 
     /// <inheritdoc />
     public void WriteAnsi(Action<AnsiWriter> action) => _inner.WriteAnsi(action);
+
+    /// <inheritdoc />
+    public void Dispose() => _inner.Dispose();
 
     private sealed class TerminalOutput(TextWriter writer, bool isTerminal, int width) : IAnsiConsoleOutput
     {

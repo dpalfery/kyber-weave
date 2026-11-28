@@ -1,6 +1,7 @@
 using KyberDash.Application.Tests.Fakes;
 using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
+using KyberDash.Core.Repositories;
 using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
@@ -14,7 +15,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// parent are, and for <see cref="IRelationalStoreWriter.DeleteProblem"/>: every case runs against
 /// <see cref="SqliteRelationalStore"/> over a real database and against <see cref="InMemoryRelationalStore"/>.
 /// </summary>
-public class SharedSpanWriteParityTests : IDisposable
+public sealed class SharedSpanWriteParityTests : IDisposable
 {
     private const string SpanId = "synth:claude-code:parent-session:msg_1";
     private const string SessionKey = "parent-session";
@@ -23,11 +24,10 @@ public class SharedSpanWriteParityTests : IDisposable
 
     private readonly TempDirectory directory = new();
 
-    /// <inheritdoc />
+    /// <summary>Deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
         directory.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     /// <summary>
@@ -312,7 +312,11 @@ public class SharedSpanWriteParityTests : IDisposable
     /// <summary>The SQLite store with raw SQL, to build a store as an older build left it.</summary>
     private sealed class RawSqliteStore(string databasePath) : SqliteRelationalStore(databasePath, new SqliteCircuitBreaker())
     {
-        public string Raw(string sql) => ExecuteSqlite(sql);
+        public string Raw(string sql)
+        {
+            ExecuteStatements([SqlStatement.Of(sql)]);
+            return string.Empty;
+        }
     }
 
     private sealed record StoreUnderTest(

@@ -69,6 +69,8 @@ public sealed class FileRepositoryTreeProbe(
     /// </remarks>
     public bool LeadsOutsideThroughSymlink(string root, string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
+
         string full = paths.GetFullPath(root, environment.CurrentDirectory);
         string current = full;
         string[] segments = path.Split(

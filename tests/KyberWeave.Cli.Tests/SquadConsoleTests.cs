@@ -7,10 +7,16 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>What the Squad commands print and ask, over a test console and the shared console fake.</summary>
-public sealed class SquadConsoleTests
+public sealed class SquadConsoleTests : IDisposable
 {
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
     private readonly FakeConsole _streams = new();
+
+    public void Dispose()
+    {
+        _ansi.Dispose();
+        _streams.Dispose();
+    }
 
     [Fact]
     public void WriteLine_LongLine_IsNotFolded()

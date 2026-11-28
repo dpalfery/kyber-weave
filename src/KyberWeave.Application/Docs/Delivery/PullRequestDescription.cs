@@ -43,8 +43,11 @@ public static partial class PullRequestDescription
         ["pull_request_template.md", "docs/pull_request_template.md", ".github/pull_request_template.md"];
 
     /// <summary>Reads the host's default pull request template, matching the file name case-insensitively, or null when it has none or none can be read.</summary>
-    public static string? ReadHostTemplate(IRepositoryFileStore files, string repoRoot) =>
-        ReadHostTemplate(files, repoRoot, files.ReadAllTextBounded).Text;
+    public static string? ReadHostTemplate(IRepositoryFileStore files, string repoRoot)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        return ReadHostTemplate(files, repoRoot, files.ReadAllTextBounded).Text;
+    }
 
     /// <summary>
     /// Reads the host's default pull request template through <paramref name="read"/>. A candidate that cannot be read is

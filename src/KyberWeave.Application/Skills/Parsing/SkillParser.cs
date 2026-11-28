@@ -54,6 +54,8 @@ public static class SkillParser
         IReadOnlyList<SkillReferenceLink> links,
         IReadOnlyList<SkillResource> resources)
     {
+        ArgumentNullException.ThrowIfNull(content);
+
         MarkdownDocument document = ParseDocument(content);
         YamlFrontMatterBlock yamlBlock = document.Descendants<YamlFrontMatterBlock>().FirstOrDefault()
             ?? throw new SkillParseException("No YAML front matter found. A SKILL.md must begin with a '---' fenced YAML block.");
@@ -141,6 +143,7 @@ public static class SkillParser
         string skillFilePath,
         IEnumerable<string> files)
     {
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(files);
 
         List<SkillResource> resources = [];

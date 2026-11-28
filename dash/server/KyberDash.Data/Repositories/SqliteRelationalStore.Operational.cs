@@ -7,6 +7,7 @@ using KyberDash.Contracts.Repositories;
 using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
+using Microsoft.Data.Sqlite;
 
 namespace KyberDash.Data.Repositories;
 
@@ -28,22 +29,30 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public SettingsView ReadSettings()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT " +
-                     "COALESCE((SELECT scheduled FROM operator_setting_folder_import WHERE singleton_id = 1), 0), " +
-                     "COALESCE((SELECT paused FROM operator_setting_jobs WHERE singleton_id = 1), 0), " +
-                     "COALESCE((SELECT minutes FROM operator_setting_refresh_cadence WHERE singleton_id = 1), 5), " +
-                     "COALESCE((SELECT hosted FROM operator_setting_receiver WHERE singleton_id = 1), 0), " +
-                     "COALESCE((SELECT port FROM operator_setting_dashboard WHERE singleton_id = 1), 4747);\n";
+        string sql =
+            "SELECT " +
+            "COALESCE((SELECT scheduled FROM operator_setting_folder_import WHERE singleton_id = 1), 0) AS scheduled, " +
+            "COALESCE((SELECT paused FROM operator_setting_jobs WHERE singleton_id = 1), 0) AS paused, " +
+            "COALESCE((SELECT minutes FROM operator_setting_refresh_cadence WHERE singleton_id = 1), 5) AS minutes, " +
+            "COALESCE((SELECT hosted FROM operator_setting_receiver WHERE singleton_id = 1), 0) AS hosted, " +
+            "COALESCE((SELECT port FROM operator_setting_dashboard WHERE singleton_id = 1), 4747) AS port;\n";
 
-        string output = ExecuteSqlite(sql);
-        string[] cols = SplitSingleRow(output, 5, "operator_setting");
-        return new SettingsView(
-            FolderImportScheduled: ParseBoolFlag(cols[0], "operator_setting_folder_import.scheduled"),
-            JobsPaused: ParseBoolFlag(cols[1], "operator_setting_jobs.paused"),
-            RefreshCadenceMinutes: ParseInt32Required(cols[2], "operator_setting_refresh_cadence.minutes"),
-            ReceiverHosted: ParseBoolFlag(cols[3], "operator_setting_receiver.hosted"),
-            DashboardPort: ParseInt32Required(cols[4], "operator_setting_dashboard.port"));
+        IReadOnlyList<SettingsView> rows = QueryRows<SettingsView>(
+            sql,
+            NewParameters(),
+            reader => new SettingsView(
+                FolderImportScheduled: ParseBoolFlag(CellText(reader, "scheduled"), "operator_setting_folder_import.scheduled"),
+                JobsPaused: ParseBoolFlag(CellText(reader, "paused"), "operator_setting_jobs.paused"),
+                RefreshCadenceMinutes: ParseInt32Required(CellText(reader, "minutes"), "operator_setting_refresh_cadence.minutes"),
+                ReceiverHosted: ParseBoolFlag(CellText(reader, "hosted"), "operator_setting_receiver.hosted"),
+                DashboardPort: ParseInt32Required(CellText(reader, "port"), "operator_setting_dashboard.port")));
+
+        if (rows.Count != 1)
+        {
+            throw new StoredDataException($"Expected single scalar row from operator_setting query, got {rows.Count}.");
+        }
+
+        return rows[0];
     }
 
     /// <inheritdoc />
@@ -53,42 +62,34 @@ public partial class SqliteRelationalStore : IOperationalStore
         RequireRangeInt(settings.RefreshCadenceMinutes, 1, 1440, "operator_setting_refresh_cadence", "minutes");
         RequireRangeInt(settings.DashboardPort, 1, 65535, "operator_setting_dashboard", "port");
 
-        StringBuilder body = new();
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO operator_setting_folder_import (singleton_id, scheduled) VALUES (1, {BoolSql(settings.FolderImportScheduled)});\n");
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO operator_setting_jobs (singleton_id, paused) VALUES (1, {BoolSql(settings.JobsPaused)});\n");
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO operator_setting_refresh_cadence (singleton_id, minutes) VALUES (1, {IntSql(settings.RefreshCadenceMinutes)});\n");
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO operator_setting_receiver (singleton_id, hosted) VALUES (1, {BoolSql(settings.ReceiverHosted)});\n");
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO operator_setting_dashboard (singleton_id, port) VALUES (1, {IntSql(settings.DashboardPort)});\n");
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO operator_setting_folder_import (singleton_id, scheduled) VALUES (1, {batch.Add(settings.FolderImportScheduled ? 1 : 0)});\n");
+        batch.Append(
+            $"INSERT OR REPLACE INTO operator_setting_jobs (singleton_id, paused) VALUES (1, {batch.Add(settings.JobsPaused ? 1 : 0)});\n");
+        batch.Append(
+            $"INSERT OR REPLACE INTO operator_setting_refresh_cadence (singleton_id, minutes) VALUES (1, {batch.Add(settings.RefreshCadenceMinutes)});\n");
+        batch.Append(
+            $"INSERT OR REPLACE INTO operator_setting_receiver (singleton_id, hosted) VALUES (1, {batch.Add(settings.ReceiverHosted ? 1 : 0)});\n");
+        batch.Append(
+            $"INSERT OR REPLACE INTO operator_setting_dashboard (singleton_id, port) VALUES (1, {batch.Add(settings.DashboardPort)});\n");
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public StoreStateView? GetStoreState()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;\n";
+        string sql =
+            "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 2, "store_state");
-            return new StoreStateView(
-                ParseInt32Required(cols[0], "store_state.schema_version"),
-                ParseInt32Required(cols[1], "store_state.detector_version"));
-        }
-
-        return null;
+        IReadOnlyList<StoreStateView> rows = QueryRows<StoreStateView>(
+            sql,
+            NewParameters(),
+            reader => new StoreStateView(
+                ParseInt32Required(CellText(reader, "schema_version"), "store_state.schema_version"),
+                ParseInt32Required(CellText(reader, "detector_version"), "store_state.detector_version")));
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <inheritdoc />
@@ -98,102 +99,90 @@ public partial class SqliteRelationalStore : IOperationalStore
         RequirePositiveInt(state.SchemaVersion, "store_state", "schema_version");
         RequirePositiveInt(state.DetectorVersion, "store_state", "detector_version");
 
-        ExecuteTransaction(
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"INSERT OR REPLACE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {IntSql(state.SchemaVersion)}, {IntSql(state.DetectorVersion)});\n"));
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {batch.Add(state.SchemaVersion)}, {batch.Add(state.DetectorVersion)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public long GetWriteMarker()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1 LIMIT 1;\n";
+        string sql = "SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1 LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 1, "store_write_marker");
-            return ParseInt64Required(cols[0], "store_write_marker.records_write_seq");
-        }
-
-        return 0L;
+        IReadOnlyList<long> rows = QueryRows<long>(sql, NewParameters(), reader => reader.GetInt64(reader.GetOrdinal("records_write_seq")));
+        return rows.Count == 0 ? 0L : rows[0];
     }
 
     /// <inheritdoc />
     public void SetWriteMarker(long recordsWriteSeq)
     {
         RequireNonNegative(recordsWriteSeq, "store_write_marker", "records_write_seq");
-        ExecuteTransaction(
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq) VALUES (1, {LongSql(recordsWriteSeq)});\n"));
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO store_write_marker (singleton_id, records_write_seq) VALUES (1, {batch.Add(recordsWriteSeq)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public string? GetLastCleanAtUtc() =>
-        ReadSingletonHexString("store_clean_stamp", "last_clean_at_utc");
+        ReadSingletonText("store_clean_stamp", "last_clean_at_utc");
 
     /// <inheritdoc />
     public void SetLastCleanAtUtc(string lastCleanAtUtc)
     {
-        string valueExpr = GuardedNonEmptyTextExpr("store_clean_stamp", "last_clean_at_utc", lastCleanAtUtc);
-        ExecuteTransaction($"INSERT OR REPLACE INTO store_clean_stamp (singleton_id, last_clean_at_utc) VALUES (1, {valueExpr});\n");
+        ArgumentNullException.ThrowIfNull(lastCleanAtUtc);
+        string value = GuardedNonEmptyText("store_clean_stamp", "last_clean_at_utc", lastCleanAtUtc);
+        SqlBatch batch = new();
+        batch.Append($"INSERT OR REPLACE INTO store_clean_stamp (singleton_id, last_clean_at_utc) VALUES (1, {batch.Add(value)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public int? GetContentRetentionDays()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT retention_days FROM content_retention WHERE singleton_id = 1 LIMIT 1;\n";
+        string sql = "SELECT retention_days FROM content_retention WHERE singleton_id = 1 LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 1, "content_retention");
-            return ParseInt32Required(cols[0], "content_retention.retention_days");
-        }
-
-        return null;
+        IReadOnlyList<int> rows = QueryRows<int>(sql, NewParameters(), reader => reader.GetInt32(reader.GetOrdinal("retention_days")));
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <inheritdoc />
     public void SetContentRetentionDays(int retentionDays)
     {
         RequirePositiveInt(retentionDays, "content_retention", "retention_days");
-        ExecuteTransaction(
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"INSERT OR REPLACE INTO content_retention (singleton_id, retention_days) VALUES (1, {IntSql(retentionDays)});\n"));
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO content_retention (singleton_id, retention_days) VALUES (1, {batch.Add(retentionDays)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public string? GetContentPurgeMarkUtc() =>
-        ReadSingletonHexString("content_purge_mark", "purged_through_utc");
+        ReadSingletonText("content_purge_mark", "purged_through_utc");
 
     /// <inheritdoc />
     public void SetContentPurgeMarkUtc(string purgedThroughUtc)
     {
-        string valueExpr = GuardedNonEmptyTextExpr("content_purge_mark", "purged_through_utc", purgedThroughUtc);
-        ExecuteTransaction($"INSERT OR REPLACE INTO content_purge_mark (singleton_id, purged_through_utc) VALUES (1, {valueExpr});\n");
+        ArgumentNullException.ThrowIfNull(purgedThroughUtc);
+        string value = GuardedNonEmptyText("content_purge_mark", "purged_through_utc", purgedThroughUtc);
+        SqlBatch batch = new();
+        batch.Append($"INSERT OR REPLACE INTO content_purge_mark (singleton_id, purged_through_utc) VALUES (1, {batch.Add(value)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public ProjectionStateView? GetProjectionState()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT projection_schema_version, records_marker FROM projection_state WHERE singleton_id = 1 LIMIT 1;\n";
+        string sql = "SELECT projection_schema_version, records_marker FROM projection_state WHERE singleton_id = 1 LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 2, "projection_state");
-            return new ProjectionStateView(
-                ParseInt32Required(cols[0], "projection_state.projection_schema_version"),
-                ParseInt64Required(cols[1], "projection_state.records_marker"));
-        }
-
-        return null;
+        IReadOnlyList<ProjectionStateView> rows = QueryRows<ProjectionStateView>(
+            sql,
+            NewParameters(),
+            reader => new ProjectionStateView(
+                reader.GetInt32(reader.GetOrdinal("projection_schema_version")),
+                reader.GetInt64(reader.GetOrdinal("records_marker"))));
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <inheritdoc />
@@ -202,41 +191,54 @@ public partial class SqliteRelationalStore : IOperationalStore
         ArgumentNullException.ThrowIfNull(state);
         RequireNonNegative(state.RecordsMarker, "projection_state", "records_marker");
 
-        ExecuteTransaction(
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"INSERT OR REPLACE INTO projection_state (singleton_id, projection_schema_version, records_marker) " +
-                $"VALUES (1, {IntSql(state.ProjectionSchemaVersion)}, {LongSql(state.RecordsMarker)});\n"));
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO projection_state (singleton_id, projection_schema_version, records_marker) " +
+            $"VALUES (1, {batch.Add(state.ProjectionSchemaVersion)}, {batch.Add(state.RecordsMarker)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public DirtyProjectionState? GetProjectionDirtyState()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT 'RNG', 0, from_seq, to_seq FROM projection_dirty_range WHERE singleton_id = 1 " +
-                     "UNION ALL " +
-                     "SELECT 'SES', rowid, hex(CAST(session_id AS BLOB)), '' FROM projection_dirty_session " +
-                     "ORDER BY 1 ASC, 2 ASC;\n";
+        string sql =
+            "SELECT 'RNG' AS tag, 0 AS sort_ord, from_seq AS value_a, to_seq AS value_b FROM projection_dirty_range WHERE singleton_id = 1 " +
+            "UNION ALL " +
+            "SELECT 'SES', rowid, session_id, '' FROM projection_dirty_session " +
+            "ORDER BY 1 ASC, 2 ASC;\n";
 
-        string output = ExecuteSqlite(sql);
+        IReadOnlyList<DirtyProjectionRow> rows = QueryRows<DirtyProjectionRow>(
+            sql,
+            NewParameters(),
+            reader =>
+            {
+                string tag = reader.GetString(reader.GetOrdinal("tag"));
+                return tag switch
+                {
+                    "RNG" => new DirtyProjectionRow(
+                        tag,
+                        reader.GetInt64(reader.GetOrdinal("value_a")),
+                        reader.GetInt64(reader.GetOrdinal("value_b")),
+                        string.Empty),
+                    "SES" => new DirtyProjectionRow(tag, 0L, 0L, reader.GetString(reader.GetOrdinal("value_a"))),
+                    _ => throw new StoredDataException($"Unexpected tag '{tag}' in projection_dirty query."),
+                };
+            });
+
         long? fromSeq = null;
         long? toSeq = null;
         List<string> keys = [];
 
-        foreach (string line in TabLines(output))
+        foreach (DirtyProjectionRow row in rows)
         {
-            string[] cols = SplitTabLine(line, 4, "projection_dirty");
-            switch (cols[0])
+            if (string.Equals(row.Tag, "RNG", StringComparison.Ordinal))
             {
-                case "RNG":
-                    fromSeq = ParseInt64Required(cols[2], "projection_dirty_range.from_seq");
-                    toSeq = ParseInt64Required(cols[3], "projection_dirty_range.to_seq");
-                    break;
-                case "SES":
-                    keys.Add(ParseHexRequired(cols[2], "projection_dirty_session.session_id"));
-                    break;
-                default:
-                    throw new StoredDataException($"Unexpected tag '{cols[0]}' in projection_dirty query.");
+                fromSeq = row.FromSeq;
+                toSeq = row.ToSeq;
+            }
+            else
+            {
+                keys.Add(row.SessionId);
             }
         }
 
@@ -260,18 +262,17 @@ public partial class SqliteRelationalStore : IOperationalStore
         RequireNonNegative(state.FromSeq, "projection_dirty_range", "from_seq");
         RequireNonNegative(state.ToSeq, "projection_dirty_range", "to_seq");
 
-        StringBuilder body = new();
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO projection_dirty_range (singleton_id, from_seq, to_seq) VALUES (1, {LongSql(state.FromSeq)}, {LongSql(state.ToSeq)});\n");
-        body.Append("DELETE FROM projection_dirty_session;\n");
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO projection_dirty_range (singleton_id, from_seq, to_seq) VALUES (1, {batch.Add(state.FromSeq)}, {batch.Add(state.ToSeq)});\n");
+        batch.Append("DELETE FROM projection_dirty_session;\n");
 
         if (!state.IsWildcard && state.Keys is not null)
         {
             HashSet<string> seenKeys = new(StringComparer.Ordinal);
             foreach (string key in state.Keys)
             {
-                string keyExpr = GuardedNonEmptyTextExpr("projection_dirty_session", "session_id", key);
+                string keyValue = GuardedNonEmptyText("projection_dirty_session", "session_id", key);
                 if (!seenKeys.Add(key))
                 {
                     throw new DashValidationException(
@@ -279,11 +280,11 @@ public partial class SqliteRelationalStore : IOperationalStore
                         $"Duplicate session_id '{key}' in projection_dirty_session.");
                 }
 
-                body.Append(CultureInfo.InvariantCulture, $"INSERT INTO projection_dirty_session (session_id) VALUES ({keyExpr});\n");
+                batch.Append($"INSERT INTO projection_dirty_session (session_id) VALUES ({batch.Add(keyValue)});\n");
             }
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
@@ -295,26 +296,21 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// <inheritdoc />
     public IReadOnlyList<SessionKeyAlias> ListSessionKeyAliases(string? sessionId = null)
     {
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT hex(CAST(alias_key AS BLOB)), hex(CAST(session_id AS BLOB)) FROM session_key_alias");
+        StringBuilder sql = new("SELECT alias_key, session_id FROM session_key_alias");
+        Dictionary<string, object?> parameters = NewParameters();
         if (sessionId is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE session_id = {TextExpr(sessionId)}");
+            sql.Append(" WHERE session_id = ").Append(AddParameter(parameters, sessionId));
         }
 
         sql.Append(" ORDER BY rowid ASC;\n");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<SessionKeyAlias> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 2, "session_key_alias");
-            results.Add(new SessionKeyAlias(
-                ParseHexRequired(cols[0], "session_key_alias.alias_key"),
-                ParseHexRequired(cols[1], "session_key_alias.session_id")));
-        }
-
-        return results;
+        return QueryRows<SessionKeyAlias>(
+            sql.ToString(),
+            parameters,
+            reader => new SessionKeyAlias(
+                reader.GetString(reader.GetOrdinal("alias_key")),
+                reader.GetString(reader.GetOrdinal("session_id"))));
     }
 
     /// <inheritdoc />
@@ -322,15 +318,15 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         ArgumentNullException.ThrowIfNull(aliases);
 
-        StringBuilder body = new();
-        body.Append("DELETE FROM session_key_alias;\n");
+        SqlBatch batch = new();
+        batch.Append("DELETE FROM session_key_alias;\n");
 
         HashSet<string> seenAliases = new(StringComparer.Ordinal);
         foreach (SessionKeyAlias alias in aliases)
         {
             ArgumentNullException.ThrowIfNull(alias);
-            string aliasExpr = GuardedNonEmptyTextExpr("session_key_alias", "alias_key", alias.AliasKey);
-            string sessionExpr = GuardedNonEmptyTextExpr("session_key_alias", "session_id", alias.SessionId);
+            string aliasValue = GuardedNonEmptyText("session_key_alias", "alias_key", alias.AliasKey);
+            string sessionValue = GuardedNonEmptyText("session_key_alias", "session_id", alias.SessionId);
             if (!seenAliases.Add(alias.AliasKey))
             {
                 throw new DashValidationException(
@@ -338,12 +334,11 @@ public partial class SqliteRelationalStore : IOperationalStore
                     $"Duplicate alias_key '{alias.AliasKey}' in session_key_alias.");
             }
 
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO session_key_alias (alias_key, session_id) VALUES ({aliasExpr}, {sessionExpr});\n");
+            batch.Append(
+                $"INSERT INTO session_key_alias (alias_key, session_id) VALUES ({batch.Add(aliasValue)}, {batch.Add(sessionValue)});\n");
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
@@ -351,40 +346,40 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         ArgumentNullException.ThrowIfNull(row);
 
-        string idExpr = GuardedNonEmptyTextExpr("refresh_run", "refresh_run_id", row.Id);
-        string startedExpr = GuardedNonEmptyTextExpr("refresh_run", "started_at_utc", row.StartedAt);
-        string statusExpr = GuardedNonEmptyTextExpr("refresh_run", "status", row.Status);
-        string triggerExpr = GuardedNonEmptyTextExpr("refresh_run", "trigger", row.Trigger);
+        string idValue = GuardedNonEmptyText("refresh_run", "refresh_run_id", row.Id);
+        string startedValue = GuardedNonEmptyText("refresh_run", "started_at_utc", row.StartedAt);
+        string statusValue = GuardedNonEmptyText("refresh_run", "status", row.Status);
+        string triggerValue = GuardedNonEmptyText("refresh_run", "trigger", row.Trigger);
 
         if (row.HistoryWeeks.HasValue)
         {
             RequirePositiveInt(row.HistoryWeeks.Value, "refresh_run_history_window", "history_weeks");
         }
 
-        StringBuilder body = new();
-        body.Append(CultureInfo.InvariantCulture, $"DELETE FROM refresh_run WHERE refresh_run_id = {idExpr};\n");
-        body.Append(
-            CultureInfo.InvariantCulture,
+        SqlBatch batch = new();
+        batch.Append($"DELETE FROM refresh_run WHERE refresh_run_id = {batch.Add(idValue)};\n");
+        batch.Append(
             $"INSERT INTO refresh_run (refresh_run_id, started_at_utc, status, pid, trigger) " +
-            $"VALUES ({idExpr}, {startedExpr}, {statusExpr}, {IntSql(row.Pid)}, {triggerExpr});\n");
+            $"VALUES ({batch.Add(idValue)}, {batch.Add(startedValue)}, {batch.Add(statusValue)}, {batch.Add(row.Pid)}, {batch.Add(triggerValue)});\n");
 
-        AppendOptionalNonEmptyTextChild(body, "refresh_run_completion", "refresh_run_id", idExpr, "completed_at_utc", row.CompletedAt);
-        AppendOptionalNonEmptyTextChild(body, "refresh_run_summary", "refresh_run_id", idExpr, "summary", row.Summary);
+        AppendOptionalNonEmptyTextChild(batch, "refresh_run_completion", "refresh_run_id", idValue, "completed_at_utc", row.CompletedAt);
+        AppendOptionalNonEmptyTextChild(batch, "refresh_run_summary", "refresh_run_id", idValue, "summary", row.Summary);
         if (row.HistoryWeeks.HasValue)
         {
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO refresh_run_history_window (refresh_run_id, history_weeks) VALUES ({idExpr}, {IntSql(row.HistoryWeeks.Value)});\n");
+            batch.Append(
+                $"INSERT INTO refresh_run_history_window (refresh_run_id, history_weeks) VALUES ({batch.Add(idValue)}, {batch.Add(row.HistoryWeeks.Value)});\n");
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public RefreshRunRow? GetRefreshRun(string refreshRunId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(refreshRunId);
-        IReadOnlyList<RefreshRunRow> rows = QueryRefreshRuns($"rr.refresh_run_id = {TextExpr(refreshRunId)}", "ORDER BY rr.rowid ASC");
+        Dictionary<string, object?> parameters = NewParameters();
+        string filter = $"rr.refresh_run_id = {AddParameter(parameters, refreshRunId)}";
+        IReadOnlyList<RefreshRunRow> rows = QueryRefreshRuns(filter, parameters, "ORDER BY rr.rowid ASC");
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -392,7 +387,9 @@ public partial class SqliteRelationalStore : IOperationalStore
     public IReadOnlyList<RefreshRunRow> ListRefreshRuns(int limit = 20)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
-        return QueryRefreshRuns(filterPredicate: null, string.Create(CultureInfo.InvariantCulture, $"ORDER BY rr.started_at_utc DESC, rr.rowid ASC LIMIT {IntSql(limit)}"));
+        Dictionary<string, object?> parameters = NewParameters();
+        string orderAndLimit = "ORDER BY rr.started_at_utc DESC, rr.rowid ASC LIMIT " + AddParameter(parameters, limit);
+        return QueryRefreshRuns(filterPredicate: null, parameters, orderAndLimit);
     }
 
     /// <inheritdoc />
@@ -401,8 +398,10 @@ public partial class SqliteRelationalStore : IOperationalStore
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceKey);
 
-        IReadOnlyList<SourceCheckpoint> rows = QuerySourceCheckpoints(
-            $"sc.harness_id = {TextExpr(harnessId)} AND sc.source_key = {TextExpr(sourceKey)}");
+        Dictionary<string, object?> parameters = NewParameters();
+        string filter =
+            $"sc.harness_id = {AddParameter(parameters, harnessId)} AND sc.source_key = {AddParameter(parameters, sourceKey)}";
+        IReadOnlyList<SourceCheckpoint> rows = QuerySourceCheckpoints(filter, parameters);
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -411,66 +410,69 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
 
-        string harnessExpr = GuardedNonEmptyTextExpr("source_checkpoint", "harness_id", checkpoint.HarnessId);
-        string sourceKeyExpr = GuardedNonEmptyTextExpr("source_checkpoint", "source_key", checkpoint.SourceKey);
-        string providerExpr = GuardedNonEmptyTextExpr("source_checkpoint", "provider_id", checkpoint.ProviderId);
-        string parserExpr = GuardedNonEmptyTextExpr("source_checkpoint", "parser_id", checkpoint.ParserId);
-        string contractExpr = GuardedNonEmptyTextExpr("source_checkpoint", "parser_contract_version", checkpoint.ParserContractVersion);
-        string formatExpr = GuardedNonEmptyTextExpr("source_checkpoint", "format", checkpoint.Format);
-        string rootLabelExpr = GuardedTextExpr("source_checkpoint", "source_root_label", checkpoint.SourceRootLabel);
-        string revisionExpr = GuardedTextExpr("source_checkpoint", "revision_token", checkpoint.RevisionToken);
-        string coveredFromExpr = GuardedNonEmptyTextExpr("source_checkpoint", "covered_from_utc", checkpoint.CoveredFromUtc);
-        string coveredThroughExpr = GuardedNonEmptyTextExpr("source_checkpoint", "covered_through_utc", checkpoint.CoveredThroughUtc);
-        string lastAttemptExpr = GuardedNonEmptyTextExpr("source_checkpoint", "last_attempt_utc", checkpoint.LastAttemptUtc);
-        string lastStatusExpr = GuardedNonEmptyTextExpr("source_checkpoint", "last_status", checkpoint.LastStatus);
+        string harnessValue = GuardedNonEmptyText("source_checkpoint", "harness_id", checkpoint.HarnessId);
+        string sourceKeyValue = GuardedNonEmptyText("source_checkpoint", "source_key", checkpoint.SourceKey);
+        string providerValue = GuardedNonEmptyText("source_checkpoint", "provider_id", checkpoint.ProviderId);
+        string parserValue = GuardedNonEmptyText("source_checkpoint", "parser_id", checkpoint.ParserId);
+        string contractValue = GuardedNonEmptyText("source_checkpoint", "parser_contract_version", checkpoint.ParserContractVersion);
+        string formatValue = GuardedNonEmptyText("source_checkpoint", "format", checkpoint.Format);
+        string rootLabelValue = GuardedTextValue("source_checkpoint", "source_root_label", checkpoint.SourceRootLabel);
+        string revisionValue = GuardedTextValue("source_checkpoint", "revision_token", checkpoint.RevisionToken);
+        string coveredFromValue = GuardedNonEmptyText("source_checkpoint", "covered_from_utc", checkpoint.CoveredFromUtc);
+        string coveredThroughValue = GuardedNonEmptyText("source_checkpoint", "covered_through_utc", checkpoint.CoveredThroughUtc);
+        string lastAttemptValue = GuardedNonEmptyText("source_checkpoint", "last_attempt_utc", checkpoint.LastAttemptUtc);
+        string lastStatusValue = GuardedNonEmptyText("source_checkpoint", "last_status", checkpoint.LastStatus);
 
         RequireNonNegative(checkpoint.UnitCount, "source_checkpoint", "unit_count");
         RequireNonNegative(checkpoint.RecordCount, "source_checkpoint", "record_count");
 
-        string? successExpr = checkpoint.LastSuccessUtc is null
+        string? successValue = checkpoint.LastSuccessUtc is null
             ? null
-            : GuardedNonEmptyTextExpr("source_checkpoint_success", "last_success_utc", checkpoint.LastSuccessUtc);
-        string? errorExpr = checkpoint.LastErrorCode is null
+            : GuardedNonEmptyText("source_checkpoint_success", "last_success_utc", checkpoint.LastSuccessUtc);
+        string? errorValue = checkpoint.LastErrorCode is null
             ? null
-            : GuardedNonEmptyTextExpr("source_checkpoint_error", "last_error_code", checkpoint.LastErrorCode);
+            : GuardedNonEmptyText("source_checkpoint_error", "last_error_code", checkpoint.LastErrorCode);
 
-        StringBuilder body = new();
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"DELETE FROM source_checkpoint WHERE harness_id = {harnessExpr} AND source_key = {sourceKeyExpr};\n");
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO source_checkpoint (harness_id, source_key, provider_id, parser_id, parser_contract_version, format, " +
-            $"source_root_label, revision_token, covered_from_utc, covered_through_utc, last_attempt_utc, last_status, unit_count, record_count) " +
-            $"VALUES ({harnessExpr}, {sourceKeyExpr}, {providerExpr}, {parserExpr}, {contractExpr}, {formatExpr}, " +
-            $"{rootLabelExpr}, {revisionExpr}, {coveredFromExpr}, {coveredThroughExpr}, {lastAttemptExpr}, {lastStatusExpr}, " +
-            $"{IntSql(checkpoint.UnitCount)}, {IntSql(checkpoint.RecordCount)});\n");
+        SqlBatch batch = new();
+        batch.Append(
+            $"DELETE FROM source_checkpoint WHERE harness_id = {batch.Add(harnessValue)} AND source_key = {batch.Add(sourceKeyValue)};\n");
+        batch.Append(
+            "INSERT INTO source_checkpoint (harness_id, source_key, provider_id, parser_id, parser_contract_version, format, " +
+            "source_root_label, revision_token, covered_from_utc, covered_through_utc, last_attempt_utc, last_status, unit_count, record_count) " +
+            $"VALUES ({batch.Add(harnessValue)}, {batch.Add(sourceKeyValue)}, {batch.Add(providerValue)}, {batch.Add(parserValue)}, " +
+            $"{batch.Add(contractValue)}, {batch.Add(formatValue)}, {batch.Add(rootLabelValue)}, {batch.Add(revisionValue)}, " +
+            $"{batch.Add(coveredFromValue)}, {batch.Add(coveredThroughValue)}, {batch.Add(lastAttemptValue)}, {batch.Add(lastStatusValue)}, " +
+            $"{batch.Add(checkpoint.UnitCount)}, {batch.Add(checkpoint.RecordCount)});\n");
 
-        if (successExpr is not null)
+        if (successValue is not null)
         {
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO source_checkpoint_success (harness_id, source_key, last_success_utc) VALUES ({harnessExpr}, {sourceKeyExpr}, {successExpr});\n");
+            batch.Append(
+                $"INSERT INTO source_checkpoint_success (harness_id, source_key, last_success_utc) VALUES ({batch.Add(harnessValue)}, {batch.Add(sourceKeyValue)}, {batch.Add(successValue)});\n");
         }
 
-        if (errorExpr is not null)
+        if (errorValue is not null)
         {
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO source_checkpoint_error (harness_id, source_key, last_error_code) VALUES ({harnessExpr}, {sourceKeyExpr}, {errorExpr});\n");
+            batch.Append(
+                $"INSERT INTO source_checkpoint_error (harness_id, source_key, last_error_code) VALUES ({batch.Add(harnessValue)}, {batch.Add(sourceKeyValue)}, {batch.Add(errorValue)});\n");
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<SourceCheckpoint> ListSourceCheckpoints(string? harnessId = null) =>
-        QuerySourceCheckpoints(harnessId is null ? null : $"sc.harness_id = {TextExpr(harnessId)}");
+    public IReadOnlyList<SourceCheckpoint> ListSourceCheckpoints(string? harnessId = null)
+    {
+        Dictionary<string, object?> parameters = NewParameters();
+        string? filter = harnessId is null ? null : $"sc.harness_id = {AddParameter(parameters, harnessId)}";
+        return QuerySourceCheckpoints(filter, parameters);
+    }
 
     /// <inheritdoc />
     public StoredIngestProblem? GetIngestProblem(long problemId)
     {
-        IReadOnlyList<StoredIngestProblem> rows = QueryIngestProblems($"ip.problem_id = {LongSql(problemId)}", limit: null, offset: null);
+        Dictionary<string, object?> parameters = NewParameters();
+        string filter = $"ip.problem_id = {AddParameter(parameters, problemId)}";
+        IReadOnlyList<StoredIngestProblem> rows = QueryIngestProblems(filter, parameters, limit: null, offset: null);
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -491,31 +493,31 @@ public partial class SqliteRelationalStore : IOperationalStore
             ArgumentOutOfRangeException.ThrowIfNegative(offset.Value);
         }
 
+        Dictionary<string, object?> parameters = NewParameters();
         List<string> predicates = [];
         if (harnessId is not null)
         {
-            predicates.Add($"iph.harness_id = {TextExpr(harnessId)}");
+            predicates.Add($"iph.harness_id = {AddParameter(parameters, harnessId)}");
         }
 
         if (spanId is not null)
         {
-            predicates.Add($"ips.span_id = {TextExpr(spanId)}");
+            predicates.Add($"ips.span_id = {AddParameter(parameters, spanId)}");
         }
 
         string? where = predicates.Count > 0 ? string.Join(" AND ", predicates) : null;
-        return QueryIngestProblems(where, limit, offset);
+        return QueryIngestProblems(where, parameters, limit, offset);
     }
 
     /// <inheritdoc />
     public int CountIngestProblems(string? harnessId = null)
     {
+        Dictionary<string, object?> parameters = NewParameters();
         string sql = harnessId is null
-            ? TabReadScriptHeader + "SELECT COUNT(*) FROM ingest_problem;\n"
-            : TabReadScriptHeader + $"SELECT COUNT(*) FROM ingest_problem_harness WHERE harness_id = {TextExpr(harnessId)};\n";
+            ? "SELECT COUNT(*) AS problem_count FROM ingest_problem;\n"
+            : $"SELECT COUNT(*) AS problem_count FROM ingest_problem_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
 
-        string output = ExecuteSqlite(sql);
-        string[] cols = SplitSingleRow(output, 1, "ingest_problem count");
-        return ParseInt32Required(cols[0], "ingest_problem count");
+        return QueryRows<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("problem_count")))[0];
     }
 
     /// <inheritdoc />
@@ -524,14 +526,14 @@ public partial class SqliteRelationalStore : IOperationalStore
         ArgumentNullException.ThrowIfNull(span);
         ArgumentNullException.ThrowIfNull(span.ObservedNamespaces);
 
-        string spanIdExpr = GuardedNonEmptyTextExpr("quarantined_span", "span_id", span.SpanId);
-        string reasonExpr = GuardedNonEmptyTextExpr("quarantined_span", "reason", span.Reason);
+        string spanIdValue = GuardedNonEmptyText("quarantined_span", "span_id", span.SpanId);
+        string reasonValue = GuardedNonEmptyText("quarantined_span", "reason", span.Reason);
 
-        List<string> namespaceExprs = new(span.ObservedNamespaces.Count);
+        List<string> namespaces = new(span.ObservedNamespaces.Count);
         HashSet<string> seenNamespaces = new(StringComparer.Ordinal);
         foreach (string ns in span.ObservedNamespaces)
         {
-            string nsExpr = GuardedNonEmptyTextExpr("quarantined_span_namespace", "namespace_name", ns);
+            string namespaceValue = GuardedNonEmptyText("quarantined_span_namespace", "namespace_name", ns);
             if (!seenNamespaces.Add(ns))
             {
                 throw new DashValidationException(
@@ -539,33 +541,34 @@ public partial class SqliteRelationalStore : IOperationalStore
                     $"Duplicate namespace_name '{ns}' for quarantined_span '{span.SpanId}'.");
             }
 
-            namespaceExprs.Add(nsExpr);
+            namespaces.Add(namespaceValue);
         }
 
-        StringBuilder body = new();
-        body.Append(CultureInfo.InvariantCulture, $"DELETE FROM quarantined_span WHERE span_id = {spanIdExpr};\n");
-        body.Append(CultureInfo.InvariantCulture, $"INSERT INTO quarantined_span (span_id, reason) VALUES ({spanIdExpr}, {reasonExpr});\n");
+        SqlBatch batch = new();
+        batch.Append($"DELETE FROM quarantined_span WHERE span_id = {batch.Add(spanIdValue)};\n");
+        batch.Append($"INSERT INTO quarantined_span (span_id, reason) VALUES ({batch.Add(spanIdValue)}, {batch.Add(reasonValue)});\n");
 
-        foreach (string nsExpr in namespaceExprs)
+        foreach (string namespaceValue in namespaces)
         {
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO quarantined_span_namespace (span_id, namespace_name) VALUES ({spanIdExpr}, {nsExpr});\n");
+            batch.Append(
+                $"INSERT INTO quarantined_span_namespace (span_id, namespace_name) VALUES ({batch.Add(spanIdValue)}, {batch.Add(namespaceValue)});\n");
         }
 
-        AppendOptionalNonEmptyTextChild(body, "quarantined_span_source", "span_id", spanIdExpr, "source", span.Source);
-        AppendOptionalNonEmptyTextChild(body, "quarantined_span_name", "span_id", spanIdExpr, "name", span.Name);
-        AppendOptionalNonEmptyTextChild(body, "quarantined_span_timestamp", "span_id", spanIdExpr, "timestamp_utc", span.TimestampUtc);
-        AppendOptionalNonEmptyTextChild(body, "quarantined_span_harness", "span_id", spanIdExpr, "harness_id", span.HarnessId);
+        AppendOptionalNonEmptyTextChild(batch, "quarantined_span_source", "span_id", spanIdValue, "source", span.Source);
+        AppendOptionalNonEmptyTextChild(batch, "quarantined_span_name", "span_id", spanIdValue, "name", span.Name);
+        AppendOptionalNonEmptyTextChild(batch, "quarantined_span_timestamp", "span_id", spanIdValue, "timestamp_utc", span.TimestampUtc);
+        AppendOptionalNonEmptyTextChild(batch, "quarantined_span_harness", "span_id", spanIdValue, "harness_id", span.HarnessId);
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public StoredQuarantinedSpan? GetQuarantinedSpan(string spanId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spanId);
-        IReadOnlyList<StoredQuarantinedSpan> rows = QueryQuarantinedSpans($"qs.span_id = {TextExpr(spanId)}", limit: null, offset: null);
+        Dictionary<string, object?> parameters = NewParameters();
+        string filter = $"qs.span_id = {AddParameter(parameters, spanId)}";
+        IReadOnlyList<StoredQuarantinedSpan> rows = QueryQuarantinedSpans(filter, parameters, limit: null, offset: null);
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -585,37 +588,31 @@ public partial class SqliteRelationalStore : IOperationalStore
             ArgumentOutOfRangeException.ThrowIfNegative(offset.Value);
         }
 
-        string? filter = harnessId is null ? null : $"qh.harness_id = {TextExpr(harnessId)}";
-        return QueryQuarantinedSpans(filter, limit, offset);
+        Dictionary<string, object?> parameters = NewParameters();
+        string? filter = harnessId is null ? null : $"qh.harness_id = {AddParameter(parameters, harnessId)}";
+        return QueryQuarantinedSpans(filter, parameters, limit, offset);
     }
 
     /// <inheritdoc />
     public int CountQuarantinedSpans(string? harnessId = null)
     {
+        Dictionary<string, object?> parameters = NewParameters();
         string sql = harnessId is null
-            ? TabReadScriptHeader + "SELECT COUNT(*) FROM quarantined_span;\n"
-            : TabReadScriptHeader + $"SELECT COUNT(*) FROM quarantined_span_harness WHERE harness_id = {TextExpr(harnessId)};\n";
+            ? "SELECT COUNT(*) AS span_count FROM quarantined_span;\n"
+            : $"SELECT COUNT(*) AS span_count FROM quarantined_span_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
 
-        string output = ExecuteSqlite(sql);
-        string[] cols = SplitSingleRow(output, 1, "quarantined_span count");
-        return ParseInt32Required(cols[0], "quarantined_span count");
+        return QueryRows<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("span_count")))[0];
     }
 
     /// <inheritdoc />
     public long? GetCachedTokenCount(string hash)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hash);
-        string sql = TabReadScriptHeader +
-                     $"SELECT token_count FROM token_cache WHERE hash = {TextExpr(hash)} LIMIT 1;\n";
+        Dictionary<string, object?> parameters = NewParameters();
+        string sql = $"SELECT token_count FROM token_cache WHERE hash = {AddParameter(parameters, hash)} LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 1, "token_cache");
-            return ParseInt64Required(cols[0], "token_cache.token_count");
-        }
-
-        return null;
+        IReadOnlyList<long> rows = QueryRows<long>(sql, parameters, reader => reader.GetInt64(reader.GetOrdinal("token_count")));
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <inheritdoc />
@@ -623,107 +620,74 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         ArgumentNullException.ThrowIfNull(entries);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         foreach (StoredTokenCacheEntry entry in entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
-            string hashExpr = GuardedNonEmptyTextExpr("token_cache", "hash", entry.Hash);
+            string hashValue = GuardedNonEmptyText("token_cache", "hash", entry.Hash);
             RequireNonNegative(entry.TokenCount, "token_cache", "token_count");
-            string? modelExpr = entry.ModelId is null
+            string? modelValue = entry.ModelId is null
                 ? null
-                : GuardedNonEmptyTextExpr("token_cache_model", "model_id", entry.ModelId);
+                : GuardedNonEmptyText("token_cache_model", "model_id", entry.ModelId);
 
-            body.Append(CultureInfo.InvariantCulture, $"DELETE FROM token_cache WHERE hash = {hashExpr};\n");
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO token_cache (hash, token_count) VALUES ({hashExpr}, {LongSql(entry.TokenCount)});\n");
-            if (modelExpr is not null)
+            batch.Append($"DELETE FROM token_cache WHERE hash = {batch.Add(hashValue)};\n");
+            batch.Append(
+                $"INSERT INTO token_cache (hash, token_count) VALUES ({batch.Add(hashValue)}, {batch.Add(entry.TokenCount)});\n");
+            if (modelValue is not null)
             {
-                body.Append(
-                    CultureInfo.InvariantCulture,
-                    $"INSERT INTO token_cache_model (hash, model_id) VALUES ({hashExpr}, {modelExpr});\n");
+                batch.Append(
+                    $"INSERT INTO token_cache_model (hash, model_id) VALUES ({batch.Add(hashValue)}, {batch.Add(modelValue)});\n");
             }
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public StoredModelCatalogSnapshot GetModelContextWindowCatalog()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT 'CAT', hex(CAST(status AS BLOB)) FROM context_window_catalog_state WHERE singleton_id = 1;\n" +
-                     "SELECT 'VND', hex(CAST(v.vendor AS BLOB)), hex(CAST(v.status AS BLOB)), " +
-                     "typeof(vr.last_refresh_at_utc), COALESCE(hex(CAST(vr.last_refresh_at_utc AS BLOB)), ''), " +
-                     "typeof(ve.last_error), COALESCE(hex(CAST(ve.last_error AS BLOB)), '') " +
-                     "FROM model_context_window_catalog_vendor v " +
-                     "LEFT JOIN model_context_window_catalog_vendor_refresh vr ON vr.vendor = v.vendor " +
-                     "LEFT JOIN model_context_window_catalog_vendor_error ve ON ve.vendor = v.vendor " +
-                     "ORDER BY v.rowid ASC;\n" +
-                     "SELECT 'ENT', hex(CAST(e.lookup_id AS BLOB)), hex(CAST(e.canonical_model_id AS BLOB)), e.context_window, " +
-                     "hex(CAST(e.vendor AS BLOB)), hex(CAST(e.documentation_url AS BLOB)), hex(CAST(e.retrieved_at_utc AS BLOB)), " +
-                     "typeof(r.source_revision), COALESCE(hex(CAST(r.source_revision AS BLOB)), '') " +
-                     "FROM model_context_window_catalog e " +
-                     "LEFT JOIN model_context_window_source_revision r ON r.lookup_id = e.lookup_id " +
-                     "ORDER BY e.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
         string status = "empty";
-        List<StoredModelCatalogVendorStatus> vendors = [];
-        List<StoredModelContextWindowEntry> entries = [];
-
-        foreach (string line in TabLines(output))
+        IReadOnlyList<string> statusRows = QueryRows<string>(
+            "SELECT status FROM context_window_catalog_state WHERE singleton_id = 1;\n",
+            NewParameters(),
+            reader => reader.GetString(reader.GetOrdinal("status")));
+        if (statusRows.Count > 0)
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length == 0)
-            {
-                continue;
-            }
-
-            switch (cols[0])
-            {
-                case "CAT":
-                    if (cols.Length != 2)
-                    {
-                        throw new StoredDataException($"Expected 2 columns for context_window_catalog_state, got {cols.Length}.");
-                    }
-
-                    status = ParseHexRequired(cols[1], "context_window_catalog_state.status");
-                    break;
-
-                case "VND":
-                    if (cols.Length != 7)
-                    {
-                        throw new StoredDataException($"Expected 7 columns for model_context_window_catalog_vendor, got {cols.Length}.");
-                    }
-
-                    vendors.Add(new StoredModelCatalogVendorStatus(
-                        ParseHexRequired(cols[1], "model_context_window_catalog_vendor.vendor"),
-                        ParseHexRequired(cols[2], "model_context_window_catalog_vendor.status"),
-                        ParseNullableHex(cols[3], cols[4], "model_context_window_catalog_vendor_refresh.last_refresh_at_utc"),
-                        ParseNullableHex(cols[5], cols[6], "model_context_window_catalog_vendor_error.last_error")));
-                    break;
-
-                case "ENT":
-                    if (cols.Length != 9)
-                    {
-                        throw new StoredDataException($"Expected 9 columns for model_context_window_catalog, got {cols.Length}.");
-                    }
-
-                    entries.Add(new StoredModelContextWindowEntry(
-                        ParseHexRequired(cols[1], "model_context_window_catalog.lookup_id"),
-                        ParseHexRequired(cols[2], "model_context_window_catalog.canonical_model_id"),
-                        ParseInt32Required(cols[3], "model_context_window_catalog.context_window"),
-                        ParseHexRequired(cols[4], "model_context_window_catalog.vendor"),
-                        new Uri(ParseHexRequired(cols[5], "model_context_window_catalog.documentation_url"), UriKind.RelativeOrAbsolute),
-                        ParseHexRequired(cols[6], "model_context_window_catalog.retrieved_at_utc"),
-                        ParseNullableHex(cols[7], cols[8], "model_context_window_source_revision.source_revision")));
-                    break;
-
-                default:
-                    throw new StoredDataException($"Unexpected tag '{cols[0]}' in model_context_window_catalog query.");
-            }
+            status = statusRows[0];
         }
+
+        string vendorSql =
+            "SELECT v.vendor, v.status, vr.last_refresh_at_utc, ve.last_error " +
+            "FROM model_context_window_catalog_vendor v " +
+            "LEFT JOIN model_context_window_catalog_vendor_refresh vr ON vr.vendor = v.vendor " +
+            "LEFT JOIN model_context_window_catalog_vendor_error ve ON ve.vendor = v.vendor " +
+            "ORDER BY v.rowid ASC;\n";
+        IReadOnlyList<StoredModelCatalogVendorStatus> vendors = QueryRows<StoredModelCatalogVendorStatus>(
+            vendorSql,
+            NewParameters(),
+            reader => new StoredModelCatalogVendorStatus(
+                reader.GetString(reader.GetOrdinal("vendor")),
+                reader.GetString(reader.GetOrdinal("status")),
+                reader.IsDBNull(reader.GetOrdinal("last_refresh_at_utc")) ? null : reader.GetString(reader.GetOrdinal("last_refresh_at_utc")),
+                reader.IsDBNull(reader.GetOrdinal("last_error")) ? null : reader.GetString(reader.GetOrdinal("last_error"))));
+
+        string entrySql =
+            "SELECT e.lookup_id, e.canonical_model_id, e.context_window, e.vendor, e.documentation_url, " +
+            "e.retrieved_at_utc, r.source_revision " +
+            "FROM model_context_window_catalog e " +
+            "LEFT JOIN model_context_window_source_revision r ON r.lookup_id = e.lookup_id " +
+            "ORDER BY e.rowid ASC;\n";
+        IReadOnlyList<StoredModelContextWindowEntry> entries = QueryRows<StoredModelContextWindowEntry>(
+            entrySql,
+            NewParameters(),
+            reader => new StoredModelContextWindowEntry(
+                reader.GetString(reader.GetOrdinal("lookup_id")),
+                reader.GetString(reader.GetOrdinal("canonical_model_id")),
+                reader.GetInt32(reader.GetOrdinal("context_window")),
+                reader.GetString(reader.GetOrdinal("vendor")),
+                new Uri(reader.GetString(reader.GetOrdinal("documentation_url")), UriKind.RelativeOrAbsolute),
+                reader.GetString(reader.GetOrdinal("retrieved_at_utc")),
+                reader.IsDBNull(reader.GetOrdinal("source_revision")) ? null : reader.GetString(reader.GetOrdinal("source_revision"))));
 
         return new StoredModelCatalogSnapshot(status, vendors, entries);
     }
@@ -735,20 +699,19 @@ public partial class SqliteRelationalStore : IOperationalStore
         ArgumentNullException.ThrowIfNull(snapshot.Vendors);
         ArgumentNullException.ThrowIfNull(snapshot.Entries);
 
-        string statusExpr = GuardedNonEmptyTextExpr("context_window_catalog_state", "status", snapshot.Status);
+        string statusValue = GuardedNonEmptyText("context_window_catalog_state", "status", snapshot.Status);
 
-        StringBuilder body = new();
-        body.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR REPLACE INTO context_window_catalog_state (singleton_id, status) VALUES (1, {statusExpr});\n");
-        body.Append("DELETE FROM model_context_window_catalog_vendor;\n");
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT OR REPLACE INTO context_window_catalog_state (singleton_id, status) VALUES (1, {batch.Add(statusValue)});\n");
+        batch.Append("DELETE FROM model_context_window_catalog_vendor;\n");
 
         HashSet<string> seenVendors = new(StringComparer.Ordinal);
         foreach (StoredModelCatalogVendorStatus vendor in snapshot.Vendors)
         {
             ArgumentNullException.ThrowIfNull(vendor);
-            string vendorExpr = GuardedNonEmptyTextExpr("model_context_window_catalog_vendor", "vendor", vendor.Vendor);
-            string vendorStatusExpr = GuardedNonEmptyTextExpr("model_context_window_catalog_vendor", "status", vendor.Status);
+            string vendorValue = GuardedNonEmptyText("model_context_window_catalog_vendor", "vendor", vendor.Vendor);
+            string vendorStatusValue = GuardedNonEmptyText("model_context_window_catalog_vendor", "status", vendor.Status);
             if (!seenVendors.Add(vendor.Vendor))
             {
                 throw new DashValidationException(
@@ -756,40 +719,39 @@ public partial class SqliteRelationalStore : IOperationalStore
                     $"Duplicate vendor '{vendor.Vendor}' in model_context_window_catalog_vendor.");
             }
 
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO model_context_window_catalog_vendor (vendor, status) VALUES ({vendorExpr}, {vendorStatusExpr});\n");
+            batch.Append(
+                $"INSERT INTO model_context_window_catalog_vendor (vendor, status) VALUES ({batch.Add(vendorValue)}, {batch.Add(vendorStatusValue)});\n");
             AppendOptionalNonEmptyTextChild(
-                body,
+                batch,
                 "model_context_window_catalog_vendor_refresh",
                 "vendor",
-                vendorExpr,
+                vendorValue,
                 "last_refresh_at_utc",
                 vendor.LastRefreshAtUtc);
             AppendOptionalNonEmptyTextChild(
-                body,
+                batch,
                 "model_context_window_catalog_vendor_error",
                 "vendor",
-                vendorExpr,
+                vendorValue,
                 "last_error",
                 vendor.LastError);
         }
 
-        body.Append("DELETE FROM model_context_window_catalog;\n");
+        batch.Append("DELETE FROM model_context_window_catalog;\n");
 
         HashSet<string> seenLookupIds = new(StringComparer.Ordinal);
         foreach (StoredModelContextWindowEntry entry in snapshot.Entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
-            string lookupIdExpr = GuardedNonEmptyTextExpr("model_context_window_catalog", "lookup_id", entry.LookupId);
-            string canonicalExpr = GuardedNonEmptyTextExpr("model_context_window_catalog", "canonical_model_id", entry.CanonicalModelId);
+            string lookupIdValue = GuardedNonEmptyText("model_context_window_catalog", "lookup_id", entry.LookupId);
+            string canonicalValue = GuardedNonEmptyText("model_context_window_catalog", "canonical_model_id", entry.CanonicalModelId);
             RequirePositiveInt(entry.ContextWindow, "model_context_window_catalog", "context_window");
-            string entryVendorExpr = GuardedNonEmptyTextExpr("model_context_window_catalog", "vendor", entry.Vendor);
-            string docUrlExpr = GuardedNonEmptyTextExpr(
+            string entryVendorValue = GuardedNonEmptyText("model_context_window_catalog", "vendor", entry.Vendor);
+            string docUrlValue = GuardedNonEmptyText(
                 "model_context_window_catalog",
                 "documentation_url",
                 entry.DocumentationUrl?.ToString());
-            string retrievedExpr = GuardedNonEmptyTextExpr("model_context_window_catalog", "retrieved_at_utc", entry.RetrievedAtUtc);
+            string retrievedValue = GuardedNonEmptyText("model_context_window_catalog", "retrieved_at_utc", entry.RetrievedAtUtc);
 
             if (!seenLookupIds.Add(entry.LookupId))
             {
@@ -798,20 +760,20 @@ public partial class SqliteRelationalStore : IOperationalStore
                     $"Duplicate lookup_id '{entry.LookupId}' in model_context_window_catalog.");
             }
 
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO model_context_window_catalog (lookup_id, canonical_model_id, context_window, vendor, documentation_url, retrieved_at_utc) " +
-                $"VALUES ({lookupIdExpr}, {canonicalExpr}, {IntSql(entry.ContextWindow)}, {entryVendorExpr}, {docUrlExpr}, {retrievedExpr});\n");
+            batch.Append(
+                "INSERT INTO model_context_window_catalog (lookup_id, canonical_model_id, context_window, vendor, documentation_url, retrieved_at_utc) " +
+                $"VALUES ({batch.Add(lookupIdValue)}, {batch.Add(canonicalValue)}, {batch.Add(entry.ContextWindow)}, " +
+                $"{batch.Add(entryVendorValue)}, {batch.Add(docUrlValue)}, {batch.Add(retrievedValue)});\n");
             AppendOptionalNonEmptyTextChild(
-                body,
+                batch,
                 "model_context_window_source_revision",
                 "lookup_id",
-                lookupIdExpr,
+                lookupIdValue,
                 "source_revision",
                 entry.SourceRevision);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
@@ -819,65 +781,63 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         ArgumentNullException.ThrowIfNull(points);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         foreach (StoredMetricPoint point in points)
         {
             ArgumentNullException.ThrowIfNull(point);
 
-            string pointKeyExpr = GuardedNonEmptyTextExpr("metric_point", "point_key", point.PointKey);
-            string nameExpr = GuardedNonEmptyTextExpr("metric_point", "name", point.Name);
-            string kindExpr = GuardedNonEmptyTextExpr("metric_point", "kind", point.Kind);
+            string pointKeyValue = GuardedNonEmptyText("metric_point", "point_key", point.PointKey);
+            string nameValue = GuardedNonEmptyText("metric_point", "name", point.Name);
+            string kindValue = GuardedNonEmptyText("metric_point", "kind", point.Kind);
 
-            string? unitExpr = point.Unit is null ? null : GuardedNonEmptyTextExpr("metric_point_unit", "unit", point.Unit);
-            string? timeExpr = point.TimeUnixNano is null ? null : GuardedNonEmptyTextExpr("metric_point_time", "time_unix_nano", point.TimeUnixNano);
-            string? startExpr = point.StartTimeUnixNano is null ? null : GuardedNonEmptyTextExpr("metric_point_start_time", "start_time_unix_nano", point.StartTimeUnixNano);
-            string? tsExpr = point.TimestampUtc is null ? null : GuardedNonEmptyTextExpr("metric_point_timestamp", "timestamp_utc", point.TimestampUtc);
-            string? valueSql = point.Value.HasValue ? RealSql("metric_point_value", "value", point.Value.Value) : null;
-            string? sumSql = point.PointSum.HasValue ? RealSql("metric_point_sum", "point_sum", point.PointSum.Value) : null;
-            string? sourceExpr = point.Source is null ? null : GuardedNonEmptyTextExpr("metric_point_source", "source", point.Source);
+            string? unitValue = point.Unit is null ? null : GuardedNonEmptyText("metric_point_unit", "unit", point.Unit);
+            string? timeValue = point.TimeUnixNano is null ? null : GuardedNonEmptyText("metric_point_time", "time_unix_nano", point.TimeUnixNano);
+            string? startValue = point.StartTimeUnixNano is null ? null : GuardedNonEmptyText("metric_point_start_time", "start_time_unix_nano", point.StartTimeUnixNano);
+            string? timestampValue = point.TimestampUtc is null ? null : GuardedNonEmptyText("metric_point_timestamp", "timestamp_utc", point.TimestampUtc);
+            double? value = point.Value.HasValue ? RequireFiniteReal("metric_point_value", "value", point.Value.Value) : null;
+            double? sum = point.PointSum.HasValue ? RequireFiniteReal("metric_point_sum", "point_sum", point.PointSum.Value) : null;
+            string? sourceValue = point.Source is null ? null : GuardedNonEmptyText("metric_point_source", "source", point.Source);
 
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO metric_point (point_key, name, kind) VALUES ({pointKeyExpr}, {nameExpr}, {kindExpr}) ");
-            body.Append("ON CONFLICT(point_key) DO UPDATE SET name = excluded.name, kind = excluded.kind;\n");
+            batch.Append(
+                $"INSERT INTO metric_point (point_key, name, kind) VALUES ({batch.Add(pointKeyValue)}, {batch.Add(nameValue)}, {batch.Add(kindValue)}) ");
+            batch.Append("ON CONFLICT(point_key) DO UPDATE SET name = excluded.name, kind = excluded.kind;\n");
 
             foreach (string childTable in MetricPointChildTables)
             {
-                body.Append(
-                    CultureInfo.InvariantCulture,
-                    $"DELETE FROM {childTable} WHERE point_id = (SELECT point_id FROM metric_point WHERE point_key = {pointKeyExpr});\n");
+                batch.Append(
+                    $"DELETE FROM {childTable} WHERE point_id = (SELECT point_id FROM metric_point WHERE point_key = {batch.Add(pointKeyValue)});\n");
             }
 
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_unit", "unit", unitExpr);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_unit", "unit", unitValue);
             if (point.AggregationTemporality.HasValue)
             {
                 AppendMetricPointOptionalChild(
-                    body,
-                    pointKeyExpr,
+                    batch,
+                    pointKeyValue,
                     "metric_point_temporality",
                     "aggregation_temporality",
-                    IntSql(point.AggregationTemporality.Value));
+                    point.AggregationTemporality.Value);
             }
 
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_time", "time_unix_nano", timeExpr);
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_start_time", "start_time_unix_nano", startExpr);
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_timestamp", "timestamp_utc", tsExpr);
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_value", "value", valueSql);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_time", "time_unix_nano", timeValue);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_start_time", "start_time_unix_nano", startValue);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_timestamp", "timestamp_utc", timestampValue);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_value", "value", value);
             if (point.PointCount.HasValue)
             {
                 AppendMetricPointOptionalChild(
-                    body,
-                    pointKeyExpr,
+                    batch,
+                    pointKeyValue,
                     "metric_point_count",
                     "point_count",
-                    LongSql(point.PointCount.Value));
+                    point.PointCount.Value);
             }
 
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_sum", "point_sum", sumSql);
-            AppendMetricPointOptionalChild(body, pointKeyExpr, "metric_point_source", "source", sourceExpr);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_sum", "point_sum", sum);
+            AppendMetricPointOptionalChild(batch, pointKeyValue, "metric_point_source", "source", sourceValue);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
@@ -888,18 +848,12 @@ public partial class SqliteRelationalStore : IOperationalStore
             ArgumentOutOfRangeException.ThrowIfNegative(limit.Value);
         }
 
-        StringBuilder sql = new(TabReadScriptHeader);
+        Dictionary<string, object?> parameters = NewParameters();
+        StringBuilder sql = new();
         sql.Append(
-            "SELECT hex(CAST(mp.point_key AS BLOB)), hex(CAST(mp.name AS BLOB)), hex(CAST(mp.kind AS BLOB)), " +
-            "typeof(mpu.unit), COALESCE(hex(CAST(mpu.unit AS BLOB)), ''), " +
-            "typeof(mpt.aggregation_temporality), COALESCE(CAST(mpt.aggregation_temporality AS TEXT), ''), " +
-            "typeof(mpti.time_unix_nano), COALESCE(hex(CAST(mpti.time_unix_nano AS BLOB)), ''), " +
-            "typeof(mpst.start_time_unix_nano), COALESCE(hex(CAST(mpst.start_time_unix_nano AS BLOB)), ''), " +
-            "typeof(mpts.timestamp_utc), COALESCE(hex(CAST(mpts.timestamp_utc AS BLOB)), ''), " +
-            "typeof(mpv.value), COALESCE(CAST(mpv.value AS TEXT), ''), " +
-            "typeof(mpc.point_count), COALESCE(CAST(mpc.point_count AS TEXT), ''), " +
-            "typeof(mpsu.point_sum), COALESCE(CAST(mpsu.point_sum AS TEXT), ''), " +
-            "typeof(mpso.source), COALESCE(hex(CAST(mpso.source AS BLOB)), '') " +
+            "SELECT mp.point_key, mp.name, mp.kind, mpu.unit, mpt.aggregation_temporality, " +
+            "mpti.time_unix_nano, mpst.start_time_unix_nano, mpts.timestamp_utc, mpv.value, " +
+            "mpc.point_count, mpsu.point_sum, mpso.source " +
             "FROM metric_point mp " +
             "LEFT JOIN metric_point_unit mpu ON mpu.point_id = mp.point_id " +
             "LEFT JOIN metric_point_temporality mpt ON mpt.point_id = mp.point_id " +
@@ -913,75 +867,66 @@ public partial class SqliteRelationalStore : IOperationalStore
 
         if (name is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE mp.name = {TextExpr(name)}");
+            sql.Append(" WHERE mp.name = ").Append(AddParameter(parameters, name));
         }
 
         sql.Append(" ORDER BY mp.point_id ASC");
-        AppendLimitOffset(sql, limit, offset: null);
+        AppendLimitOffset(sql, parameters, limit, offset: null);
         sql.Append(";\n");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<StoredMetricPoint> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 21, "metric_point");
-            long? temp = ParseNullableInt64(cols[5], cols[6], "metric_point_temporality.aggregation_temporality");
-            results.Add(new StoredMetricPoint(
-                ParseHexRequired(cols[0], "metric_point.point_key"),
-                ParseHexRequired(cols[1], "metric_point.name"),
-                ParseHexRequired(cols[2], "metric_point.kind"),
-                ParseNullableHex(cols[3], cols[4], "metric_point_unit.unit"),
-                temp.HasValue ? (int)temp.Value : null,
-                ParseNullableHex(cols[7], cols[8], "metric_point_time.time_unix_nano"),
-                ParseNullableHex(cols[9], cols[10], "metric_point_start_time.start_time_unix_nano"),
-                ParseNullableHex(cols[11], cols[12], "metric_point_timestamp.timestamp_utc"),
-                ParseNullableDouble(cols[13], cols[14], "metric_point_value.value"),
-                ParseNullableInt64(cols[15], cols[16], "metric_point_count.point_count"),
-                ParseNullableDouble(cols[17], cols[18], "metric_point_sum.point_sum"),
-                ParseNullableHex(cols[19], cols[20], "metric_point_source.source")));
-        }
-
-        return results;
+        return QueryRows<StoredMetricPoint>(
+            sql.ToString(),
+            parameters,
+            reader => new StoredMetricPoint(
+                reader.GetString(reader.GetOrdinal("point_key")),
+                reader.GetString(reader.GetOrdinal("name")),
+                reader.GetString(reader.GetOrdinal("kind")),
+                reader.IsDBNull(reader.GetOrdinal("unit")) ? null : reader.GetString(reader.GetOrdinal("unit")),
+                reader.IsDBNull(reader.GetOrdinal("aggregation_temporality")) ? null : reader.GetInt32(reader.GetOrdinal("aggregation_temporality")),
+                reader.IsDBNull(reader.GetOrdinal("time_unix_nano")) ? null : reader.GetString(reader.GetOrdinal("time_unix_nano")),
+                reader.IsDBNull(reader.GetOrdinal("start_time_unix_nano")) ? null : reader.GetString(reader.GetOrdinal("start_time_unix_nano")),
+                reader.IsDBNull(reader.GetOrdinal("timestamp_utc")) ? null : reader.GetString(reader.GetOrdinal("timestamp_utc")),
+                reader.IsDBNull(reader.GetOrdinal("value")) ? null : reader.GetDouble(reader.GetOrdinal("value")),
+                reader.IsDBNull(reader.GetOrdinal("point_count")) ? null : reader.GetInt64(reader.GetOrdinal("point_count")),
+                reader.IsDBNull(reader.GetOrdinal("point_sum")) ? null : reader.GetDouble(reader.GetOrdinal("point_sum")),
+                reader.IsDBNull(reader.GetOrdinal("source")) ? null : reader.GetString(reader.GetOrdinal("source"))));
     }
 
     /// <inheritdoc />
     public void RecordIngest(string source, int count, string timestampUtc)
     {
-        string sourceExpr = GuardedNonEmptyTextExpr("ingest_log", "source", source);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(timestampUtc);
+        string sourceValue = GuardedNonEmptyText("ingest_log", "source", source);
         RequireNonNegative(count, "ingest_log", "record_count");
-        string timestampExpr = GuardedNonEmptyTextExpr("ingest_log", "timestamp_utc", timestampUtc);
+        string timestampValue = GuardedNonEmptyText("ingest_log", "timestamp_utc", timestampUtc);
 
-        ExecuteTransaction(
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO ingest_log (source, record_count, timestamp_utc) VALUES ({sourceExpr}, {IntSql(count)}, {timestampExpr});\n"));
+        SqlBatch batch = new();
+        batch.Append(
+            $"INSERT INTO ingest_log (source, record_count, timestamp_utc) VALUES ({batch.Add(sourceValue)}, {batch.Add(count)}, {batch.Add(timestampValue)});\n");
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
     public IReadOnlyList<IngestLogEntry> ListIngestLog(string? source = null)
     {
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT ingest_id, hex(CAST(source AS BLOB)), record_count, hex(CAST(timestamp_utc AS BLOB)) FROM ingest_log");
+        Dictionary<string, object?> parameters = NewParameters();
+        StringBuilder sql = new("SELECT ingest_id, source, record_count, timestamp_utc FROM ingest_log");
         if (source is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE source = {TextExpr(source)}");
+            sql.Append(" WHERE source = ").Append(AddParameter(parameters, source));
         }
 
         sql.Append(" ORDER BY ingest_id ASC;\n");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<IngestLogEntry> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 4, "ingest_log");
-            results.Add(new IngestLogEntry(
-                ParseInt32Required(cols[0], "ingest_log.ingest_id"),
-                ParseHexRequired(cols[1], "ingest_log.source"),
-                ParseInt32Required(cols[2], "ingest_log.record_count"),
-                ParseHexRequired(cols[3], "ingest_log.timestamp_utc")));
-        }
-
-        return results;
+        return QueryRows<IngestLogEntry>(
+            sql.ToString(),
+            parameters,
+            reader => new IngestLogEntry(
+                reader.GetInt32(reader.GetOrdinal("ingest_id")),
+                reader.GetString(reader.GetOrdinal("source")),
+                reader.GetInt32(reader.GetOrdinal("record_count")),
+                reader.GetString(reader.GetOrdinal("timestamp_utc"))));
     }
 
     /// <inheritdoc />
@@ -989,42 +934,42 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         ArgumentNullException.ThrowIfNull(rows);
 
-        StringBuilder body = new();
+        SqlBatch batch = new();
         foreach (RecordProvenanceRow row in rows)
         {
             ArgumentNullException.ThrowIfNull(row);
 
-            string spanIdExpr = GuardedNonEmptyTextExpr("record_provenance", "span_id", row.SpanId);
-            string harnessExpr = GuardedNonEmptyTextExpr("record_provenance", "harness_id", row.HarnessId);
-            string sourceKeyExpr = GuardedNonEmptyTextExpr("record_provenance", "source_key", row.SourceKey);
-            string sourceRevExpr = GuardedTextExpr("record_provenance", "source_revision", row.SourceRevision);
-            string parserVerExpr = GuardedTextExpr("record_provenance", "parser_version", row.ParserVersion);
-            string importedExpr = GuardedNonEmptyTextExpr("record_provenance", "imported_at_utc", row.ImportedAtUtc);
-            string locationExpr = GuardedTextExpr("record_provenance", "location_token", row.LocationToken);
+            string spanIdValue = GuardedNonEmptyText("record_provenance", "span_id", row.SpanId);
+            string harnessValue = GuardedNonEmptyText("record_provenance", "harness_id", row.HarnessId);
+            string sourceKeyValue = GuardedNonEmptyText("record_provenance", "source_key", row.SourceKey);
+            string sourceRevValue = GuardedTextValue("record_provenance", "source_revision", row.SourceRevision);
+            string parserVerValue = GuardedTextValue("record_provenance", "parser_version", row.ParserVersion);
+            string importedValue = GuardedNonEmptyText("record_provenance", "imported_at_utc", row.ImportedAtUtc);
+            string locationValue = GuardedTextValue("record_provenance", "location_token", row.LocationToken);
 
-            body.Append(CultureInfo.InvariantCulture, $"DELETE FROM record_provenance WHERE span_id = {spanIdExpr};\n");
-            body.Append(
-                CultureInfo.InvariantCulture,
-                $"INSERT INTO record_provenance (span_id, harness_id, source_key, source_revision, parser_version, imported_at_utc, location_token) " +
-                $"VALUES ({spanIdExpr}, {harnessExpr}, {sourceKeyExpr}, {sourceRevExpr}, {parserVerExpr}, {importedExpr}, {locationExpr});\n");
+            batch.Append($"DELETE FROM record_provenance WHERE span_id = {batch.Add(spanIdValue)};\n");
+            batch.Append(
+                "INSERT INTO record_provenance (span_id, harness_id, source_key, source_revision, parser_version, imported_at_utc, location_token) " +
+                $"VALUES ({batch.Add(spanIdValue)}, {batch.Add(harnessValue)}, {batch.Add(sourceKeyValue)}, " +
+                $"{batch.Add(sourceRevValue)}, {batch.Add(parserVerValue)}, {batch.Add(importedValue)}, {batch.Add(locationValue)});\n");
 
             AppendOptionalNonEmptyTextChild(
-                body,
+                batch,
                 "record_provenance_native_session",
                 "span_id",
-                spanIdExpr,
+                spanIdValue,
                 "native_session_id",
                 row.NativeSessionId);
             AppendOptionalNonEmptyTextChild(
-                body,
+                batch,
                 "record_provenance_native_record",
                 "span_id",
-                spanIdExpr,
+                spanIdValue,
                 "native_record_id",
                 row.NativeRecordId);
         }
 
-        ExecuteTransaction(body.ToString());
+        ExecuteTransaction(batch.ToStatements());
     }
 
     /// <inheritdoc />
@@ -1033,36 +978,29 @@ public partial class SqliteRelationalStore : IOperationalStore
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceKey);
 
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rp.span_id AS BLOB)), hex(CAST(rp.harness_id AS BLOB)), hex(CAST(rp.source_key AS BLOB)), " +
-                     "typeof(rpns.native_session_id), COALESCE(hex(CAST(rpns.native_session_id AS BLOB)), ''), " +
-                     "typeof(rpnr.native_record_id), COALESCE(hex(CAST(rpnr.native_record_id AS BLOB)), ''), " +
-                     "hex(CAST(rp.source_revision AS BLOB)), hex(CAST(rp.parser_version AS BLOB)), " +
-                     "hex(CAST(rp.imported_at_utc AS BLOB)), hex(CAST(rp.location_token AS BLOB)) " +
-                     "FROM record_provenance rp " +
-                     "LEFT JOIN record_provenance_native_session rpns ON rpns.span_id = rp.span_id " +
-                     "LEFT JOIN record_provenance_native_record rpnr ON rpnr.span_id = rp.span_id " +
-                     $"WHERE rp.harness_id = {TextExpr(harnessId)} AND rp.source_key = {TextExpr(sourceKey)} " +
-                     "ORDER BY rp.rowid ASC;\n";
+        Dictionary<string, object?> parameters = NewParameters();
+        string sql =
+            "SELECT rp.span_id, rp.harness_id, rp.source_key, rpns.native_session_id, rpnr.native_record_id, " +
+            "rp.source_revision, rp.parser_version, rp.imported_at_utc, rp.location_token " +
+            "FROM record_provenance rp " +
+            "LEFT JOIN record_provenance_native_session rpns ON rpns.span_id = rp.span_id " +
+            "LEFT JOIN record_provenance_native_record rpnr ON rpnr.span_id = rp.span_id " +
+            $"WHERE rp.harness_id = {AddParameter(parameters, harnessId)} AND rp.source_key = {AddParameter(parameters, sourceKey)} " +
+            "ORDER BY rp.rowid ASC;\n";
 
-        string output = ExecuteSqlite(sql);
-        List<RecordProvenanceRow> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 11, "record_provenance");
-            results.Add(new RecordProvenanceRow(
-                ParseHexRequired(cols[0], "record_provenance.span_id"),
-                ParseHexRequired(cols[1], "record_provenance.harness_id"),
-                ParseHexRequired(cols[2], "record_provenance.source_key"),
-                ParseNullableHex(cols[3], cols[4], "record_provenance_native_session.native_session_id"),
-                ParseNullableHex(cols[5], cols[6], "record_provenance_native_record.native_record_id"),
-                ParseHexAllowEmpty(cols[7], "record_provenance.source_revision"),
-                ParseHexAllowEmpty(cols[8], "record_provenance.parser_version"),
-                ParseHexRequired(cols[9], "record_provenance.imported_at_utc"),
-                ParseHexAllowEmpty(cols[10], "record_provenance.location_token")));
-        }
-
-        return results;
+        return QueryRows<RecordProvenanceRow>(
+            sql,
+            parameters,
+            reader => new RecordProvenanceRow(
+                reader.GetString(reader.GetOrdinal("span_id")),
+                reader.GetString(reader.GetOrdinal("harness_id")),
+                reader.GetString(reader.GetOrdinal("source_key")),
+                reader.IsDBNull(reader.GetOrdinal("native_session_id")) ? null : reader.GetString(reader.GetOrdinal("native_session_id")),
+                reader.IsDBNull(reader.GetOrdinal("native_record_id")) ? null : reader.GetString(reader.GetOrdinal("native_record_id")),
+                reader.GetString(reader.GetOrdinal("source_revision")),
+                reader.GetString(reader.GetOrdinal("parser_version")),
+                reader.GetString(reader.GetOrdinal("imported_at_utc")),
+                reader.GetString(reader.GetOrdinal("location_token"))));
     }
 
     /// <summary>
@@ -1071,8 +1009,8 @@ public partial class SqliteRelationalStore : IOperationalStore
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>VACUUM</c> refuses to run inside a transaction, so the statements go through
-    /// <c>ExecuteSqlite</c> rather than through the transactional write helper.
+    /// <c>VACUUM</c> refuses to run inside a transaction, so each statement runs through the
+    /// plain query helper rather than through the transactional write helper.
     /// </para>
     /// <para>
     /// The checkpoint after <c>VACUUM</c> is not redundant. In WAL mode the rebuilt pages are
@@ -1087,115 +1025,109 @@ public partial class SqliteRelationalStore : IOperationalStore
 
         lock (writeGate)
         {
-            ExecuteSqlite("PRAGMA wal_checkpoint(TRUNCATE);\nVACUUM;\nPRAGMA wal_checkpoint(TRUNCATE);\n");
+            QueryRows<long>(
+                "PRAGMA wal_checkpoint(TRUNCATE);\n",
+                NewParameters(),
+                reader => reader.GetInt64(reader.GetOrdinal("checkpointed")));
+            QueryRows<long>("VACUUM;\n", NewParameters(), _ => 0L);
+            QueryRows<long>(
+                "PRAGMA wal_checkpoint(TRUNCATE);\n",
+                NewParameters(),
+                reader => reader.GetInt64(reader.GetOrdinal("checkpointed")));
         }
     }
 
-    private string? ReadSingletonHexString(string tableName, string columnName)
+    private static string CellText(SqliteDataReader reader, string columnName) =>
+        Convert.ToString(reader.GetValue(reader.GetOrdinal(columnName)), CultureInfo.InvariantCulture)
+        ?? string.Empty;
+
+    private string? ReadSingletonText(string tableName, string columnName)
     {
-        string sql = TabReadScriptHeader +
-                     $"SELECT hex(CAST({columnName} AS BLOB)) FROM {tableName} WHERE singleton_id = 1 LIMIT 1;\n";
+        string sql = $"SELECT {columnName} FROM {tableName} WHERE singleton_id = 1 LIMIT 1;\n";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 1, tableName);
-            return ParseHexRequired(cols[0], $"{tableName}.{columnName}");
-        }
-
-        return null;
+        IReadOnlyList<string> rows = QueryRows<string>(
+            sql,
+            NewParameters(),
+            reader => reader.GetString(reader.GetOrdinal(columnName)));
+        return rows.Count == 0 ? null : rows[0];
     }
 
-    private IReadOnlyList<RefreshRunRow> QueryRefreshRuns(string? filterPredicate, string orderAndLimit)
-    {
-        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rr.refresh_run_id AS BLOB)), hex(CAST(rr.started_at_utc AS BLOB)), " +
-                     "typeof(rrc.completed_at_utc), COALESCE(hex(CAST(rrc.completed_at_utc AS BLOB)), ''), " +
-                     "hex(CAST(rr.status AS BLOB)), rr.pid, hex(CAST(rr.trigger AS BLOB)), " +
-                     "typeof(rrs.summary), COALESCE(hex(CAST(rrs.summary AS BLOB)), ''), " +
-                     "typeof(rrhw.history_weeks), COALESCE(CAST(rrhw.history_weeks AS TEXT), '') " +
-                     "FROM refresh_run rr " +
-                     "LEFT JOIN refresh_run_completion rrc ON rrc.refresh_run_id = rr.refresh_run_id " +
-                     "LEFT JOIN refresh_run_summary rrs ON rrs.refresh_run_id = rr.refresh_run_id " +
-                     $"LEFT JOIN refresh_run_history_window rrhw ON rrhw.refresh_run_id = rr.refresh_run_id{whereClause} {orderAndLimit};\n";
-
-        string output = ExecuteSqlite(sql);
-        List<RefreshRunRow> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 11, "refresh_run");
-            long? historyWeeks = ParseNullableInt64(cols[9], cols[10], "refresh_run_history_window.history_weeks");
-            results.Add(new RefreshRunRow(
-                ParseHexRequired(cols[0], "refresh_run.refresh_run_id"),
-                ParseHexRequired(cols[1], "refresh_run.started_at_utc"),
-                ParseNullableHex(cols[2], cols[3], "refresh_run_completion.completed_at_utc"),
-                ParseHexRequired(cols[4], "refresh_run.status"),
-                ParseInt32Required(cols[5], "refresh_run.pid"),
-                ParseHexRequired(cols[6], "refresh_run.trigger"),
-                ParseNullableHex(cols[7], cols[8], "refresh_run_summary.summary"),
-                historyWeeks.HasValue ? (int)historyWeeks.Value : null));
-        }
-
-        return results;
-    }
-
-    private IReadOnlyList<SourceCheckpoint> QuerySourceCheckpoints(string? filterPredicate)
+    private IReadOnlyList<RefreshRunRow> QueryRefreshRuns(
+        string? filterPredicate,
+        IReadOnlyDictionary<string, object?> parameters,
+        string orderAndLimit)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(sc.harness_id AS BLOB)), hex(CAST(sc.source_key AS BLOB)), hex(CAST(sc.provider_id AS BLOB)), " +
-                     "hex(CAST(sc.parser_id AS BLOB)), hex(CAST(sc.parser_contract_version AS BLOB)), hex(CAST(sc.format AS BLOB)), " +
-                     "hex(CAST(sc.source_root_label AS BLOB)), hex(CAST(sc.revision_token AS BLOB)), " +
-                     "hex(CAST(sc.covered_from_utc AS BLOB)), hex(CAST(sc.covered_through_utc AS BLOB)), hex(CAST(sc.last_attempt_utc AS BLOB)), " +
-                     "typeof(scs.last_success_utc), COALESCE(hex(CAST(scs.last_success_utc AS BLOB)), ''), " +
-                     "hex(CAST(sc.last_status AS BLOB)), " +
-                     "typeof(sce.last_error_code), COALESCE(hex(CAST(sce.last_error_code AS BLOB)), ''), " +
-                     "sc.unit_count, sc.record_count " +
-                     "FROM source_checkpoint sc " +
-                     "LEFT JOIN source_checkpoint_success scs ON scs.harness_id = sc.harness_id AND scs.source_key = sc.source_key " +
-                     $"LEFT JOIN source_checkpoint_error sce ON sce.harness_id = sc.harness_id AND sce.source_key = sc.source_key{whereClause} " +
-                     "ORDER BY sc.rowid ASC;\n";
+        string sql =
+            "SELECT rr.refresh_run_id, rr.started_at_utc, rrc.completed_at_utc, rr.status, rr.pid, rr.trigger, " +
+            "rrs.summary, rrhw.history_weeks " +
+            "FROM refresh_run rr " +
+            "LEFT JOIN refresh_run_completion rrc ON rrc.refresh_run_id = rr.refresh_run_id " +
+            "LEFT JOIN refresh_run_summary rrs ON rrs.refresh_run_id = rr.refresh_run_id " +
+            $"LEFT JOIN refresh_run_history_window rrhw ON rrhw.refresh_run_id = rr.refresh_run_id{whereClause} {orderAndLimit};\n";
 
-        string output = ExecuteSqlite(sql);
-        List<SourceCheckpoint> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 18, "source_checkpoint");
-            results.Add(new SourceCheckpoint(
-                ParseHexRequired(cols[0], "source_checkpoint.harness_id"),
-                ParseHexRequired(cols[1], "source_checkpoint.source_key"),
-                ParseHexRequired(cols[2], "source_checkpoint.provider_id"),
-                ParseHexRequired(cols[3], "source_checkpoint.parser_id"),
-                ParseHexRequired(cols[4], "source_checkpoint.parser_contract_version"),
-                ParseHexRequired(cols[5], "source_checkpoint.format"),
-                ParseHexAllowEmpty(cols[6], "source_checkpoint.source_root_label"),
-                ParseHexAllowEmpty(cols[7], "source_checkpoint.revision_token"),
-                ParseHexRequired(cols[8], "source_checkpoint.covered_from_utc"),
-                ParseHexRequired(cols[9], "source_checkpoint.covered_through_utc"),
-                ParseHexRequired(cols[10], "source_checkpoint.last_attempt_utc"),
-                ParseNullableHex(cols[11], cols[12], "source_checkpoint_success.last_success_utc"),
-                ParseHexRequired(cols[13], "source_checkpoint.last_status"),
-                ParseNullableHex(cols[14], cols[15], "source_checkpoint_error.last_error_code"),
-                ParseInt32Required(cols[16], "source_checkpoint.unit_count"),
-                ParseInt32Required(cols[17], "source_checkpoint.record_count")));
-        }
-
-        return results;
+        return QueryRows<RefreshRunRow>(
+            sql,
+            parameters,
+            reader => new RefreshRunRow(
+                reader.GetString(reader.GetOrdinal("refresh_run_id")),
+                reader.GetString(reader.GetOrdinal("started_at_utc")),
+                reader.IsDBNull(reader.GetOrdinal("completed_at_utc")) ? null : reader.GetString(reader.GetOrdinal("completed_at_utc")),
+                reader.GetString(reader.GetOrdinal("status")),
+                reader.GetInt32(reader.GetOrdinal("pid")),
+                reader.GetString(reader.GetOrdinal("trigger")),
+                reader.IsDBNull(reader.GetOrdinal("summary")) ? null : reader.GetString(reader.GetOrdinal("summary")),
+                reader.IsDBNull(reader.GetOrdinal("history_weeks")) ? null : reader.GetInt32(reader.GetOrdinal("history_weeks"))));
     }
 
-    private IReadOnlyList<StoredIngestProblem> QueryIngestProblems(string? filterPredicate, int? limit, int? offset)
+    private IReadOnlyList<SourceCheckpoint> QuerySourceCheckpoints(
+        string? filterPredicate,
+        IReadOnlyDictionary<string, object?> parameters)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        StringBuilder sql = new(TabReadScriptHeader);
+        string sql =
+            "SELECT sc.harness_id, sc.source_key, sc.provider_id, sc.parser_id, sc.parser_contract_version, " +
+            "sc.format, sc.source_root_label, sc.revision_token, sc.covered_from_utc, sc.covered_through_utc, " +
+            "sc.last_attempt_utc, scs.last_success_utc, sc.last_status, sce.last_error_code, " +
+            "sc.unit_count, sc.record_count " +
+            "FROM source_checkpoint sc " +
+            "LEFT JOIN source_checkpoint_success scs ON scs.harness_id = sc.harness_id AND scs.source_key = sc.source_key " +
+            $"LEFT JOIN source_checkpoint_error sce ON sce.harness_id = sc.harness_id AND sce.source_key = sc.source_key{whereClause} " +
+            "ORDER BY sc.rowid ASC;\n";
+
+        return QueryRows<SourceCheckpoint>(
+            sql,
+            parameters,
+            reader => new SourceCheckpoint(
+                reader.GetString(reader.GetOrdinal("harness_id")),
+                reader.GetString(reader.GetOrdinal("source_key")),
+                reader.GetString(reader.GetOrdinal("provider_id")),
+                reader.GetString(reader.GetOrdinal("parser_id")),
+                reader.GetString(reader.GetOrdinal("parser_contract_version")),
+                reader.GetString(reader.GetOrdinal("format")),
+                reader.GetString(reader.GetOrdinal("source_root_label")),
+                reader.GetString(reader.GetOrdinal("revision_token")),
+                reader.GetString(reader.GetOrdinal("covered_from_utc")),
+                reader.GetString(reader.GetOrdinal("covered_through_utc")),
+                reader.GetString(reader.GetOrdinal("last_attempt_utc")),
+                reader.IsDBNull(reader.GetOrdinal("last_success_utc")) ? null : reader.GetString(reader.GetOrdinal("last_success_utc")),
+                reader.GetString(reader.GetOrdinal("last_status")),
+                reader.IsDBNull(reader.GetOrdinal("last_error_code")) ? null : reader.GetString(reader.GetOrdinal("last_error_code")),
+                reader.GetInt32(reader.GetOrdinal("unit_count")),
+                reader.GetInt32(reader.GetOrdinal("record_count"))));
+    }
+
+    private IReadOnlyList<StoredIngestProblem> QueryIngestProblems(
+        string? filterPredicate,
+        Dictionary<string, object?> parameters,
+        int? limit,
+        int? offset)
+    {
+        string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
+        StringBuilder sql = new();
         sql.Append(
-            "SELECT ip.problem_id, hex(CAST(ip.problem_key AS BLOB)), hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), " +
-            "typeof(ips.span_id), COALESCE(hex(CAST(ips.span_id AS BLOB)), ''), " +
-            "typeof(ipl.location), COALESCE(hex(CAST(ipl.location AS BLOB)), ''), " +
-            "typeof(ipse.session_id), COALESCE(hex(CAST(ipse.session_id AS BLOB)), ''), " +
-            "typeof(iph.harness_id), COALESCE(hex(CAST(iph.harness_id AS BLOB)), ''), " +
-            "typeof(ipt.timestamp_utc), COALESCE(hex(CAST(ipt.timestamp_utc AS BLOB)), ''), " +
-            "typeof(ipst.stack), COALESCE(hex(CAST(ipst.stack AS BLOB)), '') " +
+            "SELECT ip.problem_id, ip.problem_key, ip.severity, ip.code, ip.message, " +
+            "ips.span_id, ipl.location, ipse.session_id, iph.harness_id, ipt.timestamp_utc, ipst.stack " +
             "FROM ingest_problem ip " +
             "LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id " +
             "LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id " +
@@ -1204,39 +1136,40 @@ public partial class SqliteRelationalStore : IOperationalStore
             "LEFT JOIN ingest_problem_timestamp ipt ON ipt.problem_id = ip.problem_id " +
             $"LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id{whereClause} " +
             "ORDER BY ip.problem_id ASC");
-        AppendLimitOffset(sql, limit, offset);
+        AppendLimitOffset(sql, parameters, limit, offset);
         sql.Append(";\n");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<StoredIngestProblem> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 17, "ingest_problem");
-            long problemId = ParseInt64Required(cols[0], "ingest_problem.problem_id");
-            CollectedProblem problem = new(
-                ParseHexRequired(cols[1], "ingest_problem.problem_key"),
-                ParseHexRequired(cols[2], "ingest_problem.severity"),
-                ParseHexRequired(cols[3], "ingest_problem.code"),
-                ParseHexRequired(cols[4], "ingest_problem.message"),
-                ParseNullableHex(cols[5], cols[6], "ingest_problem_span.span_id"),
-                ParseNullableHex(cols[7], cols[8], "ingest_problem_location.location"),
-                ParseNullableHex(cols[9], cols[10], "ingest_problem_session.session_id"),
-                ParseNullableHex(cols[11], cols[12], "ingest_problem_harness.harness_id"),
-                ParseNullableHex(cols[13], cols[14], "ingest_problem_timestamp.timestamp_utc"),
-                ParseNullableHex(cols[15], cols[16], "ingest_problem_stack.stack"));
-            results.Add(new StoredIngestProblem(problemId, problem));
-        }
-
-        return results;
+        return QueryRows<StoredIngestProblem>(
+            sql.ToString(),
+            parameters,
+            reader =>
+            {
+                CollectedProblem problem = new(
+                    reader.GetString(reader.GetOrdinal("problem_key")),
+                    reader.GetString(reader.GetOrdinal("severity")),
+                    reader.GetString(reader.GetOrdinal("code")),
+                    reader.GetString(reader.GetOrdinal("message")),
+                    reader.IsDBNull(reader.GetOrdinal("span_id")) ? null : reader.GetString(reader.GetOrdinal("span_id")),
+                    reader.IsDBNull(reader.GetOrdinal("location")) ? null : reader.GetString(reader.GetOrdinal("location")),
+                    reader.IsDBNull(reader.GetOrdinal("session_id")) ? null : reader.GetString(reader.GetOrdinal("session_id")),
+                    reader.IsDBNull(reader.GetOrdinal("harness_id")) ? null : reader.GetString(reader.GetOrdinal("harness_id")),
+                    reader.IsDBNull(reader.GetOrdinal("timestamp_utc")) ? null : reader.GetString(reader.GetOrdinal("timestamp_utc")),
+                    reader.IsDBNull(reader.GetOrdinal("stack")) ? null : reader.GetString(reader.GetOrdinal("stack")));
+                return new StoredIngestProblem(reader.GetInt64(reader.GetOrdinal("problem_id")), problem);
+            });
     }
 
-    private IReadOnlyList<StoredQuarantinedSpan> QueryQuarantinedSpans(string? filterPredicate, int? limit, int? offset)
+    private IReadOnlyList<StoredQuarantinedSpan> QueryQuarantinedSpans(
+        string? filterPredicate,
+        Dictionary<string, object?> parameters,
+        int? limit,
+        int? offset)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        StringBuilder sql = new(TabReadScriptHeader);
+        StringBuilder sql = new();
         sql.Append(
             "WITH selected AS (" +
-            "SELECT qs.rowid AS sort_ord, qs.span_id AS span_id, qs.reason AS reason, " +
+            "SELECT qs.rowid AS sort_ord, qs.span_id AS span_id, qs.reason AS text, " +
             "qsrc.source AS source, qn.name AS name, qts.timestamp_utc AS timestamp_utc, qh.harness_id AS harness_id " +
             "FROM quarantined_span qs " +
             "LEFT JOIN quarantined_span_source qsrc ON qsrc.span_id = qs.span_id " +
@@ -1244,90 +1177,70 @@ public partial class SqliteRelationalStore : IOperationalStore
             "LEFT JOIN quarantined_span_timestamp qts ON qts.span_id = qs.span_id " +
             $"LEFT JOIN quarantined_span_harness qh ON qh.span_id = qs.span_id{whereClause} " +
             "ORDER BY qs.rowid ASC");
-        AppendLimitOffset(sql, limit, offset);
+        AppendLimitOffset(sql, parameters, limit, offset);
         sql.Append(
             ") " +
-            "SELECT 'QSP', sort_ord, hex(CAST(span_id AS BLOB)), hex(CAST(reason AS BLOB)), " +
-            "typeof(source), COALESCE(hex(CAST(source AS BLOB)), ''), " +
-            "typeof(name), COALESCE(hex(CAST(name AS BLOB)), ''), " +
-            "typeof(timestamp_utc), COALESCE(hex(CAST(timestamp_utc AS BLOB)), ''), " +
-            "typeof(harness_id), COALESCE(hex(CAST(harness_id AS BLOB)), '') " +
+            "SELECT 'QSP' AS tag, sort_ord, span_id, text, source, name, timestamp_utc, harness_id " +
             "FROM selected " +
             "UNION ALL " +
-            "SELECT 'QNS', qns.rowid, hex(CAST(qns.span_id AS BLOB)), hex(CAST(qns.namespace_name AS BLOB)), " +
-            "'', '', '', '', '', '', '', '' " +
+            "SELECT 'QNS', qns.rowid, qns.span_id, qns.namespace_name, '', '', '', '' " +
             "FROM quarantined_span_namespace qns " +
             "JOIN selected s ON s.span_id = qns.span_id " +
             "ORDER BY 1 DESC, 2 ASC;\n");
 
-        string output = ExecuteSqlite(sql.ToString());
+        IReadOnlyList<QuarantinedSpanRow> rows = QueryRows<QuarantinedSpanRow>(
+            sql.ToString(),
+            parameters,
+            reader =>
+            {
+                string tag = reader.GetString(reader.GetOrdinal("tag"));
+                return tag switch
+                {
+                    "QSP" => new QuarantinedSpanRow(
+                        tag,
+                        reader.GetString(reader.GetOrdinal("span_id")),
+                        reader.GetString(reader.GetOrdinal("text")),
+                        reader.IsDBNull(reader.GetOrdinal("source")) ? null : reader.GetString(reader.GetOrdinal("source")),
+                        reader.IsDBNull(reader.GetOrdinal("name")) ? null : reader.GetString(reader.GetOrdinal("name")),
+                        reader.IsDBNull(reader.GetOrdinal("timestamp_utc")) ? null : reader.GetString(reader.GetOrdinal("timestamp_utc")),
+                        reader.IsDBNull(reader.GetOrdinal("harness_id")) ? null : reader.GetString(reader.GetOrdinal("harness_id"))),
+                    "QNS" => new QuarantinedSpanRow(
+                        tag,
+                        reader.GetString(reader.GetOrdinal("span_id")),
+                        reader.GetString(reader.GetOrdinal("text")),
+                        null,
+                        null,
+                        null,
+                        null),
+                    _ => throw new StoredDataException($"Unexpected tag '{tag}' in quarantined_span query."),
+                };
+            });
+
         List<StoredQuarantinedSpan> results = [];
         Dictionary<string, List<string>> namespacesBySpan = new(StringComparer.Ordinal);
 
-        foreach (string line in TabLines(output))
+        foreach (QuarantinedSpanRow row in rows)
         {
-            string[] cols = SplitTabLine(line, 12, "quarantined_span");
-            switch (cols[0])
+            if (string.Equals(row.Tag, "QSP", StringComparison.Ordinal))
             {
-                case "QSP":
-                    string spanId = ParseHexRequired(cols[2], "quarantined_span.span_id");
-                    List<string> nsList = [];
-                    namespacesBySpan[spanId] = nsList;
-                    results.Add(new StoredQuarantinedSpan(
-                        spanId,
-                        ParseHexRequired(cols[3], "quarantined_span.reason"),
-                        nsList,
-                        ParseNullableHex(cols[4], cols[5], "quarantined_span_source.source"),
-                        ParseNullableHex(cols[6], cols[7], "quarantined_span_name.name"),
-                        ParseNullableHex(cols[8], cols[9], "quarantined_span_timestamp.timestamp_utc"),
-                        ParseNullableHex(cols[10], cols[11], "quarantined_span_harness.harness_id")));
-                    break;
-
-                case "QNS":
-                    string childSpanId = ParseHexRequired(cols[2], "quarantined_span_namespace.span_id");
-                    string ns = ParseHexRequired(cols[3], "quarantined_span_namespace.namespace_name");
-                    if (namespacesBySpan.TryGetValue(childSpanId, out List<string>? list))
-                    {
-                        list.Add(ns);
-                    }
-
-                    break;
-
-                default:
-                    throw new StoredDataException($"Unexpected tag '{cols[0]}' in quarantined_span query.");
+                List<string> nsList = [];
+                namespacesBySpan[row.SpanId] = nsList;
+                results.Add(new StoredQuarantinedSpan(
+                    row.SpanId,
+                    row.Text,
+                    nsList,
+                    row.Source,
+                    row.Name,
+                    row.TimestampUtc,
+                    row.HarnessId));
+            }
+            else if (namespacesBySpan.TryGetValue(row.SpanId, out List<string>? list))
+            {
+                list.Add(row.Text);
             }
         }
 
         return results;
-    }
-
-    private static string ParseHexAllowEmpty(string hexCell, string columnName) =>
-        hexCell.Length == 0 || string.Equals(hexCell, "\"\"", StringComparison.Ordinal)
-            ? string.Empty
-            : ParseHexRequired(hexCell, columnName);
-
-    private static string[] SplitSingleRow(string output, int expectedColumns, string context)
-    {
-        List<string> lines = [.. TabLines(output)];
-        if (lines.Count != 1)
-        {
-            throw new StoredDataException($"Expected single scalar row from {context} query, got {lines.Count}.");
-        }
-
-        return SplitTabLine(lines[0], expectedColumns, context);
-    }
-
-    private static string GuardedNonEmptyTextExpr(string tableName, string columnName, string? value)
-    {
-        string expr = GuardedTextExpr(tableName, columnName, value);
-        if (value!.Length == 0)
-        {
-            throw new DashValidationException(
-                ConstraintViolatedCode,
-                $"Non-empty TEXT column '{tableName}.{columnName}' cannot be empty.");
-        }
-
-        return expr;
     }
 
     private static void RequirePositiveInt(int value, string tableName, string columnName)
@@ -1361,53 +1274,68 @@ public partial class SqliteRelationalStore : IOperationalStore
         }
     }
 
-    private static void AppendOptionalNonEmptyTextChild(
-        StringBuilder sql,
+    private static void AppendMetricPointOptionalChild(
+        SqlBatch batch,
+        string pointKeyValue,
         string tableName,
-        string keyColumn,
-        string keyExpr,
-        string valueColumn,
-        string? value)
+        string columnName,
+        object? value)
     {
         if (value is null)
         {
             return;
         }
 
-        string valueExpr = GuardedNonEmptyTextExpr(tableName, valueColumn, value);
-        sql.Append(CultureInfo.InvariantCulture, $"INSERT INTO {tableName} ({keyColumn}, {valueColumn}) VALUES ({keyExpr}, {valueExpr});\n");
+        string keyParam = batch.Add(pointKeyValue);
+        string valueParam = batch.Add(value);
+        batch.Append(
+            $"INSERT INTO {tableName} (point_id, {columnName}) SELECT point_id, {valueParam} FROM metric_point WHERE point_key = {keyParam};\n");
     }
 
-    private static void AppendMetricPointOptionalChild(
+    private static void AppendLimitOffset(
         StringBuilder sql,
-        string pointKeyExpr,
-        string tableName,
-        string columnName,
-        string? valueSql)
-    {
-        if (valueSql is null)
-        {
-            return;
-        }
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT INTO {tableName} (point_id, {columnName}) SELECT point_id, {valueSql} FROM metric_point WHERE point_key = {pointKeyExpr};\n");
-    }
-
-    private static void AppendLimitOffset(StringBuilder sql, int? limit, int? offset)
+        Dictionary<string, object?> parameters,
+        int? limit,
+        int? offset)
     {
         if (limit.HasValue && offset.HasValue)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" LIMIT {IntSql(limit.Value)} OFFSET {IntSql(offset.Value)}");
+            sql.Append(" LIMIT ")
+                .Append(AddParameter(parameters, limit.Value))
+                .Append(" OFFSET ")
+                .Append(AddParameter(parameters, offset.Value));
         }
         else if (limit.HasValue)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" LIMIT {IntSql(limit.Value)}");
+            sql.Append(" LIMIT ").Append(AddParameter(parameters, limit.Value));
         }
         else if (offset.HasValue && offset.Value > 0)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" LIMIT -1 OFFSET {IntSql(offset.Value)}");
+            sql.Append(" LIMIT -1 OFFSET ").Append(AddParameter(parameters, offset.Value));
         }
     }
+
+    private static Dictionary<string, object?> NewParameters() => new(StringComparer.Ordinal);
+
+    /// <summary>Validates a guarded TEXT value on the write path and returns it to bind.</summary>
+    private static string GuardedTextValue(string tableName, string columnName, string? value) =>
+        GuardedText(tableName, columnName, value);
+
+    private static string AddParameter(Dictionary<string, object?> parameters, object? value)
+    {
+        string name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
+        parameters.Add(name, value);
+        return name;
+    }
+
+    private sealed record DirtyProjectionRow(string Tag, long FromSeq, long ToSeq, string SessionId);
+
+    private sealed record QuarantinedSpanRow(
+        string Tag,
+        string SpanId,
+        string Text,
+        string? Source,
+        string? Name,
+        string? TimestampUtc,
+        string? HarnessId);
 }

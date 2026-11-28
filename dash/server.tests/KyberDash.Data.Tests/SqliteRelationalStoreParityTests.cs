@@ -14,7 +14,7 @@ namespace KyberDash.Data.Tests;
 /// source-delete cascade the clean path relies on. Scripted <c>ExecuteSqliteCore</c> coverage lives
 /// in <c>SqliteRelationalStoreWriteTests</c> and <c>SchemaVersionTests</c>.
 /// </summary>
-public class SqliteRelationalStoreParityTests : IDisposable
+public sealed class SqliteRelationalStoreParityTests : IDisposable
 {
     private readonly TempDirectory directory = new();
 

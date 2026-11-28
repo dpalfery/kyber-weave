@@ -15,7 +15,7 @@ namespace KyberWeave.Tests;
 /// second. Every case is a source fixture on disk plus a synthetic node set — no CodeGraph
 /// index and no sqlite3.
 /// </summary>
-public class ReviewDuplicatesTests : IDisposable
+public sealed class ReviewDuplicatesTests : IDisposable
 {
     private readonly InMemoryReviewServices _services = new();
 

@@ -8,35 +8,18 @@ using KyberDash.Core.Exceptions;
 using KyberDash.Data.Collector;
 using KyberDash.Domain;
 using KyberDash.Domain.Schema;
+using Microsoft.Data.Sqlite;
 
 namespace KyberDash.Data.Repositories;
 
 public partial class SqliteRelationalStore : IRelationalStoreReader
 {
-    private const string TabReadScriptHeader = ".headers off\n.mode tabs\n";
-
-    /// <summary>
-    /// The record's stored source (kind, harness, locator) as the last three columns of a record
-    /// row; <see cref="ParseRecordSourceName"/> turns them into <see cref="CollectedRecord.SourceName"/>.
-    /// </summary>
-    private const string RecordSourceColumns =
-        "hex(CAST(src.source_kind AS BLOB)), hex(CAST(src.harness_id AS BLOB)), hex(CAST(src.locator AS BLOB)) ";
-
     /// <summary>
     /// Joins a record (alias <c>r</c>) to its source row. An inner join, because
     /// <c>record.source_id</c> is a required foreign key: a record always has a source, and one
     /// whose source is deleted is cascaded away with it.
     /// </summary>
     private const string RecordSourceJoin = "JOIN source src ON src.source_id = r.source_id ";
-
-    /// <summary>
-    /// The record's response id and request id (<c>record_response_id</c>, <c>record_request_id</c>)
-    /// as four typed-hex columns placed just before <see cref="RecordSourceColumns"/>, which stays
-    /// last. They are the ids the projector joins an OTLP turn to its transcript twin on.
-    /// </summary>
-    private const string RecordJoinIdColumns =
-        "typeof(rrid.response_id), COALESCE(hex(CAST(rrid.response_id AS BLOB)), ''), " +
-        "typeof(rqid.request_id), COALESCE(hex(CAST(rqid.request_id AS BLOB)), ''), ";
 
     /// <summary>Left-joins a record (alias <c>r</c>) to its optional response-id and request-id rows.</summary>
     private const string RecordJoinIdJoin =
@@ -49,13 +32,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// select the same fifteen columns, so both parse one row shape.
     /// </summary>
     private const string SessionProjectionHeaderColumns =
-        "hex(CAST(sp.session_id AS BLOB)), hex(CAST(sp.label AS BLOB)), sp.is_subagent, sp.span_count, " +
-        "hex(CAST(sp.started_at_utc AS BLOB)), hex(CAST(sp.ended_at_utc AS BLOB)), " +
-        "typeof(spp.parent_session_id), COALESCE(hex(CAST(spp.parent_session_id AS BLOB)), ''), " +
-        "typeof(spa.agent_name), COALESCE(hex(CAST(spa.agent_name AS BLOB)), ''), " +
+        "sp.session_id, sp.label, sp.is_subagent, sp.span_count, " +
+        "sp.started_at_utc, sp.ended_at_utc, " +
+        "spp.parent_session_id, " +
+        "spa.agent_name, " +
         "CASE WHEN spip.session_id IS NOT NULL THEN 1 ELSE 0 END, " +
-        "typeof(scu.reason), COALESCE(hex(CAST(scu.reason AS BLOB)), ''), " +
-        "typeof(ssu.reason), COALESCE(hex(CAST(ssu.reason AS BLOB)), '')";
+        "scu.reason, " +
+        "ssu.reason";
 
     /// <summary>The single-row satellites <see cref="SessionProjectionHeaderColumns"/> reads, joined on <c>sp.session_id</c>.</summary>
     private const string SessionProjectionHeaderJoins =
@@ -64,6 +47,36 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         "LEFT JOIN session_projection_included_in_parent spip ON spip.session_id = sp.session_id " +
         "LEFT JOIN session_context_unmeasurable scu ON scu.session_id = sp.session_id " +
         "LEFT JOIN session_schema_unmeasurable ssu ON ssu.session_id = sp.session_id";
+
+    /// <summary>The scalar record columns the broad and content-free record reads select.</summary>
+    private const string RecordReadColumns =
+        "r.span_id, r.harness_id, r.op, r.kind, r.name, r.started_at_utc, r.status, " +
+        "rsl.session_key, rp.parent_span_id, rt.trace_id, rm.model_id, re.ended_at_utc, rrd.duration_ms, " +
+        "rrc.amount, rrc.currency, rai.agent_instance_id, rerr.message AS error_message, " +
+        "ref.failure_count, rcr.correction_rule, rdcw.declared_context_window, " +
+        "rrti.token_count AS reported_input, rrto.token_count AS reported_output, " +
+        "rrid.response_id, rqid.request_id, " +
+        "src.source_kind, src.harness_id AS source_harness_id, src.locator";
+
+    /// <summary>The joins <see cref="RecordReadColumns"/> needs, from <c>record r</c>.</summary>
+    private const string RecordReadFrom =
+        "FROM record r " +
+        RecordSourceJoin +
+        RecordJoinIdJoin +
+        "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+        "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
+        "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
+        "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
+        "LEFT JOIN record_end re ON re.span_id = r.span_id " +
+        "LEFT JOIN record_reported_duration rrd ON rrd.span_id = r.span_id " +
+        "LEFT JOIN record_reported_cost rrc ON rrc.span_id = r.span_id " +
+        "LEFT JOIN record_agent_instance rai ON rai.span_id = r.span_id " +
+        "LEFT JOIN record_error rerr ON rerr.span_id = r.span_id " +
+        "LEFT JOIN record_edit_failure ref ON ref.span_id = r.span_id " +
+        "LEFT JOIN record_correction_rule rcr ON rcr.span_id = r.span_id " +
+        "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = r.span_id " +
+        "LEFT JOIN record_reported_total rrti ON rrti.span_id = r.span_id AND rrti.direction = 'input' " +
+        "LEFT JOIN record_reported_total rrto ON rrto.span_id = r.span_id AND rrto.direction = 'output'";
 
     /// <summary>
     /// The sessions still standing after the root rule's last round: exactly the sessions on a
@@ -76,87 +89,57 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <inheritdoc />
     public IReadOnlyList<string> Harnesses()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(harness_id AS BLOB)) FROM harness ORDER BY harness_id ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<string> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 1, "harness");
-            results.Add(ParseHexRequired(cols[0], "harness.harness_id"));
-        }
-
-        return results;
+        const string Sql = "SELECT harness_id FROM harness ORDER BY harness_id ASC";
+        return QueryRows<string>(Sql, new Dictionary<string, object?>(StringComparer.Ordinal), static reader => reader.GetString(0));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSource> Sources(string? harnessId = null)
     {
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT hex(CAST(source_id AS BLOB)), hex(CAST(harness_id AS BLOB)), hex(CAST(source_kind AS BLOB)), hex(CAST(locator AS BLOB)) FROM source");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sql = "SELECT source_id, harness_id, source_kind, locator FROM source";
         if (harnessId is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE harness_id = {TextExpr(harnessId)}");
+            sql += " WHERE harness_id = " + Bind(parameters, harnessId);
         }
 
-        sql.Append(" ORDER BY rowid ASC;\n");
-
-        string output = ExecuteSqlite(sql.ToString());
-        List<StoredSource> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 4, "source");
-            string sourceId = ParseHexRequired(cols[0], "source.source_id");
-            string rowHarness = ParseHexRequired(cols[1], "source.harness_id");
-            SourceKind kind = ParseSourceKind(ParseHexRequired(cols[2], "source.source_kind"));
-            string locator = ParseHexRequired(cols[3], "source.locator");
-            results.Add(new StoredSource(sourceId, new CollectedSource(rowHarness, kind, locator)));
-        }
-
-        return results;
+        sql += " ORDER BY rowid ASC";
+        return QueryRows<StoredSource>(sql, parameters, static reader => new StoredSource(
+            reader.GetString(reader.GetOrdinal("source_id")),
+            new CollectedSource(
+                reader.GetString(reader.GetOrdinal("harness_id")),
+                ParseSourceKind(reader.GetString(reader.GetOrdinal("source_kind"))),
+                reader.GetString(reader.GetOrdinal("locator")))));
     }
 
     /// <inheritdoc />
     public int CountRecords(string? harnessId = null)
     {
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT COUNT(*) FROM record");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sql = "SELECT COUNT(*) AS record_count FROM record";
         if (harnessId is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE harness_id = {TextExpr(harnessId)}");
+            sql += " WHERE harness_id = " + Bind(parameters, harnessId);
         }
 
-        sql.Append(";\n");
-
-        string output = ExecuteSqlite(sql.ToString());
-        List<string> lines = [.. TabLines(output)];
-        if (lines.Count != 1)
+        IReadOnlyList<int> rows = QueryRows<int>(sql, parameters, static reader => reader.GetInt32(reader.GetOrdinal("record_count")));
+        if (rows.Count != 1)
         {
-            throw new StoredDataException($"Expected single scalar row from record count query, got {lines.Count}.");
+            throw new StoredDataException($"Expected single scalar row from record count query, got {rows.Count}.");
         }
 
-        string[] cols = SplitTabLine(lines[0], 1, "record count");
-        return ParseInt32Required(cols[0], "record count");
+        return rows[0];
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSourceCount> SourceRecordCounts()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(source_id AS BLOB)), COUNT(*) FROM record " +
-                     "WHERE source_id IS NOT NULL GROUP BY source_id ORDER BY source_id ASC;\n";
-
-        List<StoredSourceCount> results = [];
-        foreach (string line in TabLines(ExecuteSqlite(sql)))
-        {
-            string[] cols = SplitTabLine(line, 2, "record source count");
-            results.Add(new StoredSourceCount(
-                ParseHexRequired(cols[0], "record.source_id"),
-                ParseInt32Required(cols[1], "record source count")));
-        }
-
-        return results;
+        const string Sql =
+            "SELECT source_id, COUNT(*) AS source_record_count FROM record " +
+            "WHERE source_id IS NOT NULL GROUP BY source_id ORDER BY source_id ASC";
+        return QueryRows<StoredSourceCount>(Sql, new Dictionary<string, object?>(StringComparer.Ordinal), static reader => new StoredSourceCount(
+            reader.GetString(reader.GetOrdinal("source_id")),
+            reader.GetInt32(reader.GetOrdinal("source_record_count"))));
     }
 
     /// <inheritdoc />
@@ -169,24 +152,19 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // Grouped by session key so each key appears once, with its newest record timestamp
         // driving the order. Started-at values are written in one fixed ISO-8601 format, so the
         // textual MAX orders chronologically.
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rsl.session_key AS BLOB)) FROM record r " +
-                     "JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
-                     "JOIN source src ON src.source_id = r.source_id " +
-                     $"WHERE src.harness_id = {TextExpr(harnessId)} AND src.locator = {TextExpr(sourceName)} " +
-                     "GROUP BY rsl.session_key " +
-                     "ORDER BY MAX(r.started_at_utc) DESC, rsl.session_key ASC " +
-                     $"LIMIT {IntSql(limit)};\n";
-
-        string output = ExecuteSqlite(sql);
-        List<string> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 1, "session keys with record source");
-            results.Add(ParseHexRequired(cols[0], "record_session_link.session_key"));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string harnessMarker = Bind(parameters, harnessId);
+        string sourceMarker = Bind(parameters, sourceName);
+        string limitMarker = Bind(parameters, limit);
+        string sql =
+            "SELECT rsl.session_key FROM record r " +
+            "JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+            "JOIN source src ON src.source_id = r.source_id " +
+            $"WHERE src.harness_id = {harnessMarker} AND src.locator = {sourceMarker} " +
+            "GROUP BY rsl.session_key " +
+            "ORDER BY MAX(r.started_at_utc) DESC, rsl.session_key ASC " +
+            $"LIMIT {limitMarker}";
+        return QueryRows<string>(sql, parameters, static reader => reader.GetString(0));
     }
 
     /// <inheritdoc />
@@ -218,25 +196,26 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // One span-scoped pass over the content-part tables in position order: the first
         // non-empty prompt bucket wins, the same parts the timeline's captured-prompt rule
         // chose before the stall fix moved the inspector off the session-wide read.
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(
-            "SELECT hex(CAST(cp.bucket AS BLOB)), " +
-            "typeof(cpt.part_text), COALESCE(hex(CAST(cpt.part_text AS BLOB)), '') " +
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string spanMarker = Bind(parameters, spanId);
+        string sql =
+            "SELECT cp.bucket, cpt.part_text " +
             "FROM content_part cp " +
             "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
-            $"WHERE cp.span_id = {TextExpr(spanId)} ORDER BY cp.position ASC;\n");
+            $"WHERE cp.span_id = {spanMarker} ORDER BY cp.position ASC";
 
-        string output = ExecuteSqlite(sql.ToString());
-        foreach (string line in TabLines(output))
+        foreach ((ContentBucket bucket, string? text) in QueryRows<(ContentBucket Bucket, string? Text)>(
+                     sql,
+                     parameters,
+                     static reader => (
+                         ParseContentBucket(reader.GetString(reader.GetOrdinal("bucket"))),
+                         reader.IsDBNull(reader.GetOrdinal("part_text")) ? null : reader.GetString(reader.GetOrdinal("part_text")))))
         {
-            string[] cols = SplitTabLine(line, 3, "span prompt");
-            ContentBucket bucket = ParseContentBucket(ParseHexRequired(cols[0], "content_part.bucket"));
             if (bucket is not (ContentBucket.UserPrompt or ContentBucket.UserMessage or ContentBucket.ConversationHistory))
             {
                 continue;
             }
 
-            string? text = ParseNullableHex(cols[1], cols[2], "content_part_text.part_text");
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
@@ -251,146 +230,102 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <inheritdoc />
     public IReadOnlyList<StoredSessionAttribution> SessionAttributions()
     {
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rsl.session_key AS BLOB)), hex(CAST(r.harness_id AS BLOB)), COUNT(*) " +
-                     "FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
-                     "GROUP BY rsl.session_key, r.harness_id " +
-                     "ORDER BY rsl.session_key ASC, r.harness_id ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredSessionAttribution> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 3, "record attribution");
-            results.Add(new StoredSessionAttribution(
-                ParseHexRequired(cols[0], "record_session_link.session_key"),
-                ParseHexRequired(cols[1], "record.harness_id"),
-                ParseInt32Required(cols[2], "record attribution count")));
-        }
-
-        return results;
+        const string Sql =
+            "SELECT rsl.session_key, r.harness_id, COUNT(*) AS attribution_count " +
+            "FROM record r JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
+            "GROUP BY rsl.session_key, r.harness_id " +
+            "ORDER BY rsl.session_key ASC, r.harness_id ASC";
+        return QueryRows<StoredSessionAttribution>(Sql, new Dictionary<string, object?>(StringComparer.Ordinal), static reader => new StoredSessionAttribution(
+            reader.GetString(reader.GetOrdinal("session_key")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            reader.GetInt32(reader.GetOrdinal("attribution_count"))));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<CollectedRecord> SessionRecordsForRebuild(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-        return QueryRecords(RecordSessionLinkPredicate(sessionKey));
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        return QueryRecords(RecordSessionLinkPredicate(sessionKey, parameters), parameters);
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance() => QueryRecords(null);
+    public IReadOnlyList<CollectedRecord> AllSessionRecordsForMaintenance() =>
+        QueryRecords(null, new Dictionary<string, object?>(StringComparer.Ordinal));
 
     /// <summary>Builds the <c>record_session_link</c> existence predicate selecting a session key's records.</summary>
     /// <param name="sessionKey">Canonical session key.</param>
-    private static string RecordSessionLinkPredicate(string sessionKey) =>
-        $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = r.span_id AND rsl.session_key = {TextExpr(sessionKey)})";
+    /// <param name="parameters">Parameter values the predicate binds.</param>
+    private static string RecordSessionLinkPredicate(string sessionKey, Dictionary<string, object?> parameters)
+    {
+        string sessionMarker = Bind(parameters, sessionKey);
+        return $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = r.span_id AND rsl.session_key = {sessionMarker})";
+    }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredTokenCount> TokenCounts(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("rtc", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rtc.span_id AS BLOB)), hex(CAST(rtc.token_class AS BLOB)), rtc.token_count " +
-                     $"FROM record_token_count rtc{whereClause} ORDER BY rtc.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredTokenCount> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 3, "record_token_count");
-            string rowSpan = ParseHexRequired(cols[0], "record_token_count.span_id");
-            TokenClass tokenClass = ParseTokenClass(ParseHexRequired(cols[1], "record_token_count.token_class"));
-            long count = ParseInt64Required(cols[2], "record_token_count.token_count");
-            results.Add(new StoredTokenCount(rowSpan, tokenClass, count));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("rtc", spanId, sessionKey, parameters);
+        string sql =
+            "SELECT rtc.span_id, rtc.token_class, rtc.token_count " +
+            $"FROM record_token_count rtc{whereClause} ORDER BY rtc.rowid ASC";
+        return QueryRows<StoredTokenCount>(sql, parameters, static reader => new StoredTokenCount(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+            reader.GetInt64(reader.GetOrdinal("token_count"))));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredReportedTotal> ReportedTotals(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("rrt", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rrt.span_id AS BLOB)), hex(CAST(rrt.direction AS BLOB)), rrt.token_count " +
-                     $"FROM record_reported_total rrt{whereClause} ORDER BY rrt.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredReportedTotal> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 3, "record_reported_total");
-            string rowSpan = ParseHexRequired(cols[0], "record_reported_total.span_id");
-            ReportedTotalDirection direction = ParseReportedDirection(ParseHexRequired(cols[1], "record_reported_total.direction"));
-            long count = ParseInt64Required(cols[2], "record_reported_total.token_count");
-            results.Add(new StoredReportedTotal(rowSpan, direction, count));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("rrt", spanId, sessionKey, parameters);
+        string sql =
+            "SELECT rrt.span_id, rrt.direction, rrt.token_count " +
+            $"FROM record_reported_total rrt{whereClause} ORDER BY rrt.rowid ASC";
+        return QueryRows<StoredReportedTotal>(sql, parameters, static reader => new StoredReportedTotal(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            ParseReportedDirection(reader.GetString(reader.GetOrdinal("direction"))),
+            reader.GetInt64(reader.GetOrdinal("token_count"))));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredReportedCost> ReportedCosts(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("rrc", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rrc.span_id AS BLOB)), rrc.amount, hex(CAST(rrc.currency AS BLOB)) " +
-                     $"FROM record_reported_cost rrc{whereClause} ORDER BY rrc.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredReportedCost> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 3, "record_reported_cost");
-            string rowSpan = ParseHexRequired(cols[0], "record_reported_cost.span_id");
-            double amount = ParseDoubleRequired(cols[1], "record_reported_cost.amount");
-            string currency = ParseHexRequired(cols[2], "record_reported_cost.currency");
-            results.Add(new StoredReportedCost(rowSpan, amount, currency));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("rrc", spanId, sessionKey, parameters);
+        string sql =
+            "SELECT rrc.span_id, rrc.amount, rrc.currency " +
+            $"FROM record_reported_cost rrc{whereClause} ORDER BY rrc.rowid ASC";
+        return QueryRows<StoredReportedCost>(sql, parameters, static reader => new StoredReportedCost(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            reader.GetDouble(reader.GetOrdinal("amount")),
+            reader.GetString(reader.GetOrdinal("currency"))));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSkillInvocation> SkillsInvoked(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("rsi", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rsi.span_id AS BLOB)), hex(CAST(rsi.skill_name AS BLOB)) " +
-                     $"FROM record_skill_invocation rsi{whereClause} ORDER BY rsi.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredSkillInvocation> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 2, "record_skill_invocation");
-            string rowSpan = ParseHexRequired(cols[0], "record_skill_invocation.span_id");
-            string skillName = ParseHexRequired(cols[1], "record_skill_invocation.skill_name");
-            results.Add(new StoredSkillInvocation(rowSpan, skillName));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("rsi", spanId, sessionKey, parameters);
+        string sql =
+            "SELECT rsi.span_id, rsi.skill_name " +
+            $"FROM record_skill_invocation rsi{whereClause} ORDER BY rsi.rowid ASC";
+        return QueryRows<StoredSkillInvocation>(sql, parameters, static reader => new StoredSkillInvocation(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            reader.GetString(reader.GetOrdinal("skill_name"))));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredToolCall> ToolCalls(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("tc", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     BuildToolCallSelect("tc", whereClause, "ORDER BY tc.rowid ASC");
-
-        string output = ExecuteSqlite(sql);
-        List<StoredToolCall> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 33, "tool_call");
-            string rowSpan = ParseHexRequired(cols[0], "tool_call.span_id");
-            CollectedToolCall call = ParseToolCallColumns(cols, startIndex: 1);
-            results.Add(new StoredToolCall(rowSpan, call));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("tc", spanId, sessionKey, parameters);
+        string sql = BuildToolCallSelect("tc", whereClause, "ORDER BY tc.rowid ASC");
+        return QueryRows<StoredToolCall>(sql, parameters, static reader => new StoredToolCall(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            ReadToolCallColumns(reader)));
     }
 
     /// <inheritdoc />
@@ -414,37 +349,30 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
         }
 
+        Dictionary<string, object?> criteria = new(StringComparer.Ordinal);
         List<string> predicates =
         [
-            $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = cp.span_id AND rsl.session_key = {TextExpr(sessionKey)})",
+            $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = cp.span_id AND rsl.session_key = {Bind(criteria, sessionKey)})",
         ];
         if (!string.IsNullOrEmpty(scopedSpan))
         {
-            predicates.Add($"cp.span_id = {TextExpr(scopedSpan)}");
+            predicates.Add($"cp.span_id = {Bind(criteria, scopedSpan)}");
         }
 
         if (!string.IsNullOrEmpty(part))
         {
-            predicates.Add($"cp.bucket = {TextExpr(part)}");
+            predicates.Add($"cp.bucket = {Bind(criteria, part)}");
         }
 
         string whereClause = " WHERE " + string.Join(" AND ", predicates);
         bool cutInSql = !full && budget > 0;
-        string sql = TabReadScriptHeader + (cutInSql
+        string sql = cutInSql
             ? BuildBudgetedContentPartSelect("cp", whereClause, budget)
-            : BuildContentPartSelect("cp", whereClause, "ORDER BY cp.span_id ASC, cp.position ASC"));
+            : BuildContentPartSelect("cp", whereClause, "ORDER BY cp.span_id ASC, cp.position ASC");
 
-        string output = ExecuteSqlite(sql);
-        List<StoredContentPart> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, ContentPartColumnCount + (cutInSql ? 2 : 1), "content_part");
-            string rowSpan = ParseHexRequired(cols[0], "content_part.span_id");
-            CollectedContentPart scopedPart = ParseContentPartColumns(cols, startIndex: 1);
-            results.Add(new StoredContentPart(rowSpan, scopedPart));
-        }
-
-        return results;
+        return QueryRows<StoredContentPart>(sql, criteria, static reader => new StoredContentPart(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            ReadContentPartColumns(reader)));
     }
 
     /// <summary>
@@ -486,173 +414,136 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
         }
 
+        Dictionary<string, object?> criteria = new(StringComparer.Ordinal);
         List<string> predicates =
         [
-            $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = cp.span_id AND rsl.session_key = {TextExpr(sessionKey)})",
+            $"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = cp.span_id AND rsl.session_key = {Bind(criteria, sessionKey)})",
         ];
         if (!string.IsNullOrEmpty(scopedSpan))
         {
-            predicates.Add($"cp.span_id = {TextExpr(scopedSpan)}");
+            predicates.Add($"cp.span_id = {Bind(criteria, scopedSpan)}");
         }
 
         if (!string.IsNullOrEmpty(part))
         {
-            predicates.Add($"cp.bucket = {TextExpr(part)}");
+            predicates.Add($"cp.bucket = {Bind(criteria, part)}");
         }
 
         // COUNT over the scoped rows only: no content-text column is selected, so the count read
         // transfers no part text however large the parts are.
-        string sql = TabReadScriptHeader +
-                     $"SELECT COUNT(*) FROM content_part cp WHERE {string.Join(" AND ", predicates)};\n";
+        string sql =
+            $"SELECT COUNT(*) AS part_count FROM content_part cp WHERE {string.Join(" AND ", predicates)}";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
-        {
-            return ParseInt32Required(SplitTabLine(line, 1, "content_part.count")[0], "content_part.count");
-        }
-
-        return 0;
+        IReadOnlyList<int> rows = QueryRows<int>(sql, criteria, static reader => reader.GetInt32(reader.GetOrdinal("part_count")));
+        return rows.Count == 0 ? 0 : rows[0];
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredToolDefinition> ToolDefinitions(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("td", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-                     "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
-                     "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
-                     "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
-                     "FROM tool_definition td " +
-                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
-                     "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
-                     $"{whereClause} ORDER BY td.span_id ASC, td.position ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredToolDefinition> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 10, "tool_definition");
-            string rowSpan = ParseHexRequired(cols[0], "tool_definition.span_id");
-            int position = ParseInt32Required(cols[1], "tool_definition.position");
-            string toolName = ParseHexRequired(cols[2], "tool_definition.tool_name");
-            string? server = ParseNullableHex(cols[3], cols[4], "tool_definition_server.server_name");
-            long schemaTokens = ParseInt64Required(cols[5], "tool_definition.schema_tokens");
-            string? tokenizer = ParseNullableHex(cols[6], cols[7], "tool_definition_tokenizer.tokenizer");
-            long? tokenizerIsModelOwn = ParseNullableInt64(cols[8], cols[9], "tool_definition_tokenizer.is_model_own");
-            results.Add(new StoredToolDefinition(rowSpan, new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L)));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("td", spanId, sessionKey, parameters);
+        string sql =
+            "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
+            "tdt.tokenizer, tdt.is_model_own " +
+            "FROM tool_definition td " +
+            "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+            "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
+            $"{whereClause} ORDER BY td.span_id ASC, td.position ASC";
+        return QueryRows<StoredToolDefinition>(sql, parameters, static reader => new StoredToolDefinition(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            new CollectedToolDefinition(
+                reader.GetInt32(reader.GetOrdinal("position")),
+                reader.GetString(reader.GetOrdinal("tool_name")),
+                reader.IsDBNull(reader.GetOrdinal("server_name")) ? null : reader.GetString(reader.GetOrdinal("server_name")),
+                reader.GetInt64(reader.GetOrdinal("schema_tokens")),
+                reader.IsDBNull(reader.GetOrdinal("tokenizer")) ? null : reader.GetString(reader.GetOrdinal("tokenizer")),
+                !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L)));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredAgentInvocation> AgentInvocations(string? spanId = null, string? sessionKey = null)
     {
-        string whereClause = BuildSpanFilterWhere("ai", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     BuildAgentInvocationSelect("ai", whereClause, "ORDER BY ai.rowid ASC");
-
-        string output = ExecuteSqlite(sql);
-        List<StoredAgentInvocation> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 8, "agent_invocation");
-            string rowSpan = ParseHexRequired(cols[0], "agent_invocation.span_id");
-            CollectedAgentInvocation invocation = ParseAgentInvocationColumns(cols, startIndex: 1);
-            results.Add(new StoredAgentInvocation(rowSpan, invocation));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string whereClause = BuildSpanFilterWhere("ai", spanId, sessionKey, parameters);
+        string sql = BuildAgentInvocationSelect("ai", whereClause, "ORDER BY ai.rowid ASC");
+        return QueryRows<StoredAgentInvocation>(sql, parameters, static reader => new StoredAgentInvocation(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            ReadAgentInvocationColumns(reader)));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredRecordSignals> RecordSignals(string? spanId = null, string? sessionKey = null)
     {
-        string filterClause = BuildSpanFilterWhere("sig", spanId, sessionKey);
-        string sql = TabReadScriptHeader +
-                     "WITH candidate_spans(span_id) AS (" +
-                     "SELECT span_id FROM record_error UNION " +
-                     "SELECT span_id FROM record_edit_failure UNION " +
-                     "SELECT span_id FROM record_correction UNION " +
-                     "SELECT span_id FROM record_declared_context_window" +
-                     ") " +
-                     "SELECT hex(CAST(sig.span_id AS BLOB)), " +
-                     "typeof(re.message), COALESCE(hex(CAST(re.message AS BLOB)), ''), " +
-                     "typeof(ref.failure_count), COALESCE(CAST(ref.failure_count AS TEXT), ''), " +
-                     "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
-                     "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), '') " +
-                     "FROM candidate_spans sig " +
-                     "LEFT JOIN record_error re ON re.span_id = sig.span_id " +
-                     "LEFT JOIN record_edit_failure ref ON ref.span_id = sig.span_id " +
-                     "LEFT JOIN record_correction_rule rcr ON rcr.span_id = sig.span_id " +
-                     "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = sig.span_id" +
-                     $"{filterClause} ORDER BY sig.span_id ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredRecordSignals> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 9, "record_signals");
-            string rowSpan = ParseHexRequired(cols[0], "record_signals.span_id");
-            string? errorMessage = ParseNullableHex(cols[1], cols[2], "record_error.message");
-            long? editFailures = ParseNullableInt64(cols[3], cols[4], "record_edit_failure.failure_count");
-            string? correctionRule = ParseNullableHex(cols[5], cols[6], "record_correction_rule.correction_rule");
-            long? declaredWindow = ParseNullableInt64(cols[7], cols[8], "record_declared_context_window.declared_context_window");
-            results.Add(new StoredRecordSignals(rowSpan, new CollectedRecordSignals(errorMessage, editFailures, correctionRule, declaredWindow)));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filterClause = BuildSpanFilterWhere("sig", spanId, sessionKey, parameters);
+        string sql =
+            "WITH candidate_spans(span_id) AS (" +
+            "SELECT span_id FROM record_error UNION " +
+            "SELECT span_id FROM record_edit_failure UNION " +
+            "SELECT span_id FROM record_correction UNION " +
+            "SELECT span_id FROM record_declared_context_window" +
+            ") " +
+            "SELECT sig.span_id, re.message, ref.failure_count, rcr.correction_rule, rdcw.declared_context_window " +
+            "FROM candidate_spans sig " +
+            "LEFT JOIN record_error re ON re.span_id = sig.span_id " +
+            "LEFT JOIN record_edit_failure ref ON ref.span_id = sig.span_id " +
+            "LEFT JOIN record_correction_rule rcr ON rcr.span_id = sig.span_id " +
+            "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = sig.span_id" +
+            $"{filterClause} ORDER BY sig.span_id ASC";
+        return QueryRows<StoredRecordSignals>(sql, parameters, static reader => new StoredRecordSignals(
+            reader.GetString(reader.GetOrdinal("span_id")),
+            new CollectedRecordSignals(
+                ReadNullableString(reader, "message"),
+                ReadNullableInt64(reader, "failure_count"),
+                ReadNullableString(reader, "correction_rule"),
+                ReadNullableInt64(reader, "declared_context_window"))));
     }
 
     /// <inheritdoc />
     public CollectedSession? GetSession(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id = {TextExpr(sessionKey)}", $"u.session_id = {TextExpr(sessionKey)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string marker = Bind(parameters, sessionKey);
+        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id = {marker}", $"u.session_id = {marker}", parameters);
         return sessions.Count == 0 ? null : sessions[0];
     }
 
     /// <inheritdoc />
     public IReadOnlyList<CollectedSession> Sessions(string? harnessId = null)
     {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
         if (harnessId is null)
         {
-            return QuerySessions(sessionPredicate: null, usagePredicate: null);
+            return QuerySessions(sessionPredicate: null, usagePredicate: null, parameters);
         }
 
-        string harnessExpr = TextExpr(harnessId);
+        string harnessMarker = Bind(parameters, harnessId);
         return QuerySessions(
-            $"s.harness_id = {harnessExpr}",
-            $"EXISTS (SELECT 1 FROM session s WHERE s.session_id = u.session_id AND s.harness_id = {harnessExpr})");
+            $"s.harness_id = {harnessMarker}",
+            $"EXISTS (SELECT 1 FROM session s WHERE s.session_id = u.session_id AND s.harness_id = {harnessMarker})",
+            parameters);
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSessionModelUsage> SessionModelUsages(string? sessionKey = null)
     {
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT hex(CAST(session_id AS BLOB)), snapshot_position, hex(CAST(model_id AS BLOB)), hex(CAST(token_class AS BLOB)), token_count FROM session_model_usage");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sql = "SELECT session_id, snapshot_position, model_id, token_class, token_count FROM session_model_usage";
         if (sessionKey is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE session_id = {TextExpr(sessionKey)}");
+            sql += " WHERE session_id = " + Bind(parameters, sessionKey);
         }
 
-        sql.Append(" ORDER BY session_id ASC, snapshot_position ASC, model_id ASC, token_class ASC;\n");
-
-        string output = ExecuteSqlite(sql.ToString());
-        List<StoredSessionModelUsage> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 5, "session_model_usage");
-            string rowSession = ParseHexRequired(cols[0], "session_model_usage.session_id");
-            int position = ParseInt32Required(cols[1], "session_model_usage.snapshot_position");
-            string modelId = ParseHexRequired(cols[2], "session_model_usage.model_id");
-            TokenClass tokenClass = ParseTokenClass(ParseHexRequired(cols[3], "session_model_usage.token_class"));
-            long count = ParseInt64Required(cols[4], "session_model_usage.token_count");
-            results.Add(new StoredSessionModelUsage(rowSession, new CollectedModelUsage(position, modelId, tokenClass, count)));
-        }
-
-        return results;
+        sql += " ORDER BY session_id ASC, snapshot_position ASC, model_id ASC, token_class ASC";
+        return QueryRows<StoredSessionModelUsage>(sql, parameters, static reader => new StoredSessionModelUsage(
+            reader.GetString(reader.GetOrdinal("session_id")),
+            new CollectedModelUsage(
+                reader.GetInt32(reader.GetOrdinal("snapshot_position")),
+                reader.GetString(reader.GetOrdinal("model_id")),
+                ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                reader.GetInt64(reader.GetOrdinal("token_count")))));
     }
 
     /// <inheritdoc />
@@ -660,7 +551,8 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
 
-        string sessionExpr = TextExpr(sessionKey);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sessionMarker = Bind(parameters, sessionKey);
         IReadOnlyList<TableDefinition> tables = RelationalSchemaCatalog.Tables;
 
         // The inventory's missing-parent-key computation reads key columns alone: a qualifying
@@ -674,33 +566,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 ResolveColumnIndices(table, [.. keyColumnsByTable[table.Name].Select(static c => c.Name)]);
         }
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        for (int tableIndex = 0; tableIndex < tables.Count; tableIndex++)
-        {
-            TableDefinition table = tables[tableIndex];
-            string? whereClause = BuildStoredFieldsScopeWhere(table, sessionExpr);
-            if (whereClause is null)
-            {
-                continue;
-            }
-
-            sql.Append(CultureInfo.InvariantCulture, $"SELECT {tableIndex.ToString(CultureInfo.InvariantCulture)}, 'c', COUNT(*) FROM {table.Name} WHERE {whereClause};\n");
-            List<ColumnDefinition> keyColumns = keyColumnsByTable[table.Name];
-            if (keyColumns.Count == 0)
-            {
-                continue;
-            }
-
-            sql.Append(CultureInfo.InvariantCulture, $"SELECT {tableIndex.ToString(CultureInfo.InvariantCulture)}, 'k'");
-            foreach (ColumnDefinition column in keyColumns)
-            {
-                AppendStoredFieldValueSelect(sql, table, column);
-            }
-
-            sql.Append(CultureInfo.InvariantCulture, $" FROM {table.Name} WHERE {whereClause} ORDER BY rowid ASC;\n");
-        }
-
-        string output = ExecuteSqlite(sql.ToString());
         long[] counts = new long[tables.Count];
         Dictionary<string, List<StoredFieldRow>> keyRowsByTable = new(tables.Count, StringComparer.Ordinal);
         foreach (TableDefinition table in tables)
@@ -708,60 +573,46 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             keyRowsByTable[table.Name] = [];
         }
 
-        foreach (string line in TabLines(output))
+        for (int tableIndex = 0; tableIndex < tables.Count; tableIndex++)
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 3)
-            {
-                throw new StoredDataException("Empty row returned from the stored-fields inventory query.");
-            }
-
-            int tableIndex = ParseInt32Required(cols[0], "table_index");
-            if (tableIndex < 0 || tableIndex >= tables.Count)
-            {
-                throw new StoredDataException($"Out-of-range table index '{tableIndex.ToString(CultureInfo.InvariantCulture)}' returned from the stored-fields inventory query.");
-            }
-
             TableDefinition table = tables[tableIndex];
-            switch (cols[1])
+            string? whereClause = BuildStoredFieldsScopeWhere(table, sessionMarker);
+            if (whereClause is null)
             {
-                case "c":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for the {table.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    counts[tableIndex] = ParseInt64Required(cols[2], $"{table.Name}.row_count");
-                    break;
-                case "k":
-                    List<ColumnDefinition> keyColumns = keyColumnsByTable[table.Name];
-                    if (cols.Length != 2 + (keyColumns.Count * 2))
-                    {
-                        throw new StoredDataException($"Expected {2 + (keyColumns.Count * 2)} columns for the {table.Name} key rows, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    StoredFieldCell[] cells = new StoredFieldCell[table.Columns.Count];
-                    for (int columnIndex = 0; columnIndex < table.Columns.Count; columnIndex++)
-                    {
-                        ColumnDefinition every = table.Columns[columnIndex];
-                        cells[columnIndex] = new StoredFieldCell(every.Name, every.Type);
-                    }
-
-                    int[] keyCellIndices = keyCellIndicesByTable[table.Name];
-                    for (int keyIndex = 0; keyIndex < keyColumns.Count; keyIndex++)
-                    {
-                        cells[keyCellIndices[keyIndex]] = ParseStoredFieldCell(
-                            table.Name,
-                            keyColumns[keyIndex],
-                            cols[2 + (keyIndex * 2)],
-                            cols[3 + (keyIndex * 2)]);
-                    }
-
-                    keyRowsByTable[table.Name].Add(new StoredFieldRow(cells));
-                    break;
-                default:
-                    throw new StoredDataException($"Unexpected inventory row tag '{cols[1]}' for '{table.Name}'.");
+                continue;
             }
+
+            string countSql = $"SELECT COUNT(*) AS row_count FROM {table.Name} WHERE {whereClause}";
+            IReadOnlyList<long> countRows = QueryRows<long>(countSql, parameters, static reader => reader.GetInt64(reader.GetOrdinal("row_count")));
+            counts[tableIndex] = countRows.Count == 0 ? 0 : countRows[0];
+
+            List<ColumnDefinition> keyColumns = keyColumnsByTable[table.Name];
+            if (keyColumns.Count == 0)
+            {
+                continue;
+            }
+
+            string keySql =
+                $"SELECT {string.Join(", ", keyColumns.Select(static column => column.Name))} " +
+                $"FROM {table.Name} WHERE {whereClause} ORDER BY rowid ASC";
+            IReadOnlyList<StoredFieldRow> keyRows = QueryRows<StoredFieldRow>(keySql, parameters, reader =>
+            {
+                StoredFieldCell[] cells = new StoredFieldCell[table.Columns.Count];
+                for (int columnIndex = 0; columnIndex < table.Columns.Count; columnIndex++)
+                {
+                    ColumnDefinition every = table.Columns[columnIndex];
+                    cells[columnIndex] = new StoredFieldCell(every.Name, every.Type);
+                }
+
+                int[] keyCellIndices = keyCellIndicesByTable[table.Name];
+                for (int keyIndex = 0; keyIndex < keyColumns.Count; keyIndex++)
+                {
+                    cells[keyCellIndices[keyIndex]] = ReadStoredFieldCell(reader, keyColumns[keyIndex]);
+                }
+
+                return new StoredFieldRow(cells);
+            });
+            keyRowsByTable[table.Name].AddRange(keyRows);
         }
 
         List<StoredTableInventory> tableEntries = new(tables.Count);
@@ -793,7 +644,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         List<string> columnNames = [.. definition.Columns.Select(static c => c.Name)];
         int offset = (int)Math.Clamp((long)(page - 1) * limit, 0L, int.MaxValue);
-        string? whereClause = BuildStoredFieldsScopeWhere(definition, TextExpr(sessionKey));
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sessionMarker = Bind(parameters, sessionKey);
+        string? whereClause = BuildStoredFieldsScopeWhere(definition, sessionMarker);
         if (whereClause is null)
         {
             // A table the session scope cannot bind answers an empty page, as the inventory's
@@ -801,65 +654,41 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return new StoredTableRows(definition.Name, columnNames, 0, page, limit, offset, []);
         }
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 0, 'c', COUNT(*) FROM {definition.Name} WHERE {whereClause};\n");
-        sql.Append("SELECT 0, 'k'");
-        foreach (ColumnDefinition column in definition.Columns)
-        {
-            AppendStoredFieldValueSelect(sql, definition, column);
-        }
+        string countSql = $"SELECT COUNT(*) AS row_count FROM {definition.Name} WHERE {whereClause}";
+        IReadOnlyList<long> countRows = QueryRows<long>(countSql, parameters, static reader => reader.GetInt64(reader.GetOrdinal("row_count")));
+        long totalRows = countRows.Count == 0 ? 0 : countRows[0];
 
-        sql.Append(CultureInfo.InvariantCulture, $" FROM {definition.Name} WHERE {whereClause} ORDER BY rowid ASC LIMIT {limit.ToString(CultureInfo.InvariantCulture)} OFFSET {offset.ToString(CultureInfo.InvariantCulture)};\n");
+        string limitMarker = Bind(parameters, limit);
+        string offsetMarker = Bind(parameters, offset);
+        string sql =
+            $"SELECT {string.Join(", ", definition.Columns.Select(static column => column.Name))} " +
+            $"FROM {definition.Name} WHERE {whereClause} ORDER BY rowid ASC LIMIT {limitMarker} OFFSET {offsetMarker}";
+        IReadOnlyList<StoredFieldRow> rows = QueryRows<StoredFieldRow>(sql, parameters, reader => ReadStoredFieldRow(reader, definition));
 
-        string output = ExecuteSqlite(sql.ToString());
-        long totalRows = 0;
-        List<StoredFieldRow> rows = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 3)
-            {
-                throw new StoredDataException("Empty row returned from the stored-fields rows query.");
-            }
-
-            switch (cols[1])
-            {
-                case "c":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for the {definition.Name} count, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    totalRows = ParseInt64Required(cols[2], $"{definition.Name}.row_count");
-                    break;
-                case "k":
-                    rows.Add(ParseStoredFieldRow(definition, cols[2..]));
-                    break;
-                default:
-                    throw new StoredDataException($"Unexpected row tag '{cols[1]}' for '{definition.Name}'.");
-            }
-        }
-
-        return new StoredTableRows(definition.Name, columnNames, totalRows, page, limit, offset, rows);
+        return new StoredTableRows(definition.Name, columnNames, totalRows, page, limit, offset, [.. rows]);
     }
 
     /// <inheritdoc />
     public StoredSessionProjection? GetSessionProjection(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        IReadOnlyList<StoredSessionProjection> projections = QuerySessionProjections($"sp.session_id = {TextExpr(sessionId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string marker = Bind(parameters, sessionId);
+        IReadOnlyList<StoredSessionProjection> projections = QuerySessionProjections($"sp.session_id = {marker}", parameters);
         return projections.Count == 0 ? null : projections[0];
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSessionProjection> ListSessionProjections(string? harnessId = null)
     {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
         if (harnessId is null)
         {
-            return QuerySessionProjections(filterPredicate: null);
+            return QuerySessionProjections(filterPredicate: null, parameters);
         }
 
-        return QuerySessionProjections($"EXISTS (SELECT 1 FROM session s WHERE s.session_id = sp.session_id AND s.harness_id = {TextExpr(harnessId)})");
+        string marker = Bind(parameters, harnessId);
+        return QuerySessionProjections($"EXISTS (SELECT 1 FROM session s WHERE s.session_id = sp.session_id AND s.harness_id = {marker})", parameters);
     }
 
     /// <inheritdoc />
@@ -868,22 +697,23 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        AppendSessionRootRule(sql, harnessId);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        StringBuilder sql = new();
+        AppendSessionRootRule(sql, harnessId, parameters);
         sql.Append("page_set AS (SELECT sc.session_id, sp.started_at_utc FROM scope sc JOIN session_projection sp ON sp.session_id = sc.session_id WHERE (");
         sql.Append("sc.parent_session_id IS NULL OR sc.parent_session_id = '' OR NOT EXISTS (SELECT 1 FROM scope p WHERE p.session_id = sc.parent_session_id) OR sc.session_id IN ");
         sql.Append(CyclicSessionSet);
         sql.Append(')');
         if (!string.IsNullOrEmpty(search))
         {
-            // The search text is bound as one hex literal, so a quote in it is data, and the ESCAPE
+            // The search text is bound as one parameter, so a quote in it is data, and the ESCAPE
             // clause makes a %, _ or backslash in it match itself.
-            string pattern = TextExpr("%" + EscapeLikePattern(search) + "%");
+            string pattern = Bind(parameters, "%" + EscapeLikePattern(search) + "%");
             sql.Append(CultureInfo.InvariantCulture, $" AND (sp.label LIKE {pattern} ESCAPE '\\' OR sp.session_id LIKE {pattern} ESCAPE '\\')");
         }
 
         sql.Append(')');
-        return ReadSessionHeaderPage(sql, "DESC", page, limit);
+        return ReadSessionHeaderPage(sql, "DESC", page, limit, parameters);
     }
 
     /// <inheritdoc />
@@ -893,12 +723,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        AppendSessionRootRule(sql, harnessId: null);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        StringBuilder sql = new();
+        AppendSessionRootRule(sql, harnessId: null, parameters);
         sql.Append("page_set AS (SELECT sp.session_id, sp.started_at_utc FROM session_projection_parent spp JOIN session_projection sp ON sp.session_id = spp.session_id WHERE ");
-        AppendSessionAttachPredicate(sql, $"spp.parent_session_id = {TextExpr(parentSessionId)}");
+        AppendSessionAttachPredicate(sql, $"spp.parent_session_id = {Bind(parameters, parentSessionId)}");
         sql.Append(')');
-        return ReadSessionHeaderPage(sql, "ASC", page, limit);
+        return ReadSessionHeaderPage(sql, "ASC", page, limit, parameters);
     }
 
     /// <inheritdoc />
@@ -912,32 +743,31 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return [];
         }
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        AppendSessionRootRule(sql, harnessId: null);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        StringBuilder sql = new();
+        AppendSessionRootRule(sql, harnessId: null, parameters);
         sql.Append("ranked AS (SELECT spp.parent_session_id, sp.session_id, sp.started_at_utc, ");
         sql.Append("row_number() OVER (PARTITION BY spp.parent_session_id ORDER BY sp.started_at_utc ASC, sp.session_id ASC) AS child_rank, ");
         sql.Append("COUNT(*) OVER (PARTITION BY spp.parent_session_id) AS child_total ");
         sql.Append("FROM session_projection_parent spp JOIN session_projection sp ON sp.session_id = spp.session_id WHERE ");
-        AppendSessionAttachPredicate(sql, $"spp.parent_session_id IN ({SessionKeyListFilter(parents)})");
+        AppendSessionAttachPredicate(sql, $"spp.parent_session_id IN ({SessionKeyListFilter(parents, parameters)})");
         sql.Append(CultureInfo.InvariantCulture, $"), preview AS (SELECT * FROM ranked WHERE child_rank <= {IntSql(perParent)}) ");
-        sql.Append("SELECT 'PREVIEW', hex(CAST(r.parent_session_id AS BLOB)), r.child_total, r.child_rank, hex(CAST(r.session_id AS BLOB)) ");
+        sql.Append("SELECT r.parent_session_id, r.child_total, r.child_rank, r.session_id ");
         sql.Append("FROM preview r JOIN session_projection p ON p.session_id = r.parent_session_id ");
-        sql.Append("ORDER BY p.started_at_utc DESC, r.parent_session_id ASC, r.child_rank ASC;\n");
+        sql.Append("ORDER BY p.started_at_utc DESC, r.parent_session_id ASC, r.child_rank ASC");
 
-        string output = ExecuteSqlite(sql.ToString());
+        IReadOnlyList<(string ParentSessionId, int TotalChildren, int ChildRank, string ChildSessionId)> rows =
+            QueryRows<(string ParentSessionId, int TotalChildren, int ChildRank, string ChildSessionId)>(
+                sql.ToString(),
+                parameters,
+                static reader => (
+                    reader.GetString(reader.GetOrdinal("parent_session_id")),
+                    reader.GetInt32(reader.GetOrdinal("child_total")),
+                    reader.GetInt32(reader.GetOrdinal("child_rank")),
+                    reader.GetString(reader.GetOrdinal("session_id"))));
         List<(string ParentSessionId, int TotalChildren, List<string> Children)> previews = [];
-        foreach (string line in TabLines(output))
+        foreach ((string parentSessionId, int totalChildren, int childRank, string childSessionId) in rows)
         {
-            string[] cols = SplitTabLine(line, 5, "session child preview");
-            if (cols[0] != "PREVIEW")
-            {
-                throw new StoredDataException($"Unexpected session child preview row tag '{cols[0]}'.");
-            }
-
-            string parentSessionId = ParseHexRequired(cols[1], "session_projection_parent.parent_session_id");
-            int totalChildren = ParseInt32Required(cols[2], "session child preview total");
-            int childRank = ParseInt32Required(cols[3], "session child preview rank");
-            string childSessionId = ParseHexRequired(cols[4], "session_projection.session_id");
             if (previews.Count == 0 || !string.Equals(previews[^1].ParentSessionId, parentSessionId, StringComparison.Ordinal))
             {
                 previews.Add((parentSessionId, totalChildren, []));
@@ -966,19 +796,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return [];
         }
 
-        string sql = TabReadScriptHeader +
-                     "SELECT 'HEADER', COUNT(*) OVER (), " + SessionProjectionHeaderColumns + " " +
-                     "FROM session_projection sp " + SessionProjectionHeaderJoins + " " +
-                     $"WHERE sp.session_id IN ({SessionKeyListFilter(keys)}) ORDER BY sp.started_at_utc DESC, sp.session_id ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredSessionHeader> headers = [];
-        foreach (string line in TabLines(output))
-        {
-            headers.Add(ParseSessionHeaderPageRow(line.Split('\t')).Header);
-        }
-
-        return headers;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sql =
+            "SELECT " + SessionProjectionHeaderColumns + " " +
+            "FROM session_projection sp " + SessionProjectionHeaderJoins + " " +
+            $"WHERE sp.session_id IN ({SessionKeyListFilter(keys, parameters)}) ORDER BY sp.started_at_utc DESC, sp.session_id ASC";
+        return QueryRows<StoredSessionHeader>(sql, parameters, static reader => ReadSessionHeader(reader, 0));
     }
 
     /// <summary>
@@ -1002,12 +825,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// is recognised even when its members fall on different pages.
     /// </para>
     /// </remarks>
-    private static void AppendSessionRootRule(StringBuilder sql, string? harnessId)
+    private static void AppendSessionRootRule(StringBuilder sql, string? harnessId, Dictionary<string, object?> parameters)
     {
         sql.Append("WITH RECURSIVE scope(session_id, parent_session_id) AS (SELECT sp.session_id, spp.parent_session_id FROM session_projection sp LEFT JOIN session_projection_parent spp ON spp.session_id = sp.session_id");
         if (harnessId is not null)
         {
-            sql.Append(CultureInfo.InvariantCulture, $" WHERE EXISTS (SELECT 1 FROM session s WHERE s.session_id = sp.session_id AND s.harness_id = {TextExpr(harnessId)})");
+            sql.Append(CultureInfo.InvariantCulture, $" WHERE EXISTS (SELECT 1 FROM session s WHERE s.session_id = sp.session_id AND s.harness_id = {Bind(parameters, harnessId)})");
         }
 
         sql.Append("), keep(session_id, round) AS (SELECT session_id, 0 FROM scope UNION ALL SELECT spp.parent_session_id, k.round + 1 FROM keep k JOIN session_projection_parent spp ON spp.session_id = k.session_id WHERE spp.parent_session_id IN (SELECT session_id FROM scope) AND k.round < (SELECT COUNT(*) FROM session_projection) + 1), ");
@@ -1038,76 +861,67 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="order"><c>ASC</c> for oldest start first, <c>DESC</c> for newest start first; session id breaks ties ascending.</param>
     /// <param name="page">One-based page number.</param>
     /// <param name="limit">Rows on a page.</param>
+    /// <param name="parameters">Parameter values the read binds.</param>
     /// <returns>The page's headers and the size of <c>page_set</c>.</returns>
-    private SessionHeaderPageResult ReadSessionHeaderPage(StringBuilder cte, string order, int page, int limit)
+    private SessionHeaderPageResult ReadSessionHeaderPage(StringBuilder cte, string order, int page, int limit, Dictionary<string, object?> parameters)
     {
         long offset = ((long)page - 1) * limit;
+        string limitMarker = Bind(parameters, limit);
+        string offsetMarker = Bind(parameters, offset);
         string sql = cte +
-                     "SELECT 'HEADER', (SELECT COUNT(*) FROM page_set), " + SessionProjectionHeaderColumns + " " +
+                     "SELECT (SELECT COUNT(*) FROM page_set) AS page_total, " + SessionProjectionHeaderColumns + " " +
                      "FROM (SELECT session_id FROM page_set ORDER BY started_at_utc " + order + ", session_id ASC" +
-                     $" LIMIT {IntSql(limit)} OFFSET {LongSql(offset)}) page " +
+                     $" LIMIT {limitMarker} OFFSET {offsetMarker}) page " +
                      "JOIN session_projection sp ON sp.session_id = page.session_id " + SessionProjectionHeaderJoins + " " +
-                     "ORDER BY sp.started_at_utc " + order + ", sp.session_id ASC;\n";
+                     "ORDER BY sp.started_at_utc " + order + ", sp.session_id ASC";
 
-        string output = ExecuteSqlite(sql);
+        IReadOnlyList<(StoredSessionHeader Header, int Total)> rows =
+            QueryRows<(StoredSessionHeader Header, int Total)>(
+                sql,
+                parameters,
+                static reader => (ReadSessionHeader(reader, 1), reader.GetInt32(reader.GetOrdinal("page_total"))));
         List<StoredSessionHeader> headers = [];
         int total = 0;
-        foreach (string line in TabLines(output))
+        foreach ((StoredSessionHeader header, int rowTotal) in rows)
         {
-            (StoredSessionHeader header, int rowTotal) = ParseSessionHeaderPageRow(line.Split('\t'));
             headers.Add(header);
             total = rowTotal;
         }
 
         if (headers.Count == 0)
         {
-            string[] countLines = [.. TabLines(ExecuteSqlite(cte + "SELECT 'HEADER', COUNT(*) FROM page_set;\n"))];
-            if (countLines.Length != 1)
+            string countSql = cte + "SELECT COUNT(*) AS page_total FROM page_set";
+            IReadOnlyList<int> countRows = QueryRows<int>(countSql, parameters, static reader => reader.GetInt32(reader.GetOrdinal("page_total")));
+            if (countRows.Count != 1)
             {
-                throw new StoredDataException($"Expected 1 count row for the session header page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+                throw new StoredDataException($"Expected 1 count row for the session header page, got {countRows.Count.ToString(CultureInfo.InvariantCulture)}.");
             }
 
-            total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session header page count")[1], "session header page total");
+            total = countRows[0];
         }
 
         return new SessionHeaderPageResult(headers, total);
     }
 
     /// <summary>
-    /// Parses one row of a paged header read: the <c>HEADER</c> tag, the row set's total, then the
-    /// fifteen header columns.
-    /// </summary>
-    /// <param name="cols">Tab-split columns of the row.</param>
-    /// <returns>The header and the total.</returns>
-    private static (StoredSessionHeader Header, int Total) ParseSessionHeaderPageRow(string[] cols)
-    {
-        if (cols.Length != 17 || cols[0] != "HEADER")
-        {
-            throw new StoredDataException($"Expected 17 columns for HEADER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-        }
-
-        return (ParseSessionHeader(cols, 2), ParseInt32Required(cols[1], "session header page total"));
-    }
-
-    /// <summary>
-    /// Parses the fifteen projection header columns <see cref="SessionProjectionHeaderColumns"/>
+    /// Reads the eleven projection header columns <see cref="SessionProjectionHeaderColumns"/>
     /// selects, starting at <paramref name="startIndex"/>.
     /// </summary>
-    /// <param name="cols">Tab-split columns of the row.</param>
+    /// <param name="reader">Reader positioned on a header row.</param>
     /// <param name="startIndex">Index of the session id column.</param>
     /// <returns>The projection header.</returns>
-    private static StoredSessionHeader ParseSessionHeader(string[] cols, int startIndex) => new(
-        ParseHexRequired(cols[startIndex], "session_projection.session_id"),
-        ParseHexRequired(cols[startIndex + 1], "session_projection.label"),
-        ParseBoolFlag(cols[startIndex + 2], "session_projection.is_subagent"),
-        ParseInt32Required(cols[startIndex + 3], "session_projection.span_count"),
-        ParseHexRequired(cols[startIndex + 4], "session_projection.started_at_utc"),
-        ParseHexRequired(cols[startIndex + 5], "session_projection.ended_at_utc"),
-        ParseNullableHex(cols[startIndex + 6], cols[startIndex + 7], "session_projection_parent.parent_session_id"),
-        ParseNullableHex(cols[startIndex + 8], cols[startIndex + 9], "session_projection_agent.agent_name"),
-        ParseBoolFlag(cols[startIndex + 10], "session_projection_included_in_parent"),
-        ParseNullableHex(cols[startIndex + 11], cols[startIndex + 12], "session_context_unmeasurable.reason"),
-        ParseNullableHex(cols[startIndex + 13], cols[startIndex + 14], "session_schema_unmeasurable.reason"));
+    private static StoredSessionHeader ReadSessionHeader(SqliteDataReader reader, int startIndex) => new(
+        reader.GetString(startIndex),
+        reader.GetString(startIndex + 1),
+        reader.GetInt64(startIndex + 2) == 1L,
+        reader.GetInt32(startIndex + 3),
+        reader.GetString(startIndex + 4),
+        reader.GetString(startIndex + 5),
+        reader.IsDBNull(startIndex + 6) ? null : reader.GetString(startIndex + 6),
+        reader.IsDBNull(startIndex + 7) ? null : reader.GetString(startIndex + 7),
+        reader.GetInt64(startIndex + 8) == 1L,
+        reader.IsDBNull(startIndex + 9) ? null : reader.GetString(startIndex + 9),
+        reader.IsDBNull(startIndex + 10) ? null : reader.GetString(startIndex + 10));
 
     /// <summary>
     /// Escapes search text for a SQLite <c>LIKE</c> pattern read with <c>ESCAPE '\'</c>, so a
@@ -1120,49 +934,124 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         .Replace("%", "\\%", StringComparison.Ordinal)
         .Replace("_", "\\_", StringComparison.Ordinal);
 
-    /// <summary>Builds the <c>IN (…)</c> list that binds <paramref name="keys"/> as hex literals.</summary>
+    /// <summary>Builds the <c>IN (…)</c> list that binds <paramref name="keys"/> as parameters.</summary>
     /// <param name="keys">Text keys to bind; never empty.</param>
-    /// <returns>The comma-separated key literals.</returns>
-    private static string SessionKeyListFilter(IReadOnlyCollection<string> keys) =>
-        string.Join(", ", keys.Select(static key => TextExpr(key)));
+    /// <param name="parameters">Parameter values the list binds.</param>
+    /// <returns>The comma-separated parameter markers.</returns>
+    private static string SessionKeyListFilter(IReadOnlyCollection<string> keys, Dictionary<string, object?> parameters) =>
+        string.Join(", ", keys.Select(key => Bind(parameters, key)));
+
+    /// <summary>
+    /// The most session keys one statement binds. A statement may use its key list twice, so this keeps it
+    /// under 500 variables, the limit of the system SQLite macOS ships, however many sessions the store holds.
+    /// </summary>
+    private const int MaxKeysPerStatement = 240;
+
+    /// <summary>
+    /// Reads the session rows for <paramref name="keys"/> in storage order, as one statement would, binding at
+    /// most <see cref="MaxKeysPerStatement"/> keys per statement. Past one chunk the keys are first put in storage
+    /// order, so each chunk's rows (read in storage order) concatenate in the order a single read returns.
+    /// </summary>
+    /// <param name="keys">Distinct session keys.</param>
+    /// <returns>The sessions found, in storage order.</returns>
+    private IReadOnlyList<CollectedSession> QuerySessionsByKeys(IReadOnlyList<string> keys)
+    {
+        if (keys.Count <= MaxKeysPerStatement)
+        {
+            return QuerySessionChunk(keys);
+        }
+
+        List<(string Key, long RowId)> stored = [];
+        foreach (string[] chunk in keys.Chunk(MaxKeysPerStatement))
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            stored.AddRange(QueryRows<(string Key, long RowId)>(
+                $"SELECT session_id, rowid FROM session WHERE session_id IN ({SessionKeyListFilter(chunk, parameters)})",
+                parameters,
+                static reader => (reader.GetString(0), reader.GetInt64(1))));
+        }
+
+        List<CollectedSession> sessions = new(stored.Count);
+        foreach (string[] chunk in stored.OrderBy(static row => row.RowId).Select(static row => row.Key).Chunk(MaxKeysPerStatement))
+        {
+            sessions.AddRange(QuerySessionChunk(chunk));
+        }
+
+        return sessions;
+    }
+
+    private IReadOnlyList<CollectedSession> QuerySessionChunk(IReadOnlyCollection<string> keys)
+    {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(keys, parameters);
+        return QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})", parameters);
+    }
+
+    /// <summary>
+    /// Runs a per-session read over <paramref name="sessionKeys"/> in chunks of at most
+    /// <see cref="MaxKeysPerStatement"/> and merges the per-session results. Each session's rows come from
+    /// one chunk, so merging never splits a session.
+    /// </summary>
+    /// <typeparam name="TValue">What the read returns per session.</typeparam>
+    /// <param name="sessionKeys">Session keys to read.</param>
+    /// <param name="read">The read for one chunk of keys.</param>
+    /// <returns>The merged results, by session key.</returns>
+    private static Dictionary<string, TValue> MergeKeyChunks<TValue>(
+        IReadOnlyList<string> sessionKeys,
+        Func<IReadOnlyList<string>, Dictionary<string, TValue>> read)
+    {
+        if (sessionKeys.Count <= MaxKeysPerStatement)
+        {
+            return read(sessionKeys);
+        }
+
+        Dictionary<string, TValue> merged = new(StringComparer.Ordinal);
+        foreach (string[] chunk in sessionKeys.Distinct(StringComparer.Ordinal).Chunk(MaxKeysPerStatement))
+        {
+            foreach (KeyValuePair<string, TValue> entry in read(chunk))
+            {
+                merged[entry.Key] = entry.Value;
+            }
+        }
+
+        return merged;
+    }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSessionTurn> GetSessionTurns(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        string sql = TabReadScriptHeader +
-                     $"SELECT position, hex(CAST(span_id AS BLOB)) FROM session_turn WHERE session_id = {TextExpr(sessionId)} ORDER BY position ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredSessionTurn> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 2, "session_turn");
-            int position = ParseInt32Required(cols[0], "session_turn.position");
-            string spanId = ParseHexRequired(cols[1], "session_turn.span_id");
-            results.Add(new StoredSessionTurn(sessionId, position, spanId));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string marker = Bind(parameters, sessionId);
+        string sql = $"SELECT session_id, position, span_id FROM session_turn WHERE session_id = {marker} ORDER BY position ASC";
+        return QueryRows<StoredSessionTurn>(sql, parameters, static reader => new StoredSessionTurn(
+            reader.GetString(reader.GetOrdinal("session_id")),
+            reader.GetInt32(reader.GetOrdinal("position")),
+            reader.GetString(reader.GetOrdinal("span_id"))));
     }
 
     /// <inheritdoc />
     public StoredRun? GetRun(string runId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        IReadOnlyList<StoredRun> runs = QueryRuns($"r.run_id = {TextExpr(runId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        IReadOnlyList<StoredRun> runs = QueryRuns($"r.run_id = {Bind(parameters, runId)}", parameters);
         return runs.Count == 0 ? null : runs[0];
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<StoredRun> ListRuns(string? harnessId = null) =>
-        QueryRuns(harnessId is null ? null : $"r.harness_id = {TextExpr(harnessId)}");
+    public IReadOnlyList<StoredRun> ListRuns(string? harnessId = null)
+    {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        return QueryRuns(harnessId is null ? null : $"r.harness_id = {Bind(parameters, harnessId)}", parameters);
+    }
 
     /// <inheritdoc />
     public StoredExecution? GetExecution(string executionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
-        IReadOnlyList<StoredExecution> executions = QueryExecutions($"e.execution_id = {TextExpr(executionId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        IReadOnlyList<StoredExecution> executions = QueryExecutions($"e.execution_id = {Bind(parameters, executionId)}", parameters);
         return executions.Count == 0 ? null : executions[0];
     }
 
@@ -1170,77 +1059,85 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     public IReadOnlyList<StoredExecution> ListExecutionsForRun(string runId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        return QueryExecutions($"e.run_id = {TextExpr(runId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        return QueryExecutions($"e.run_id = {Bind(parameters, runId)}", parameters);
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredExecution> ListExecutionsByHarness(string harnessId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
-        return QueryExecutions($"e.harness_id = {TextExpr(harnessId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        return QueryExecutions($"e.harness_id = {Bind(parameters, harnessId)}", parameters);
     }
 
     /// <inheritdoc />
     public StoredHarnessRollup? GetHarnessRollup(string harnessId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessId);
-        IReadOnlyList<StoredHarnessRollup> rollups = QueryHarnessRollups($"harness_id = {TextExpr(harnessId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        IReadOnlyList<StoredHarnessRollup> rollups = QueryHarnessRollups($"harness_id = {Bind(parameters, harnessId)}", parameters);
         return rollups.Count == 0 ? null : rollups[0];
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<StoredHarnessRollup> ListHarnessRollups() => QueryHarnessRollups(filterPredicate: null);
+    public IReadOnlyList<StoredHarnessRollup> ListHarnessRollups() =>
+        QueryHarnessRollups(filterPredicate: null, new Dictionary<string, object?>(StringComparer.Ordinal));
 
     /// <inheritdoc />
     public StoredFinding? GetFinding(string findingId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(findingId);
-        IReadOnlyList<StoredFinding> findings = QueryFindings($"f.finding_id = {TextExpr(findingId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        IReadOnlyList<StoredFinding> findings = QueryFindings($"f.finding_id = {Bind(parameters, findingId)}", parameters);
         return findings.Count == 0 ? null : findings[0];
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredFinding> ListFindings(string? runId = null, string? sessionId = null)
     {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
         List<string> predicates = [];
         if (runId is not null)
         {
-            predicates.Add($"fr.run_id = {TextExpr(runId)}");
+            predicates.Add($"fr.run_id = {Bind(parameters, runId)}");
         }
 
         if (sessionId is not null)
         {
-            predicates.Add($"fs.session_id = {TextExpr(sessionId)}");
+            predicates.Add($"fs.session_id = {Bind(parameters, sessionId)}");
         }
 
         string? filter = predicates.Count > 0 ? string.Join(" AND ", predicates) : null;
-        return QueryFindings(filter);
+        return QueryFindings(filter, parameters);
     }
 
     /// <inheritdoc />
     public StoredPrediction? GetPrediction(string predictionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(predictionId);
-        IReadOnlyList<StoredPrediction> predictions = QueryPredictions($"p.prediction_id = {TextExpr(predictionId)}");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        IReadOnlyList<StoredPrediction> predictions = QueryPredictions($"p.prediction_id = {Bind(parameters, predictionId)}", parameters);
         return predictions.Count == 0 ? null : predictions[0];
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredPrediction> ListPredictions(string? runId = null, string? findingId = null)
     {
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
         List<string> predicates = [];
         if (runId is not null)
         {
-            predicates.Add($"p.run_id = {TextExpr(runId)}");
+            predicates.Add($"p.run_id = {Bind(parameters, runId)}");
         }
 
         if (findingId is not null)
         {
-            predicates.Add($"p.finding_id = {TextExpr(findingId)}");
+            predicates.Add($"p.finding_id = {Bind(parameters, findingId)}");
         }
 
         string? filter = predicates.Count > 0 ? string.Join(" AND ", predicates) : null;
-        return QueryPredictions(filter);
+        return QueryPredictions(filter, parameters);
     }
 
     /// <inheritdoc />
@@ -1278,15 +1175,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // The same batches as the harness-scoped read, each bound to the named keys by its own
         // statement: the session rows, the content-free record scalars, what the figures take
         // from the projections, the fallback turns of sessions without a projection, and the
-        // stored ingest problems. No statement lists the store's sessions or projections.
-        string filter = SessionKeyListFilter(keys);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})");
+        // stored ingest problems. No statement lists the store's sessions or projections, and
+        // each binds at most MaxKeysPerStatement keys.
+        IReadOnlyList<CollectedSession> sessions = QuerySessionsByKeys(keys);
         if (sessions.Count == 0)
         {
             return [];
         }
 
-        return BuildSessionListFigures(sessions, QuerySessionListProjectionShapes(filter), pricing);
+        Dictionary<string, SessionListProjectionShape> shapes = MergeKeyChunks(keys, chunk =>
+        {
+            Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+            return QuerySessionListProjectionShapes(SessionKeyListFilter(chunk, parameters), parameters);
+        });
+        return BuildSessionListFigures(sessions, shapes, pricing);
     }
 
     /// <summary>
@@ -1331,47 +1233,35 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// schema or timeline row is read.
     /// </summary>
     /// <param name="filter">The <c>IN (…)</c> list binding the session keys.</param>
+    /// <param name="parameters">Parameter values the read binds.</param>
     /// <returns>Each named session that has a projection, by session id.</returns>
-    private Dictionary<string, SessionListProjectionShape> QuerySessionListProjectionShapes(string filter)
+    private Dictionary<string, SessionListProjectionShape> QuerySessionListProjectionShapes(string filter, Dictionary<string, object?> parameters)
     {
-        string sql = TabReadScriptHeader +
-                     $"SELECT 'PROJ', hex(CAST(sp.session_id AS BLOB)) FROM session_projection sp WHERE sp.session_id IN ({filter});\n" +
-                     $"SELECT 'REQ', hex(CAST(session_id AS BLOB)), hex(CAST(request_span_id AS BLOB)) FROM session_request WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n" +
-                     $"SELECT 'TURN', hex(CAST(session_id AS BLOB)), position, hex(CAST(span_id AS BLOB)) FROM session_turn WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n";
-
-        string output = ExecuteSqlite(sql);
         HashSet<string> projectedSessionIds = [];
-        Dictionary<string, List<string>> requestsBySession = new(StringComparer.Ordinal);
-        Dictionary<string, List<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
-        foreach (string line in TabLines(output))
+        foreach (string sessionId in QueryRows<string>(
+                     $"SELECT sp.session_id FROM session_projection sp WHERE sp.session_id IN ({filter})",
+                     parameters,
+                     static reader => reader.GetString(0)))
         {
-            string tag = line.Split('\t')[0];
-            switch (tag)
-            {
-                case "PROJ":
-                    _ = projectedSessionIds.Add(ParseHexRequired(SplitTabLine(line, 2, "session projection shape")[1], "session_projection.session_id"));
-                    break;
+            _ = projectedSessionIds.Add(sessionId);
+        }
 
-                case "REQ":
-                    {
-                        string[] cols = SplitTabLine(line, 3, "session_request");
-                        GetOrCreateList(requestsBySession, ParseHexRequired(cols[1], "session_request.session_id"))
-                            .Add(ParseHexRequired(cols[2], "session_request.request_span_id"));
-                        break;
-                    }
+        Dictionary<string, List<string>> requestsBySession = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string RequestSpanId) row in QueryRows<(string SessionId, string RequestSpanId)>(
+                     $"SELECT session_id, request_span_id FROM session_request WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(requestsBySession, row.SessionId).Add(row.RequestSpanId);
+        }
 
-                case "TURN":
-                    {
-                        string[] cols = SplitTabLine(line, 4, "session_turn");
-                        string sessionId = ParseHexRequired(cols[1], "session_turn.session_id");
-                        GetOrCreateList(turnsBySession, sessionId)
-                            .Add(new StoredSessionTurn(sessionId, ParseInt32Required(cols[2], "session_turn.position"), ParseHexRequired(cols[3], "session_turn.span_id")));
-                        break;
-                    }
-
-                default:
-                    throw new StoredDataException($"Unexpected session projection shape row tag '{tag}'.");
-            }
+        Dictionary<string, List<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int Position, string SpanId) row in QueryRows<(string SessionId, int Position, string SpanId)>(
+                     $"SELECT session_id, position, span_id FROM session_turn WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetInt32(1), reader.GetString(2))))
+        {
+            GetOrCreateList(turnsBySession, row.SessionId).Add(new StoredSessionTurn(row.SessionId, row.Position, row.SpanId));
         }
 
         Dictionary<string, SessionListProjectionShape> shapes = new(projectedSessionIds.Count, StringComparer.Ordinal);
@@ -1420,8 +1310,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // metadata included — the report prices offered and invoked tools), and their stored
         // turns. The report figures are projection-independent, so no projection, problem, or
         // skill read runs, and no statement lists the store's sessions or projections.
-        string filter = SessionKeyListFilter(keys);
-        IReadOnlyList<CollectedSession> sessions = QuerySessions($"s.session_id IN ({filter})", $"u.session_id IN ({filter})");
+        IReadOnlyList<CollectedSession> sessions = QuerySessionsByKeys(keys);
         if (sessions.Count == 0)
         {
             return [];
@@ -1523,30 +1412,32 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         string sqlOrder = NormalizeSortOrderSql(order);
 
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
         StringBuilder ctes = new("WITH RECURSIVE ");
-        AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
-        ctes.Append(CultureInfo.InvariantCulture, $"named_requests(position, request_span_id) AS (SELECT position, request_span_id FROM session_request WHERE session_id = {TextExpr(sessionKey)}), ");
+        AppendSessionSectionCtes(ctes, key);
+        ctes.Append(CultureInfo.InvariantCulture, $"named_requests(position, request_span_id) AS (SELECT position, request_span_id FROM session_request WHERE session_id = {key}), ");
         ctes.Append("fallback_requests(position, request_span_id) AS (SELECT ROW_NUMBER() OVER (ORDER BY rr.started_at_utc ASC, rr.span_id ASC), rr.span_id FROM roots ro JOIN record rr ON rr.span_id = ro.span_id WHERE NOT EXISTS (SELECT 1 FROM session_request WHERE session_id = ");
-        ctes.Append(TextExpr(sessionKey));
+        ctes.Append(key);
         ctes.Append(")), ");
         ctes.Append("all_requests(position, request_span_id) AS (SELECT position, request_span_id FROM named_requests WHERE EXISTS (SELECT 1 FROM session_request WHERE session_id = ");
-        ctes.Append(TextExpr(sessionKey));
+        ctes.Append(key);
         ctes.Append(") UNION ALL SELECT position, request_span_id FROM fallback_requests) ");
 
-        StringBuilder sql = new(TabReadScriptHeader);
+        StringBuilder sql = new();
         sql.Append(ctes);
-        sql.Append(CultureInfo.InvariantCulture, $", page(position, request_span_id) AS (SELECT position, request_span_id FROM all_requests ORDER BY position {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)}), ");
+        string limitMarker = Bind(parameters, limit);
+        string offsetMarker = Bind(parameters, ((long)page - 1) * limit);
+        sql.Append(CultureInfo.InvariantCulture, $", page(position, request_span_id) AS (SELECT position, request_span_id FROM all_requests ORDER BY position {sqlOrder} LIMIT {limitMarker} OFFSET {offsetMarker}), ");
         sql.Append("subtree(root, span) AS (SELECT request_span_id, request_span_id FROM page UNION SELECT s.root, ch.span_id FROM subtree s JOIN record_parent ch ON ch.parent_span_id = s.span AND ch.span_id IN (SELECT span_id FROM spans)), ");
         sql.Append("owned(root, turn_position, turn_span) AS (SELECT s.root, t.position, t.span_id FROM subtree s JOIN turn_entries t ON t.span_id = s.span), ");
         sql.Append("ranked(root, turn_position, turn_span, turn_rank, turn_total) AS (SELECT root, turn_position, turn_span, ROW_NUMBER() OVER (PARTITION BY root ORDER BY turn_position ASC), COUNT(*) OVER (PARTITION BY root) FROM owned), ");
         sql.Append("first_model(root, model_id) AS (SELECT root, model_id FROM (SELECT o.root, rm.model_id, ROW_NUMBER() OVER (PARTITION BY o.root ORDER BY o.turn_position ASC) AS model_rank FROM owned o JOIN record_model rm ON rm.span_id = o.turn_span) WHERE model_rank = 1) ");
 
-        sql.Append("SELECT 'REQROW', (SELECT COUNT(*) FROM all_requests), hex(CAST(p.request_span_id AS BLOB)), ");
-        sql.Append("typeof(rr.started_at_utc), COALESCE(hex(CAST(rr.started_at_utc AS BLOB)), ''), ");
-        sql.Append("typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), ");
-        sql.Append("COALESCE(rk.turn_total, 0), ");
-        sql.Append("typeof(fts.started_at_utc), COALESCE(hex(CAST(fts.started_at_utc AS BLOB)), ''), ");
-        sql.Append("typeof(fmm.model_id), COALESCE(hex(CAST(fmm.model_id AS BLOB)), '') ");
+        sql.Append("SELECT (SELECT COUNT(*) FROM all_requests) AS page_total, p.request_span_id AS request_span_id, ");
+        sql.Append("rr.started_at_utc AS request_started_at_utc, rm.model_id AS request_model_id, ");
+        sql.Append("COALESCE(rk.turn_total, 0) AS turn_total, ");
+        sql.Append("fts.started_at_utc AS first_turn_started_at_utc, fmm.model_id AS first_turn_model_id ");
         sql.Append("FROM page p ");
         sql.Append("LEFT JOIN record rr ON rr.span_id = p.request_span_id ");
         sql.Append("LEFT JOIN record_model rm ON rm.span_id = p.request_span_id ");
@@ -1554,38 +1445,40 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("LEFT JOIN (SELECT root, turn_span FROM ranked WHERE turn_rank = 1) ft ON ft.root = p.request_span_id ");
         sql.Append("LEFT JOIN record fts ON fts.span_id = ft.turn_span ");
         sql.Append("LEFT JOIN first_model fmm ON fmm.root = p.request_span_id ");
-        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY p.position {sqlOrder};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY p.position {sqlOrder}");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<ReadTimeSessionRequestSummary> rows = [];
-        int total = 0;
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 12, "session request figures");
-            total = ParseInt32Required(cols[1], "session request page total");
-            string requestSpanId = ParseHexRequired(cols[2], "session_request.request_span_id");
-            string? requestStartedRaw = ParseNullableHex(cols[3], cols[4], "record.started_at_utc");
-            DateTimeOffset? requestStarted = requestStartedRaw is null ? null : ParseTimestampRequired(requestStartedRaw, "record.started_at_utc");
-            string? requestModel = ParseNullableHex(cols[5], cols[6], "record_model.model_id");
-            string? firstTurnStartedRaw = ParseNullableHex(cols[8], cols[9], "owned turn started_at_utc");
-            DateTimeOffset? firstTurnStarted = firstTurnStartedRaw is null ? null : ParseTimestampRequired(firstTurnStartedRaw, "owned turn started_at_utc");
-            string? firstTurnModel = ParseNullableHex(cols[10], cols[11], "owned turn model_id");
-            string? model = string.IsNullOrEmpty(requestModel) ? firstTurnModel : requestModel;
-            string timestampUtc = requestStarted.HasValue
-                ? FormatTimestamp(requestStarted.Value)
-                : (firstTurnStarted.HasValue ? FormatTimestamp(firstTurnStarted.Value) : string.Empty);
-            rows.Add(new ReadTimeSessionRequestSummary(
-                RequestSpanId: requestSpanId,
-                TimestampUtc: timestampUtc,
-                Turns: ParseInt32Required(cols[7], "owned turn count"),
-                Model: model,
-                PromptPreview: null));
-        }
+        // The page statement carries the total in every row, so the page and its total come from one
+        // evaluation of the request chain; only an empty page needs a second statement for the total.
+        IReadOnlyList<(ReadTimeSessionRequestSummary Row, int PageTotal)> paged = QueryRows<(ReadTimeSessionRequestSummary Row, int PageTotal)>(
+            sql.ToString(),
+            parameters,
+            static reader =>
+            {
+                string? requestStartedRaw = ReadNullableString(reader, "request_started_at_utc");
+                DateTimeOffset? requestStarted = requestStartedRaw is null ? null : ParseTimestampRequired(requestStartedRaw, "record.started_at_utc");
+                string? requestModel = ReadNullableString(reader, "request_model_id");
+                string? firstTurnStartedRaw = ReadNullableString(reader, "first_turn_started_at_utc");
+                DateTimeOffset? firstTurnStarted = firstTurnStartedRaw is null ? null : ParseTimestampRequired(firstTurnStartedRaw, "owned turn started_at_utc");
+                string? firstTurnModel = ReadNullableString(reader, "first_turn_model_id");
+                string? model = string.IsNullOrEmpty(requestModel) ? firstTurnModel : requestModel;
+                string timestampUtc = requestStarted.HasValue
+                    ? FormatTimestamp(requestStarted.Value)
+                    : (firstTurnStarted.HasValue ? FormatTimestamp(firstTurnStarted.Value) : string.Empty);
+                return (new ReadTimeSessionRequestSummary(
+                    RequestSpanId: reader.GetString(reader.GetOrdinal("request_span_id")),
+                    TimestampUtc: timestampUtc,
+                    Turns: reader.GetInt32(reader.GetOrdinal("turn_total")),
+                    Model: model,
+                    PromptPreview: null), reader.GetInt32(reader.GetOrdinal("page_total")));
+            });
 
-        if (rows.Count == 0)
-        {
-            total = ReadSessionSectionTotal(ctes, "all_requests", "session request page");
-        }
+        ReadTimeSessionRequestSummary[] rows = [.. paged.Select(static entry => entry.Row)];
+        int total = paged.Count > 0
+            ? paged[0].PageTotal
+            : QueryRows<int>(
+                ctes + "SELECT (SELECT COUNT(*) FROM all_requests) AS page_total",
+                parameters,
+                static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
 
         return new SessionRequestFigurePageResult(rows, total);
     }
@@ -1600,8 +1493,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         string sqlOrder = NormalizeSortOrderSql(order);
 
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
         StringBuilder ctes = new("WITH RECURSIVE ");
-        AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
+        AppendSessionSectionCtes(ctes, key);
         ctes.Append("turn_tokens(position, span_id, fresh_input, cache_read, cache_write, output) AS (SELECT t.position, t.span_id, ");
         ctes.Append("MAX(CASE WHEN tc.token_class = 'input' THEN tc.token_count END), ");
         ctes.Append("MAX(CASE WHEN tc.token_class = 'cache_read' THEN tc.token_count END), ");
@@ -1622,36 +1517,34 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ctes.Append("FROM turn_tokens s JOIN turn_reported r ON r.position = s.position AND r.span_id = s.span_id), ");
         ctes.Append("measurable AS (SELECT * FROM reconciled WHERE input_match IS NOT NULL AND output_match IS NOT NULL) ");
 
-        StringBuilder sql = new(TabReadScriptHeader);
+        string limitMarker = Bind(parameters, limit);
+        string offsetMarker = Bind(parameters, ((long)page - 1) * limit);
+        StringBuilder sql = new();
         sql.Append(ctes);
-        sql.Append("SELECT 'RECON', (SELECT COUNT(*) FROM measurable), position, hex(CAST(span_id AS BLOB)), ");
-        sql.Append("typeof(reported_input), COALESCE(CAST(reported_input AS TEXT), ''), ");
+        sql.Append("SELECT (SELECT COUNT(*) FROM measurable) AS page_total, position, span_id, ");
+        sql.Append("reported_input, ");
         sql.Append("sum_chat_input, input_match, ");
-        sql.Append("typeof(reported_output), COALESCE(CAST(reported_output AS TEXT), ''), ");
+        sql.Append("reported_output, ");
         sql.Append("sum_chat_output, output_match ");
-        sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+        sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position {sqlOrder} LIMIT {limitMarker} OFFSET {offsetMarker}");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<ReadTimeTurnReconciliation> rows = [];
-        int total = 0;
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 12, "session reconciliation figures");
-            total = ParseInt32Required(cols[1], "session reconciliation page total");
-            rows.Add(new ReadTimeTurnReconciliation(
-                RequestSpanId: ParseHexRequired(cols[3], "reconciled turn span_id"),
-                RootInput: ParseNullableInt64(cols[4], cols[5], "record_reported_total.input"),
-                SumChatInput: ParseInt64Required(cols[6], "tokenized input"),
-                InputMatch: ParseBoolFlag(cols[7], "reconciled input_match"),
-                RootOutput: ParseNullableInt64(cols[8], cols[9], "record_reported_total.output"),
-                SumChatOutput: ParseInt64Required(cols[10], "tokenized output"),
-                OutputMatch: ParseBoolFlag(cols[11], "reconciled output_match")));
-        }
+        IReadOnlyList<(ReadTimeTurnReconciliation Row, int PageTotal)> paged = QueryRows<(ReadTimeTurnReconciliation Row, int PageTotal)>(
+            sql.ToString(),
+            parameters,
+            static reader => (new ReadTimeTurnReconciliation(
+                RequestSpanId: reader.GetString(reader.GetOrdinal("span_id")),
+                RootInput: ReadNullableInt64(reader, "reported_input"),
+                SumChatInput: reader.GetInt64(reader.GetOrdinal("sum_chat_input")),
+                InputMatch: reader.GetInt64(reader.GetOrdinal("input_match")) == 1L,
+                RootOutput: ReadNullableInt64(reader, "reported_output"),
+                SumChatOutput: reader.GetInt64(reader.GetOrdinal("sum_chat_output")),
+                OutputMatch: reader.GetInt64(reader.GetOrdinal("output_match")) == 1L), reader.GetInt32(reader.GetOrdinal("page_total"))));
 
-        if (rows.Count == 0)
-        {
-            total = ReadSessionSectionTotal(ctes, "measurable", "session reconciliation page");
-        }
+        // As for the request page: the total comes from the page statement's own rows.
+        ReadTimeTurnReconciliation[] rows = [.. paged.Select(static entry => entry.Row)];
+        int total = paged.Count == 0
+            ? ReadSessionSectionTotal(ctes, "measurable", "session reconciliation page", parameters)
+            : paged[0].PageTotal;
 
         return new SessionReconciliationFigurePageResult(rows, total);
     }
@@ -1664,54 +1557,54 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         string sqlOrder = NormalizeSortOrderSql(order);
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT 'PROBLEM', (SELECT COUNT(*) FROM (SELECT DISTINCT problem_id FROM (");
-        AppendSessionProblemAttachment(sql, sessionKey);
-        sql.Append(")) att), ");
-        sql.Append("hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), ");
-        sql.Append("typeof(ipl.location), COALESCE(hex(CAST(ipl.location AS BLOB)), ''), ");
-        sql.Append("typeof(ips.span_id), COALESCE(hex(CAST(ips.span_id AS BLOB)), ''), ");
-        sql.Append("typeof(ipst.stack), COALESCE(hex(CAST(ipst.stack AS BLOB)), '') ");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
+        StringBuilder sql = new();
+        sql.Append("SELECT (SELECT COUNT(*) FROM (SELECT DISTINCT problem_id FROM (");
+        AppendSessionProblemAttachment(sql, key);
+        sql.Append(")) att) AS page_total, ");
+        sql.Append("ip.severity, ip.code, ip.message, ");
+        sql.Append("ipl.location, ");
+        sql.Append("ips.span_id AS problem_span_id, ");
+        sql.Append("ipst.stack ");
         sql.Append("FROM ingest_problem ip ");
         sql.Append("LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id ");
         sql.Append("LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id ");
         sql.Append("LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id ");
         sql.Append("LEFT JOIN ingest_problem_timestamp ipt ON ipt.problem_id = ip.problem_id ");
         sql.Append("WHERE ip.problem_id IN (SELECT DISTINCT problem_id FROM (");
-        AppendSessionProblemAttachment(sql, sessionKey);
+        AppendSessionProblemAttachment(sql, key);
         sql.Append(")) ");
-        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY CASE WHEN ipt.timestamp_utc IS NULL THEN 1 ELSE 0 END ASC, ipt.timestamp_utc {sqlOrder}, ip.problem_id {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+        string limitMarker = Bind(parameters, limit);
+        string offsetMarker = Bind(parameters, ((long)page - 1) * limit);
+        sql.Append(CultureInfo.InvariantCulture, $"ORDER BY CASE WHEN ipt.timestamp_utc IS NULL THEN 1 ELSE 0 END ASC, ipt.timestamp_utc {sqlOrder}, ip.problem_id {sqlOrder} LIMIT {limitMarker} OFFSET {offsetMarker}");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<Problem> rows = [];
-        int total = 0;
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 11, "session ingest_problem page");
-            total = ParseInt32Required(cols[1], "session problem page total");
-            ProblemSeverity severity = ParseProblemSeverityValue(ParseHexRequired(cols[2], "ingest_problem.severity"));
-            string code = ParseHexRequired(cols[3], "ingest_problem.code");
-            string message = ParseHexRequired(cols[4], "ingest_problem.message");
-            string? location = ParseNullableHex(cols[5], cols[6], "ingest_problem_location.location")
-                ?? ParseNullableHex(cols[7], cols[8], "ingest_problem_span.span_id");
-            string? stack = ParseNullableHex(cols[9], cols[10], "ingest_problem_stack.stack");
-            rows.Add(new Problem(severity, code, message, location, stack));
-        }
-
-        if (rows.Count == 0)
-        {
-            StringBuilder countSql = new(TabReadScriptHeader);
-            countSql.Append("SELECT 'PROBLEM', COUNT(*) FROM (SELECT DISTINCT problem_id FROM (");
-            AppendSessionProblemAttachment(countSql, sessionKey);
-            countSql.Append("));\n");
-            string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
-            if (countLines.Length != 1)
+        IReadOnlyList<Problem> rows = QueryRows<Problem>(
+            sql.ToString(),
+            parameters,
+            static reader =>
             {
-                throw new StoredDataException($"Expected 1 count row for the session problem page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
-            }
+                string? location = ReadNullableString(reader, "location") ?? ReadNullableString(reader, "problem_span_id");
+                return new Problem(
+                    ParseProblemSeverityValue(reader.GetString(reader.GetOrdinal("severity"))),
+                    reader.GetString(reader.GetOrdinal("code")),
+                    reader.GetString(reader.GetOrdinal("message")),
+                    location,
+                    ReadNullableString(reader, "stack"));
+            });
 
-            total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session problem page count")[1], "session problem page total");
+        int total;
+        StringBuilder countSql = new();
+        countSql.Append("SELECT COUNT(*) AS page_total FROM (SELECT DISTINCT problem_id FROM (");
+        AppendSessionProblemAttachment(countSql, key);
+        countSql.Append("))");
+        IReadOnlyList<int> countRows = QueryRows<int>(countSql.ToString(), parameters, static reader => reader.GetInt32(reader.GetOrdinal("page_total")));
+        if (countRows.Count != 1)
+        {
+            throw new StoredDataException($"Expected 1 count row for the session problem page, got {countRows.Count.ToString(CultureInfo.InvariantCulture)}.");
         }
+
+        total = countRows[0];
 
         return new SessionProblemPageResult(rows, total);
     }
@@ -1720,170 +1613,144 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     public SessionToolFigureSet SessionToolFigures(string sessionKey, IModelPricingLookup? pricing = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-        string key = TextExpr(sessionKey);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
 
-        // One script, five tagged selects: the two identity columns the unused-range pricing
+        // One query per tagged select: the two identity columns the unused-range pricing
         // resolves (the session's harness and its first turn model), the tool-call metadata, the
         // tool-definition metadata, and the stored schema projection. No content column, no
         // content-text table, no timeline, and no context row is touched.
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'HARNESS', typeof(s.harness_id), COALESCE(hex(CAST(s.harness_id AS BLOB)), '') FROM session s WHERE s.session_id = {key};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'MODEL', typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), '') FROM record_session_link rsl JOIN record r ON r.span_id = rsl.span_id JOIN record_model rm ON rm.span_id = r.span_id WHERE rsl.session_key = {key} AND r.op = 'llm.invoke' ORDER BY r.started_at_utc ASC, r.span_id ASC LIMIT 1;\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'CALL', hex(CAST(tc.span_id AS BLOB)), hex(CAST(tc.tool_name AS BLOB)), typeof(oco.succeeded), COALESCE(CAST(oco.succeeded AS TEXT), ''), typeof(terr.message), COALESCE(hex(CAST(terr.message AS BLOB)), '') FROM tool_call tc JOIN record_session_link rsl ON rsl.span_id = tc.span_id AND rsl.session_key = {key} LEFT JOIN tool_call_outcome oco ON oco.span_id = tc.span_id LEFT JOIN tool_call_error terr ON terr.span_id = tc.span_id ORDER BY tc.rowid ASC;\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'DEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), td.schema_tokens, typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), '') FROM tool_definition td JOIN record_session_link rsl ON rsl.span_id = td.span_id AND rsl.session_key = {key} JOIN record r ON r.span_id = td.span_id LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position ORDER BY r.rowid ASC, td.position ASC;\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH', t.invocation_count, t.turn_count, typeof(u.token_residencies), COALESCE(CAST(u.token_residencies AS TEXT), '') FROM session_schema t LEFT JOIN session_schema_unused u ON u.session_id = t.session_id WHERE t.session_id = {key};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_REASON', typeof(r.reason), COALESCE(hex(CAST(r.reason AS BLOB)), '') FROM session_schema_unmeasurable r WHERE r.session_id = {key};\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_TOOL', t.position, hex(CAST(t.tool_name AS BLOB)), t.cost_tokens, t.invoked, typeof(s.server_name), COALESCE(hex(CAST(s.server_name AS BLOB)), '') FROM session_schema_ranked_tool t LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position WHERE t.session_id = {key} ORDER BY t.position ASC;\n");
-        sql.Append(CultureInfo.InvariantCulture, $"SELECT 'SCH_SRV', hex(CAST(t.server_name AS BLOB)), t.tokens FROM session_schema_server t WHERE t.session_id = {key} ORDER BY t.rowid ASC;\n");
+        IReadOnlyList<string?> harnessRows = QueryRows<string?>(
+            $"SELECT s.harness_id FROM session s WHERE s.session_id = {key}",
+            parameters,
+            static reader => reader.IsDBNull(0) ? null : reader.GetString(0));
+        string? harnessId = harnessRows.Count == 0 ? null : harnessRows[0];
 
-        string output = ExecuteSqlite(sql.ToString());
-        string? harnessId = null;
-        string? primaryModel = null;
+        IReadOnlyList<string?> modelRows = QueryRows<string?>(
+            "SELECT rm.model_id FROM record_session_link rsl JOIN record r ON r.span_id = rsl.span_id " +
+            "JOIN record_model rm ON rm.span_id = r.span_id " +
+            $"WHERE rsl.session_key = {key} AND r.op = 'llm.invoke' " +
+            "ORDER BY r.started_at_utc ASC, r.span_id ASC LIMIT 1",
+            parameters,
+            static reader => reader.IsDBNull(0) ? null : reader.GetString(0));
+        string? primaryModel = modelRows.Count == 0 ? null : modelRows[0];
+
         int toolCallTotal = 0;
         List<string> toolsInvoked = [];
         HashSet<string> seenInvokedTools = new(StringComparer.Ordinal);
         Dictionary<string, int> invCounts = new(StringComparer.Ordinal);
         Dictionary<string, int> errCounts = new(StringComparer.Ordinal);
+        foreach ((string ToolName, bool? Succeeded, string? Error) row in QueryRows<(string ToolName, bool? Succeeded, string? Error)>(
+                     "SELECT tc.tool_name, oco.succeeded, terr.message FROM tool_call tc " +
+                     $"JOIN record_session_link rsl ON rsl.span_id = tc.span_id AND rsl.session_key = {key} " +
+                     "LEFT JOIN tool_call_outcome oco ON oco.span_id = tc.span_id " +
+                     "LEFT JOIN tool_call_error terr ON terr.span_id = tc.span_id ORDER BY tc.rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("tool_name")),
+                         reader.IsDBNull(reader.GetOrdinal("succeeded")) ? null : reader.GetInt64(reader.GetOrdinal("succeeded")) == 1L,
+                         reader.IsDBNull(reader.GetOrdinal("message")) ? null : reader.GetString(reader.GetOrdinal("message")))))
+        {
+            toolCallTotal++;
+            if (seenInvokedTools.Add(row.ToolName))
+            {
+                toolsInvoked.Add(row.ToolName);
+            }
+
+            invCounts[row.ToolName] = invCounts.GetValueOrDefault(row.ToolName) + 1;
+            if (row.Succeeded == false || row.Error is not null)
+            {
+                errCounts[row.ToolName] = errCounts.GetValueOrDefault(row.ToolName) + 1;
+            }
+        }
+
         Dictionary<string, (long SchemaTokens, string? Server, HashSet<string> SpanIds)> defStats = new(StringComparer.Ordinal);
         List<string> toolsOffered = [];
         HashSet<string> seenOfferedTools = new(StringComparer.Ordinal);
-        StoredSessionSchema? schema = null;
-        List<StoredSchemaRankedTool> rankedTools = [];
-        List<StoredSchemaServerTokens> schemaServers = [];
         string? definitionsSpanId = null;
-        string? schemaUnmeasurableReason = null;
-
-        foreach (string line in TabLines(output))
+        foreach ((string SpanId, string ToolName, long SchemaTokens, string? Server) row in QueryRows<(string SpanId, string ToolName, long SchemaTokens, string? Server)>(
+                     "SELECT td.span_id, td.tool_name, td.schema_tokens, tds.server_name FROM tool_definition td " +
+                     $"JOIN record_session_link rsl ON rsl.span_id = td.span_id AND rsl.session_key = {key} " +
+                     "JOIN record r ON r.span_id = td.span_id " +
+                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                     "ORDER BY r.rowid ASC, td.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         reader.GetString(reader.GetOrdinal("tool_name")),
+                         reader.GetInt64(reader.GetOrdinal("schema_tokens")),
+                         reader.IsDBNull(reader.GetOrdinal("server_name")) ? null : reader.GetString(reader.GetOrdinal("server_name")))))
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 2)
+            definitionsSpanId ??= row.SpanId;
+            if (seenOfferedTools.Add(row.ToolName))
             {
-                throw new StoredDataException("Unexpected short row in the session tool figures read.");
+                toolsOffered.Add(row.ToolName);
             }
 
-            switch (cols[0])
+            if (!defStats.TryGetValue(row.ToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
             {
-                case "HARNESS":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for HARNESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    harnessId = ParseNullableHex(cols[1], cols[2], "session.harness_id");
-                    break;
-
-                case "MODEL":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for MODEL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    primaryModel = ParseNullableHex(cols[1], cols[2], "record_model.model_id");
-                    break;
-
-                case "CALL":
-                    if (cols.Length != 7)
-                    {
-                        throw new StoredDataException($"Expected 7 columns for CALL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    toolCallTotal++;
-                    string callToolName = ParseHexRequired(cols[2], "tool_call.tool_name");
-                    if (seenInvokedTools.Add(callToolName))
-                    {
-                        toolsInvoked.Add(callToolName);
-                    }
-
-                    invCounts[callToolName] = invCounts.GetValueOrDefault(callToolName) + 1;
-                    bool? succeeded = ParseOptionalBool(cols[3], cols[4], "tool_call_outcome.succeeded");
-                    string? callError = ParseNullableHex(cols[5], cols[6], "tool_call_error.message");
-                    if (succeeded == false || callError is not null)
-                    {
-                        errCounts[callToolName] = errCounts.GetValueOrDefault(callToolName) + 1;
-                    }
-
-                    break;
-
-                case "DEF":
-                    if (cols.Length != 7)
-                    {
-                        throw new StoredDataException($"Expected 7 columns for DEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    string defSpan = ParseHexRequired(cols[1], "tool_definition.span_id");
-                    definitionsSpanId ??= defSpan;
-                    string defToolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
-                    long schemaTokens = ParseInt64Required(cols[4], "tool_definition.schema_tokens");
-                    string? defServer = ParseNullableHex(cols[5], cols[6], "tool_definition_server.server_name");
-                    if (seenOfferedTools.Add(defToolName))
-                    {
-                        toolsOffered.Add(defToolName);
-                    }
-
-                    if (!defStats.TryGetValue(defToolName, out (long SchemaTokens, string? Server, HashSet<string> SpanIds) existing))
-                    {
-                        defStats[defToolName] = (schemaTokens, defServer, new HashSet<string>(StringComparer.Ordinal) { defSpan });
-                    }
-                    else
-                    {
-                        _ = existing.SpanIds.Add(defSpan);
-                        defStats[defToolName] = (existing.SchemaTokens, existing.Server ?? defServer, existing.SpanIds);
-                    }
-
-                    break;
-
-                case "SCH":
-                    if (cols.Length != 5)
-                    {
-                        throw new StoredDataException($"Expected 5 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    schema = new StoredSessionSchema(
-                        InvocationCount: ParseInt32Required(cols[1], "session_schema.invocation_count"),
-                        TurnCount: ParseInt32Required(cols[2], "session_schema.turn_count"),
-                        RankedTools: rankedTools,
-                        Servers: schemaServers,
-                        UnusedTokenResidencies: ParseNullableInt64(cols[3], cols[4], "session_schema_unused.token_residencies"));
-                    break;
-
-                case "SCH_REASON":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for SCH_REASON row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    schemaUnmeasurableReason = ParseNullableHex(cols[1], cols[2], "session_schema_unmeasurable.reason");
-                    break;
-
-                case "SCH_TOOL":
-                    if (cols.Length != 7)
-                    {
-                        throw new StoredDataException($"Expected 7 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    rankedTools.Add(new StoredSchemaRankedTool(
-                        Position: ParseInt32Required(cols[1], "session_schema_ranked_tool.position"),
-                        ToolName: ParseHexRequired(cols[2], "session_schema_ranked_tool.tool_name"),
-                        CostTokens: ParseInt64Required(cols[3], "session_schema_ranked_tool.cost_tokens"),
-                        Invoked: ParseBoolFlag(cols[4], "session_schema_ranked_tool.invoked"),
-                        ServerName: ParseNullableHex(cols[5], cols[6], "session_schema_ranked_tool_server.server_name")));
-                    break;
-
-                case "SCH_SRV":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    schemaServers.Add(new StoredSchemaServerTokens(
-                        ServerName: ParseHexRequired(cols[1], "session_schema_server.server_name"),
-                        Tokens: ParseInt64Required(cols[2], "session_schema_server.tokens")));
-                    break;
-
-                default:
-                    throw new StoredDataException($"Unexpected row tag in the session tool figures read: '{cols[0]}'.");
+                defStats[row.ToolName] = (row.SchemaTokens, row.Server, new HashSet<string>(StringComparer.Ordinal) { row.SpanId });
+            }
+            else
+            {
+                _ = existing.SpanIds.Add(row.SpanId);
+                defStats[row.ToolName] = (existing.SchemaTokens, existing.Server ?? row.Server, existing.SpanIds);
             }
         }
+
+        List<StoredSchemaRankedTool> rankedTools = [];
+        foreach (StoredSchemaRankedTool ranked in QueryRows<StoredSchemaRankedTool>(
+                     "SELECT t.position, t.tool_name, t.cost_tokens, t.invoked, s.server_name " +
+                     "FROM session_schema_ranked_tool t " +
+                     "LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position " +
+                     $"WHERE t.session_id = {key} ORDER BY t.position ASC",
+                     parameters,
+                     static reader => new StoredSchemaRankedTool(
+                         Position: reader.GetInt32(reader.GetOrdinal("position")),
+                         ToolName: reader.GetString(reader.GetOrdinal("tool_name")),
+                         CostTokens: reader.GetInt64(reader.GetOrdinal("cost_tokens")),
+                         Invoked: reader.GetInt64(reader.GetOrdinal("invoked")) == 1L,
+                         ServerName: reader.IsDBNull(reader.GetOrdinal("server_name")) ? null : reader.GetString(reader.GetOrdinal("server_name")))))
+        {
+            rankedTools.Add(ranked);
+        }
+
+        List<StoredSchemaServerTokens> schemaServers = [];
+        foreach (StoredSchemaServerTokens server in QueryRows<StoredSchemaServerTokens>(
+                     "SELECT t.server_name, t.tokens FROM session_schema_server t " +
+                     $"WHERE t.session_id = {key} ORDER BY t.rowid ASC",
+                     parameters,
+                     static reader => new StoredSchemaServerTokens(
+                         ServerName: reader.GetString(reader.GetOrdinal("server_name")),
+                         Tokens: reader.GetInt64(reader.GetOrdinal("tokens")))))
+        {
+            schemaServers.Add(server);
+        }
+
+        StoredSessionSchema? schema = null;
+        IReadOnlyList<(int InvocationCount, int TurnCount, long? Unused)> schemaRows = QueryRows<(int InvocationCount, int TurnCount, long? Unused)>(
+            "SELECT t.invocation_count, t.turn_count, u.token_residencies FROM session_schema t " +
+            $"LEFT JOIN session_schema_unused u ON u.session_id = t.session_id WHERE t.session_id = {key}",
+            parameters,
+            static reader => (
+                reader.GetInt32(reader.GetOrdinal("invocation_count")),
+                reader.GetInt32(reader.GetOrdinal("turn_count")),
+                ReadNullableInt64(reader, "token_residencies")));
+        if (schemaRows.Count > 0)
+        {
+            schema = new StoredSessionSchema(
+                InvocationCount: schemaRows[0].InvocationCount,
+                TurnCount: schemaRows[0].TurnCount,
+                RankedTools: rankedTools,
+                Servers: schemaServers,
+                UnusedTokenResidencies: schemaRows[0].Unused);
+        }
+
+        IReadOnlyList<string?> reasonRows = QueryRows<string?>(
+            $"SELECT r.reason FROM session_schema_unmeasurable r WHERE r.session_id = {key}",
+            parameters,
+            static reader => reader.IsDBNull(0) ? null : reader.GetString(0));
+        string? schemaUnmeasurableReason = reasonRows.Count == 0 ? null : reasonRows[0];
 
         // The residency helpers price the stored schema only, so the read carries the schema in a
         // minimal projection shape instead of reading the session's whole projection.
@@ -1983,51 +1850,39 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     public IReadOnlyList<StoredSkillInvocation> SessionSkillFigures(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rsi.span_id AS BLOB)), hex(CAST(rsi.skill_name AS BLOB)) " +
-                     "FROM record_skill_invocation rsi " +
-                     "JOIN record_session_link rsl ON rsl.span_id = rsi.span_id " +
-                     $"WHERE rsl.session_key = {TextExpr(sessionKey)} ORDER BY rsi.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredSkillInvocation> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 2, "session record_skill_invocation page");
-            results.Add(new StoredSkillInvocation(
-                SpanId: ParseHexRequired(cols[0], "record_skill_invocation.span_id"),
-                SkillName: ParseHexRequired(cols[1], "record_skill_invocation.skill_name")));
-        }
-
-        return results;
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
+        string sql =
+            "SELECT rsi.span_id, rsi.skill_name " +
+            "FROM record_skill_invocation rsi " +
+            "JOIN record_session_link rsl ON rsl.span_id = rsi.span_id " +
+            $"WHERE rsl.session_key = {key} ORDER BY rsi.rowid ASC";
+        return QueryRows<StoredSkillInvocation>(sql, parameters, static reader => new StoredSkillInvocation(
+            SpanId: reader.GetString(reader.GetOrdinal("span_id")),
+            SkillName: reader.GetString(reader.GetOrdinal("skill_name"))));
     }
 
     /// <inheritdoc />
     public IReadOnlyList<StoredSkillListing> SessionSkillListings(string sessionKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
-        string keyExpr = TextExpr(sessionKey);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(rsk.span_id AS BLOB)), hex(CAST(rsk.skill_name AS BLOB)), COALESCE(st.position, -1) " +
-                     "FROM record_skill_listing rsk " +
-                     "JOIN record_session_link rsl ON rsl.span_id = rsk.span_id " +
-                     "JOIN record r ON r.span_id = rsk.span_id " +
-                     $"LEFT JOIN session_turn st ON st.span_id = rsk.span_id AND st.session_id = {keyExpr} " +
-                     $"WHERE rsl.session_key = {keyExpr} ORDER BY r.rowid ASC, rsk.position ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredSkillListing> results = [];
-        foreach (string line in TabLines(output))
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
+        string sql =
+            "SELECT rsk.span_id, rsk.skill_name, COALESCE(st.position, -1) AS turn_position " +
+            "FROM record_skill_listing rsk " +
+            "JOIN record_session_link rsl ON rsl.span_id = rsk.span_id " +
+            "JOIN record r ON r.span_id = rsk.span_id " +
+            $"LEFT JOIN session_turn st ON st.span_id = rsk.span_id AND st.session_id = {key} " +
+            $"WHERE rsl.session_key = {key} ORDER BY r.rowid ASC, rsk.position ASC";
+        return QueryRows<StoredSkillListing>(sql, parameters, static reader =>
         {
-            string[] cols = SplitTabLine(line, 3, "session record_skill_listing");
-            int turn = ParseInt32Required(cols[2], "session_turn.position");
-            results.Add(new StoredSkillListing(
-                SpanId: ParseHexRequired(cols[0], "record_skill_listing.span_id"),
-                SkillName: ParseHexRequired(cols[1], "record_skill_listing.skill_name"),
-                TurnIndex: turn >= 0 ? turn : null));
-        }
-
-        return results;
+            int turn = reader.GetInt32(reader.GetOrdinal("turn_position"));
+            return new StoredSkillListing(
+                SpanId: reader.GetString(reader.GetOrdinal("span_id")),
+                SkillName: reader.GetString(reader.GetOrdinal("skill_name")),
+                TurnIndex: turn >= 0 ? turn : null);
+        });
     }
 
     /// <summary>
@@ -2058,58 +1913,52 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // D17 load rule is the statement's filter and the page answers from LIMIT/OFFSET, so a
         // page never reads the reply head of a load outside it. The call's input is never joined:
         // the skill is read from the reply header (D17).
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append("SELECT 'KWLOAD', (SELECT COUNT(*) FROM (SELECT tc.span_id FROM tool_call tc ");
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
+        StringBuilder sql = new();
+        sql.Append("SELECT (SELECT COUNT(*) FROM (SELECT tc.span_id FROM tool_call tc ");
         sql.Append("JOIN record r ON r.span_id = tc.span_id ");
         sql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
-        AppendSessionKwLoadPredicate(sql, sessionKey);
-        sql.Append(")), ");
-        sql.Append("hex(CAST(tc.span_id AS BLOB)), hex(CAST(tc.tool_name AS BLOB)), ");
-        sql.Append("typeof(tcm.server_name), COALESCE(hex(CAST(tcm.server_name AS BLOB)), ''), ");
-        sql.Append("typeof(tcm.server_tool_name), COALESCE(hex(CAST(tcm.server_tool_name AS BLOB)), ''), ");
-        sql.Append("typeof(tcrt.text), COALESCE(hex(CAST(substr(tcrt.text, 1, 1024) AS BLOB)), ''), ");
-        sql.Append("hex(CAST(r.started_at_utc AS BLOB)) ");
+        AppendSessionKwLoadPredicate(sql, key, parameters);
+        sql.Append(")) AS page_total, ");
+        sql.Append("tc.span_id, tc.tool_name, ");
+        sql.Append("tcm.server_name, ");
+        sql.Append("tcm.server_tool_name, ");
+        sql.Append("substr(tcrt.text, 1, 1024) AS reply_head, ");
+        sql.Append("r.started_at_utc ");
         sql.Append("FROM tool_call tc ");
         sql.Append("JOIN record r ON r.span_id = tc.span_id ");
         sql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
         sql.Append("LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id ");
-        AppendSessionKwLoadPredicate(sql, sessionKey);
-        sql.Append(CultureInfo.InvariantCulture, $" ORDER BY r.started_at_utc {sqlOrder}, tc.rowid {sqlOrder} LIMIT {IntSql(limit)} OFFSET {LongSql(((long)page - 1) * limit)};\n");
+        AppendSessionKwLoadPredicate(sql, key, parameters);
+        string limitMarker = Bind(parameters, limit);
+        string offsetMarker = Bind(parameters, ((long)page - 1) * limit);
+        sql.Append(CultureInfo.InvariantCulture, $" ORDER BY r.started_at_utc {sqlOrder}, tc.rowid {sqlOrder} LIMIT {limitMarker} OFFSET {offsetMarker}");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<StoredKwSkillLoad> results = [];
-        int total = 0;
-        foreach (string line in TabLines(output))
+        IReadOnlyList<StoredKwSkillLoad> results = QueryRows<StoredKwSkillLoad>(
+            sql.ToString(),
+            parameters,
+            static reader => new StoredKwSkillLoad(
+                SpanId: reader.GetString(reader.GetOrdinal("span_id")),
+                ToolName: reader.GetString(reader.GetOrdinal("tool_name")),
+                McpServerName: ReadNullableString(reader, "server_name"),
+                McpToolName: ReadNullableString(reader, "server_tool_name"),
+                ReplyHead: ReadNullableString(reader, "reply_head"),
+                StartedAtUtc: ParseTimestampRequired(reader.GetString(reader.GetOrdinal("started_at_utc")), "record.started_at_utc")));
+
+        StringBuilder countSql = new();
+        countSql.Append("SELECT COUNT(*) AS page_total FROM (SELECT tc.span_id FROM tool_call tc ");
+        countSql.Append("JOIN record r ON r.span_id = tc.span_id ");
+        countSql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
+        AppendSessionKwLoadPredicate(countSql, key, parameters);
+        countSql.Append(')');
+        IReadOnlyList<int> countRows = QueryRows<int>(countSql.ToString(), parameters, static reader => reader.GetInt32(reader.GetOrdinal("page_total")));
+        if (countRows.Count != 1)
         {
-            string[] cols = SplitTabLine(line, 11, "session KW skill load page");
-            total = ParseInt32Required(cols[1], "session KW skill load page total");
-            results.Add(new StoredKwSkillLoad(
-                SpanId: ParseHexRequired(cols[2], "tool_call.span_id"),
-                ToolName: ParseHexRequired(cols[3], "tool_call.tool_name"),
-                McpServerName: ParseNullableHex(cols[4], cols[5], "tool_call_mcp.server_name"),
-                McpToolName: ParseNullableHex(cols[6], cols[7], "tool_call_mcp.server_tool_name"),
-                ReplyHead: ParseNullableHex(cols[8], cols[9], "tool_call_result_text.text"),
-                StartedAtUtc: ParseTimestampRequired(ParseHexRequired(cols[10], "record.started_at_utc"), "record.started_at_utc")));
+            throw new StoredDataException($"Expected 1 count row for the session KW skill load page, got {countRows.Count.ToString(CultureInfo.InvariantCulture)}.");
         }
 
-        if (results.Count == 0)
-        {
-            StringBuilder countSql = new(TabReadScriptHeader);
-            countSql.Append("SELECT 'KWLOAD', COUNT(*) FROM (SELECT tc.span_id FROM tool_call tc ");
-            countSql.Append("JOIN record r ON r.span_id = tc.span_id ");
-            countSql.Append("LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id ");
-            AppendSessionKwLoadPredicate(countSql, sessionKey);
-            countSql.Append(");\n");
-            string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
-            if (countLines.Length != 1)
-            {
-                throw new StoredDataException($"Expected 1 count row for the session KW skill load page, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
-            }
-
-            total = ParseInt32Required(SplitTabLine(countLines[0], 2, "session KW skill load count")[1], "session KW skill load page total");
-        }
-
-        return new SessionKwSkillLoadPageResult(results, total);
+        return new SessionKwSkillLoadPageResult(results, countRows[0]);
     }
 
     /// <summary>Appends the D17 load predicate selecting a session's KW skill load rows.</summary>
@@ -2121,10 +1970,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// is not a load (D17), so the page and the total count loads only. The application
     /// recognizer keeps the final word on each row the page returns.
     /// </remarks>
-    private static void AppendSessionKwLoadPredicate(StringBuilder sql, string sessionKey)
+    private static void AppendSessionKwLoadPredicate(StringBuilder sql, string sessionMarker, Dictionary<string, object?> parameters)
     {
-        string unsplitNames = string.Join(", ", KwSkillLoadToolNames.Select(static name => TextExpr(name)));
-        sql.Append(CultureInfo.InvariantCulture, $"WHERE EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = tc.span_id AND rsl.session_key = {TextExpr(sessionKey)}) ");
+        string unsplitNames = string.Join(", ", KwSkillLoadToolNames.Select(name => Bind(parameters, name)));
+        sql.Append(CultureInfo.InvariantCulture, $"WHERE EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = tc.span_id AND rsl.session_key = {sessionMarker}) ");
         sql.Append("AND (");
         sql.Append("((tcm.server_name IS NOT NULL OR tcm.server_tool_name IS NOT NULL) ");
         sql.Append("AND LOWER(REPLACE(COALESCE(tcm.server_name, ''), '_', '-')) IN ('kw-docs', 'kyber-weave') ");
@@ -2144,36 +1993,36 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return [];
         }
 
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string sessionMarker = Bind(parameters, sessionKey);
         StringBuilder ctes = new("WITH RECURSIVE ");
-        AppendSessionSectionCtes(ctes, TextExpr(sessionKey));
+        AppendSessionSectionCtes(ctes, sessionMarker);
         ctes.Append("requested(request_span_id) AS (SELECT ");
-        ctes.Append(string.Join(" UNION ALL SELECT ", requested.Select(static id => TextExpr(id))));
+        ctes.Append(string.Join(" UNION ALL SELECT ", requested.Select(id => Bind(parameters, id))));
         ctes.Append("), ");
         ctes.Append("subtree(root, span) AS (SELECT request_span_id, request_span_id FROM requested UNION SELECT s.root, ch.span_id FROM subtree s JOIN record_parent ch ON ch.parent_span_id = s.span AND ch.span_id IN (SELECT span_id FROM spans)), ");
         ctes.Append("candidate(root, span, ord) AS (SELECT root, span, 0 FROM subtree WHERE span = root UNION SELECT s.root, t.span_id, 1 + t.position FROM subtree s JOIN turn_entries t ON t.span_id = s.span WHERE t.span_id <> s.root) ");
 
-        StringBuilder sql = new(TabReadScriptHeader);
+        StringBuilder sql = new();
         sql.Append(ctes);
-        sql.Append("SELECT 'PROMPT', hex(CAST(c.root AS BLOB)), hex(CAST(cp.span_id AS BLOB)), c.ord, cp.position, ");
-        sql.Append("hex(CAST(cp.bucket AS BLOB)), typeof(cpt.part_text), COALESCE(hex(CAST(cpt.part_text AS BLOB)), '') ");
+        sql.Append("SELECT c.root, cp.span_id, c.ord, cp.position, ");
+        sql.Append("cp.bucket, cpt.part_text ");
         sql.Append("FROM candidate c ");
         sql.Append("JOIN content_part cp ON cp.span_id = c.span ");
         sql.Append("LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position ");
-        sql.Append("ORDER BY c.root ASC, c.ord ASC, cp.position ASC;\n");
+        sql.Append("ORDER BY c.root ASC, c.ord ASC, cp.position ASC");
 
-        string output = ExecuteSqlite(sql.ToString());
-        List<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> partRows = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 8, "request prompt parts");
-            partRows.Add((
-                ParseHexRequired(cols[1], "content_part request root"),
-                ParseInt32Required(cols[3], "content_part candidate order"),
-                ParseHexRequired(cols[2], "content_part.span_id"),
-                ParseInt32Required(cols[4], "content_part.position"),
-                ParseContentBucket(ParseHexRequired(cols[5], "content_part.bucket")),
-                ParseNullableHex(cols[6], cols[7], "content_part_text.part_text")));
-        }
+        List<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)> partRows =
+            [.. QueryRows<(string Root, int Ord, string Span, int PartPosition, ContentBucket Bucket, string? PlainText)>(
+                sql.ToString(),
+                parameters,
+                static reader => (
+                    reader.GetString(reader.GetOrdinal("root")),
+                    reader.GetInt32(reader.GetOrdinal("ord")),
+                    reader.GetString(reader.GetOrdinal("span_id")),
+                    reader.GetInt32(reader.GetOrdinal("position")),
+                    ParseContentBucket(reader.GetString(reader.GetOrdinal("bucket"))),
+                    ReadNullableString(reader, "part_text")))];
 
         List<StoredRequestPromptPreview> previews = new(requested.Length);
         foreach (string root in requested)
@@ -2287,19 +2136,20 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="ctes">The read's common table expressions, already carrying <c>WITH RECURSIVE</c>.</param>
     /// <param name="setName">The CTE the rows are cut from.</param>
     /// <param name="displayName">Name the parse errors carry.</param>
+    /// <param name="parameters">Parameter values the count binds.</param>
     /// <returns>The set's row count.</returns>
-    private int ReadSessionSectionTotal(StringBuilder ctes, string setName, string displayName)
+    private int ReadSessionSectionTotal(StringBuilder ctes, string setName, string displayName, Dictionary<string, object?> parameters)
     {
-        StringBuilder countSql = new(TabReadScriptHeader);
+        StringBuilder countSql = new();
         countSql.Append(ctes);
-        countSql.Append(CultureInfo.InvariantCulture, $"SELECT 'TOTAL', COUNT(*) FROM {setName};\n");
-        string[] countLines = [.. TabLines(ExecuteSqlite(countSql.ToString()))];
-        if (countLines.Length != 1)
+        countSql.Append(CultureInfo.InvariantCulture, $"SELECT COUNT(*) AS total FROM {setName}");
+        IReadOnlyList<int> countRows = QueryRows<int>(countSql.ToString(), parameters, static reader => reader.GetInt32(reader.GetOrdinal("total")));
+        if (countRows.Count != 1)
         {
-            throw new StoredDataException($"Expected 1 count row for the {displayName} count, got {countLines.Length.ToString(CultureInfo.InvariantCulture)}.");
+            throw new StoredDataException($"Expected 1 count row for the {displayName} count, got {countRows.Count.ToString(CultureInfo.InvariantCulture)}.");
         }
 
-        return ParseInt32Required(SplitTabLine(countLines[0], 2, displayName)[1], $"{displayName} total");
+        return countRows[0];
     }
 
     /// <summary>
@@ -2307,10 +2157,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// by one of the session's spans — as one parenthesized select.
     /// </summary>
     /// <param name="sql">Script the select is appended to.</param>
-    /// <param name="sessionKey">Canonical session key.</param>
-    private static void AppendSessionProblemAttachment(StringBuilder sql, string sessionKey)
+    /// <param name="key">Session key bound as one parameter marker.</param>
+    private static void AppendSessionProblemAttachment(StringBuilder sql, string key)
     {
-        string key = TextExpr(sessionKey);
         sql.Append("SELECT problem_id FROM ingest_problem_session WHERE session_id = ");
         sql.Append(key);
         sql.Append(" UNION SELECT psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key = ");
@@ -2336,19 +2185,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         // D11) and its response and request ids, so every record read hydrates the same join ids:
         // no trace, end time, token count, reported total, error or correction signal, tool
         // metadata, or content child row (decision D17).
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(
-            "SELECT 'TREC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
-            "hex(CAST(r.name AS BLOB)), hex(CAST(r.started_at_utc AS BLOB)), hex(CAST(r.status AS BLOB)), " +
-            "typeof(rsl.session_key), COALESCE(hex(CAST(rsl.session_key AS BLOB)), ''), " +
-            "typeof(rp.parent_span_id), COALESCE(hex(CAST(rp.parent_span_id AS BLOB)), ''), " +
-            "typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), " +
-            "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
-            "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
-            "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
-            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
-            RecordJoinIdColumns +
-            RecordSourceColumns +
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string key = Bind(parameters, sessionKey);
+        string sql =
+            "SELECT r.span_id, r.harness_id, r.op, r.kind, r.name, r.started_at_utc, r.status, " +
+            "rsl.session_key, rp.parent_span_id, rm.model_id, rrd.duration_ms, rrc.amount, rrc.currency, " +
+            "rdcw.declared_context_window, rrid.response_id, rqid.request_id, " +
+            "src.source_kind, src.harness_id AS source_harness_id, src.locator " +
             "FROM record r " +
             RecordSourceJoin +
             RecordJoinIdJoin +
@@ -2358,57 +2201,54 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             "LEFT JOIN record_reported_duration rrd ON rrd.span_id = r.span_id " +
             "LEFT JOIN record_reported_cost rrc ON rrc.span_id = r.span_id " +
             "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = r.span_id " +
-            $"WHERE rsl.session_key = {TextExpr(sessionKey)} ORDER BY r.rowid ASC;\n");
+            $"WHERE rsl.session_key = {key} ORDER BY r.rowid ASC";
 
-        List<CollectedRecord> records = [];
-        foreach (string line in TabLines(ExecuteSqlite(sql.ToString())))
-        {
-            string[] cols = line.Split('\t');
-            if (cols.Length != 29)
+        return QueryRows<CollectedRecord>(
+            sql,
+            parameters,
+            static reader =>
             {
-                throw new StoredDataException($"Expected 29 columns for TREC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-            }
+                double? costAmount = ReadNullableDouble(reader, "amount");
+                string? costCurrency = ReadNullableString(reader, "currency");
+                CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
+                    ? new CollectedCost(costAmount.Value, costCurrency)
+                    : costAmount.HasValue || costCurrency is not null
+                        ? throw new StoredDataException("Partial record_reported_cost row returned.")
+                        : null;
+                SourceKind sourceKind = ParseSourceKind(reader.GetString(reader.GetOrdinal("source_kind")));
+                string sourceName = sourceKind == SourceKind.File
+                    ? CanonSynth.FileSourcePrefix + reader.GetString(reader.GetOrdinal("source_harness_id"))
+                    : reader.GetString(reader.GetOrdinal("locator"));
 
-            string spanId = ParseHexRequired(cols[1], "record.span_id");
-            double? costAmount = ParseNullableDouble(cols[16], cols[17], "record_reported_cost.amount");
-            string? costCurrency = ParseNullableHex(cols[18], cols[19], "record_reported_cost.currency");
-            CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
-                ? new CollectedCost(costAmount.Value, costCurrency)
-                : costAmount.HasValue || costCurrency is not null
-                    ? throw new StoredDataException("Partial record_reported_cost row returned.")
-                    : null;
-
-            records.Add(new CollectedRecord(
-                spanId,
-                ParseHexRequired(cols[2], "record.harness_id"),
-                ParseRecordOp(ParseHexRequired(cols[3], "record.op")),
-                ParseRecordKind(ParseHexRequired(cols[4], "record.kind")),
-                ParseHexRequired(cols[5], "record.name"),
-                ParseTimestampRequired(ParseHexRequired(cols[6], "record.started_at_utc"), "record.started_at_utc"),
-                ParseRecordStatus(ParseHexRequired(cols[7], "record.status")),
-                ParseNullableHex(cols[8], cols[9], "record_session_link.session_key"),
-                ParseNullableHex(cols[10], cols[11], "record_parent.parent_span_id"),
-                TraceId: null,
-                ParseNullableHex(cols[12], cols[13], "record_model.model_id"),
-                EndedAt: null,
-                ParseNullableInt64(cols[14], cols[15], "record_reported_duration.duration_ms"),
-                Tokens: [],
-                reportedCost,
-                Parts: [],
-                Tool: null,
-                Agent: null,
-                SkillsInvoked: [],
-                AgentInstanceId: null,
-                ToolDefinitions: [],
-                new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, ParseNullableInt64(cols[20], cols[21], "record_declared_context_window.declared_context_window")),
-                ReportedInputTokens: null,
-                ReportedOutputTokens: null,
-                SourceName: ParseRecordSourceName(cols, startIndex: 26),
-                ResponseId: ParseNullableHex(cols[22], cols[23], "record_response_id.response_id"),
-                RequestId: ParseNullableHex(cols[24], cols[25], "record_request_id.request_id")));
-        }
-
-        return records;
+                return new CollectedRecord(
+                    reader.GetString(reader.GetOrdinal("span_id")),
+                    reader.GetString(reader.GetOrdinal("harness_id")),
+                    ParseRecordOp(reader.GetString(reader.GetOrdinal("op"))),
+                    ParseRecordKind(reader.GetString(reader.GetOrdinal("kind"))),
+                    reader.GetString(reader.GetOrdinal("name")),
+                    ParseTimestampRequired(reader.GetString(reader.GetOrdinal("started_at_utc")), "record.started_at_utc"),
+                    ParseRecordStatus(reader.GetString(reader.GetOrdinal("status"))),
+                    ReadNullableString(reader, "session_key"),
+                    ReadNullableString(reader, "parent_span_id"),
+                    TraceId: null,
+                    ReadNullableString(reader, "model_id"),
+                    EndedAt: null,
+                    ReadNullableInt64(reader, "duration_ms"),
+                    Tokens: [],
+                    reportedCost,
+                    Parts: [],
+                    Tool: null,
+                    Agent: null,
+                    SkillsInvoked: [],
+                    AgentInstanceId: null,
+                    ToolDefinitions: [],
+                    new CollectedRecordSignals(ErrorMessage: null, EditFailures: null, CorrectionRule: null, ReadNullableInt64(reader, "declared_context_window")),
+                    ReportedInputTokens: null,
+                    ReportedOutputTokens: null,
+                    SourceName: sourceName,
+                    ResponseId: ReadNullableString(reader, "response_id"),
+                    RequestId: ReadNullableString(reader, "request_id"));
+            });
     }
 
     private static IReadOnlyList<ReadTimeTurnSummary> BuildContentFreeTurnSummaries(
@@ -3004,7 +2844,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return grouped.TryGetValue(sessionKey, out List<Problem>? problems) ? problems : [];
     }
 
-    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys)
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionTurnsBySessionChunk);
+
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySessionChunk(IReadOnlyList<string> sessionKeys)
     {
         Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -3012,26 +2855,21 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return turnsBySession;
         }
 
-        string filter = SessionKeyListFilter(sessionKeys);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(session_id AS BLOB)), position, hex(CAST(span_id AS BLOB)) FROM session_turn " +
-                     $"WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC;\n";
-
-        string output = ExecuteSqlite(sql);
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(sessionKeys, parameters);
+        string sql =
+            "SELECT session_id, position, span_id FROM session_turn " +
+            $"WHERE session_id IN ({filter}) ORDER BY session_id ASC, position ASC";
         Dictionary<string, List<StoredSessionTurn>> grouped = new(StringComparer.Ordinal);
-        foreach (string line in TabLines(output))
+        foreach (StoredSessionTurn turn in QueryRows<StoredSessionTurn>(
+                     sql,
+                     parameters,
+                     static reader => new StoredSessionTurn(
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         reader.GetString(reader.GetOrdinal("span_id")))))
         {
-            string[] cols = SplitTabLine(line, 3, "session_turn");
-            string sessionId = ParseHexRequired(cols[0], "session_turn.session_id");
-            int position = ParseInt32Required(cols[1], "session_turn.position");
-            string spanId = ParseHexRequired(cols[2], "session_turn.span_id");
-            if (!grouped.TryGetValue(sessionId, out List<StoredSessionTurn>? turns))
-            {
-                turns = [];
-                grouped[sessionId] = turns;
-            }
-
-            turns.Add(new StoredSessionTurn(sessionId, position, spanId));
+            GetOrCreateList(grouped, turn.SessionId).Add(turn);
         }
 
         foreach (KeyValuePair<string, List<StoredSessionTurn>> entry in grouped)
@@ -3042,7 +2880,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return turnsBySession;
     }
 
-    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys)
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionIngestProblemsBySessionChunk);
+
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySessionChunk(IReadOnlyList<string> sessionKeys)
     {
         Dictionary<string, List<Problem>> problemsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -3050,117 +2891,92 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             return problemsBySession;
         }
 
-        string filter = SessionKeyListFilter(sessionKeys);
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(att.session_key AS BLOB)), " +
-                     "hex(CAST(ip.severity AS BLOB)), hex(CAST(ip.code AS BLOB)), hex(CAST(ip.message AS BLOB)), " +
-                     "typeof(ipl.location), COALESCE(hex(CAST(ipl.location AS BLOB)), ''), " +
-                     "typeof(ips.span_id), COALESCE(hex(CAST(ips.span_id AS BLOB)), ''), " +
-                     "typeof(ipst.stack), COALESCE(hex(CAST(ipst.stack AS BLOB)), '') " +
-                     "FROM ingest_problem ip " +
-                     "LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id " +
-                     "LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id " +
-                     "LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id " +
-                     "JOIN (" +
-                     $"SELECT session_id AS session_key, problem_id FROM ingest_problem_session WHERE session_id IN ({filter}) UNION " +
-                     $"SELECT rsl.session_key AS session_key, psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key IN ({filter})" +
-                     ") att ON att.problem_id = ip.problem_id " +
-                     "ORDER BY att.session_key ASC, ip.problem_id ASC;\n";
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string filter = SessionKeyListFilter(sessionKeys, parameters);
+        string sql =
+            "SELECT att.session_key, " +
+            "ip.severity, ip.code, ip.message, " +
+            "ipl.location, ips.span_id AS problem_span_id, ipst.stack " +
+            "FROM ingest_problem ip " +
+            "LEFT JOIN ingest_problem_location ipl ON ipl.problem_id = ip.problem_id " +
+            "LEFT JOIN ingest_problem_span ips ON ips.problem_id = ip.problem_id " +
+            "LEFT JOIN ingest_problem_stack ipst ON ipst.problem_id = ip.problem_id " +
+            "JOIN (" +
+            $"SELECT session_id AS session_key, problem_id FROM ingest_problem_session WHERE session_id IN ({filter}) UNION " +
+            $"SELECT rsl.session_key AS session_key, psp.problem_id FROM ingest_problem_span psp JOIN record_session_link rsl ON rsl.span_id = psp.span_id WHERE rsl.session_key IN ({filter})" +
+            ") att ON att.problem_id = ip.problem_id " +
+            "ORDER BY att.session_key ASC, ip.problem_id ASC";
 
-        string output = ExecuteSqlite(sql);
-        foreach (string line in TabLines(output))
+        foreach ((string SessionId, Problem Problem) row in QueryRows<(string SessionId, Problem Problem)>(
+                     sql,
+                     parameters,
+                     static reader =>
+                     {
+                         string? location = ReadNullableString(reader, "location") ?? ReadNullableString(reader, "problem_span_id");
+                         return (
+                             reader.GetString(reader.GetOrdinal("session_key")),
+                             new Problem(
+                                 ParseProblemSeverityValue(reader.GetString(reader.GetOrdinal("severity"))),
+                                 reader.GetString(reader.GetOrdinal("code")),
+                                 reader.GetString(reader.GetOrdinal("message")),
+                                 location,
+                                 ReadNullableString(reader, "stack")));
+                     }))
         {
-            string[] cols = SplitTabLine(line, 10, "session ingest_problem");
-            string sessionId = ParseHexRequired(cols[0], "ingest_problem session_key");
-            ProblemSeverity severity = ParseProblemSeverityValue(ParseHexRequired(cols[1], "ingest_problem.severity"));
-            string code = ParseHexRequired(cols[2], "ingest_problem.code");
-            string message = ParseHexRequired(cols[3], "ingest_problem.message");
-            string? location = ParseNullableHex(cols[4], cols[5], "ingest_problem_location.location")
-                ?? ParseNullableHex(cols[6], cols[7], "ingest_problem_span.span_id");
-            string? stack = ParseNullableHex(cols[8], cols[9], "ingest_problem_stack.stack");
-            if (!problemsBySession.TryGetValue(sessionId, out List<Problem>? problems))
-            {
-                problems = [];
-                problemsBySession[sessionId] = problems;
-            }
-
-            problems.Add(new Problem(severity, code, message, location, stack));
+            GetOrCreateList(problemsBySession, row.SessionId).Add(row.Problem);
         }
 
         return problemsBySession;
     }
 
     /// <summary>
-    /// Parses one tab-split <c>REC</c> row of a record query into a raw record header — the
-    /// shared parse behind both the broad record read and the content-free sessions-list read,
-    /// so both derive from the same scalar columns.
+    /// Reads one record row of a record query into a raw record header — the shared parse behind
+    /// both the broad record read and the content-free sessions-list read, so both derive from the
+    /// same scalar columns.
     /// </summary>
-    /// <param name="cols">Tab-split columns of the <c>REC</c> row.</param>
-    private static RawRecordHeader ParseRawRecordHeader(string[] cols)
+    /// <param name="reader">Reader positioned on a <see cref="RecordReadColumns"/> row.</param>
+    private static RawRecordHeader ReadRawRecordHeader(SqliteDataReader reader)
     {
-        if (cols.Length != 45)
-        {
-            throw new StoredDataException($"Expected 45 columns for REC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-        }
-
-        string spanId = ParseHexRequired(cols[1], "record.span_id");
-        string harnessId = ParseHexRequired(cols[2], "record.harness_id");
-        RecordOp op = ParseRecordOp(ParseHexRequired(cols[3], "record.op"));
-        RecordKind kind = ParseRecordKind(ParseHexRequired(cols[4], "record.kind"));
-        string name = ParseHexRequired(cols[5], "record.name");
-        DateTimeOffset startedAt = ParseTimestampRequired(ParseHexRequired(cols[6], "record.started_at_utc"), "record.started_at_utc");
-        RecordStatus status = ParseRecordStatus(ParseHexRequired(cols[7], "record.status"));
-        string? sessionKey = ParseNullableHex(cols[8], cols[9], "record_session_link.session_key");
-        string? parentSpanId = ParseNullableHex(cols[10], cols[11], "record_parent.parent_span_id");
-        string? traceId = ParseNullableHex(cols[12], cols[13], "record_trace.trace_id");
-        string? model = ParseNullableHex(cols[14], cols[15], "record_model.model_id");
-        string? endedRaw = ParseNullableHex(cols[16], cols[17], "record_end.ended_at_utc");
+        string? endedRaw = ReadNullableString(reader, "ended_at_utc");
         DateTimeOffset? endedAt = endedRaw is null ? null : ParseTimestampRequired(endedRaw, "record_end.ended_at_utc");
-        long? reportedDurationMs = ParseNullableInt64(cols[18], cols[19], "record_reported_duration.duration_ms");
-        double? costAmount = ParseNullableDouble(cols[20], cols[21], "record_reported_cost.amount");
-        string? costCurrency = ParseNullableHex(cols[22], cols[23], "record_reported_cost.currency");
+        double? costAmount = ReadNullableDouble(reader, "amount");
+        string? costCurrency = ReadNullableString(reader, "currency");
         CollectedCost? reportedCost = costAmount.HasValue && costCurrency is not null
             ? new CollectedCost(costAmount.Value, costCurrency)
             : costAmount.HasValue || costCurrency is not null
                 ? throw new StoredDataException("Partial record_reported_cost row returned.")
                 : null;
-        string? agentInstanceId = ParseNullableHex(cols[24], cols[25], "record_agent_instance.agent_instance_id");
-        string? errMsg = ParseNullableHex(cols[26], cols[27], "record_error.message");
-        long? editFailures = ParseNullableInt64(cols[28], cols[29], "record_edit_failure.failure_count");
-        string? correctionRule = ParseNullableHex(cols[30], cols[31], "record_correction_rule.correction_rule");
-        long? declaredWindow = ParseNullableInt64(cols[32], cols[33], "record_declared_context_window.declared_context_window");
-        long? repIn = ParseNullableInt64(cols[34], cols[35], "record_reported_total.input");
-        long? repOut = ParseNullableInt64(cols[36], cols[37], "record_reported_total.output");
-        string? responseId = ParseNullableHex(cols[38], cols[39], "record_response_id.response_id");
-        string? requestId = ParseNullableHex(cols[40], cols[41], "record_request_id.request_id");
-        string sourceName = ParseRecordSourceName(cols, startIndex: 42);
 
         return new RawRecordHeader(
-            spanId,
-            harnessId,
-            op,
-            kind,
-            name,
-            startedAt,
-            status,
-            sessionKey,
-            parentSpanId,
-            traceId,
-            model,
+            reader.GetString(reader.GetOrdinal("span_id")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            ParseRecordOp(reader.GetString(reader.GetOrdinal("op"))),
+            ParseRecordKind(reader.GetString(reader.GetOrdinal("kind"))),
+            reader.GetString(reader.GetOrdinal("name")),
+            ParseTimestampRequired(reader.GetString(reader.GetOrdinal("started_at_utc")), "record.started_at_utc"),
+            ParseRecordStatus(reader.GetString(reader.GetOrdinal("status"))),
+            ReadNullableString(reader, "session_key"),
+            ReadNullableString(reader, "parent_span_id"),
+            ReadNullableString(reader, "trace_id"),
+            ReadNullableString(reader, "model_id"),
             endedAt,
-            reportedDurationMs,
+            ReadNullableInt64(reader, "duration_ms"),
             reportedCost,
-            agentInstanceId,
-            new CollectedRecordSignals(errMsg, editFailures, correctionRule, declaredWindow),
-            repIn,
-            repOut,
-            sourceName,
-            responseId,
-            requestId);
+            ReadNullableString(reader, "agent_instance_id"),
+            new CollectedRecordSignals(
+                ReadNullableString(reader, "error_message"),
+                ReadNullableInt64(reader, "failure_count"),
+                ReadNullableString(reader, "correction_rule"),
+                ReadNullableInt64(reader, "declared_context_window")),
+            ReadNullableInt64(reader, "reported_input"),
+            ReadNullableInt64(reader, "reported_output"),
+            ReadRecordSourceName(reader),
+            ReadNullableString(reader, "response_id"),
+            ReadNullableString(reader, "request_id"));
     }
 
     /// <summary>
-    /// Parses the three <see cref="RecordSourceColumns"/> of a record row into the record's source
+    /// Reads the three <see cref="RecordSourceColumns"/> of a record row into the record's source
     /// name as the projection rules read it: the locator for an OTLP source, or
     /// <see cref="CanonSynth.FileSourcePrefix"/> followed by the source's harness for a file source.
     /// </summary>
@@ -3170,13 +2986,12 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// same prefix constant the file synthesizer stamps, which is what the projector's file-source
     /// test reads.
     /// </remarks>
-    /// <param name="cols">Tab-split columns of the record row.</param>
-    /// <param name="startIndex">Index of the first source column.</param>
-    private static string ParseRecordSourceName(string[] cols, int startIndex)
+    /// <param name="reader">Reader positioned on a <see cref="RecordReadColumns"/> row.</param>
+    private static string ReadRecordSourceName(SqliteDataReader reader)
     {
-        SourceKind kind = ParseSourceKind(ParseHexRequired(cols[startIndex], "source.source_kind"));
-        string harnessId = ParseHexRequired(cols[startIndex + 1], "source.harness_id");
-        string locator = ParseHexRequired(cols[startIndex + 2], "source.locator");
+        SourceKind kind = ParseSourceKind(reader.GetString(reader.GetOrdinal("source_kind")));
+        string harnessId = reader.GetString(reader.GetOrdinal("source_harness_id"));
+        string locator = reader.GetString(reader.GetOrdinal("locator"));
         return kind == SourceKind.File ? CanonSynth.FileSourcePrefix + harnessId : locator;
     }
 
@@ -3196,7 +3011,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
         IReadOnlyList<string> sessionKeys,
         bool includeToolMetadata = false,
-        string? scopedSpanId = null)
+        string? scopedSpanId = null) =>
+        scopedSpanId is not null
+            ? QueryContentFreeRecordsBySessionChunk(sessionKeys, includeToolMetadata, scopedSpanId)
+            : MergeKeyChunks(sessionKeys, chunk => QueryContentFreeRecordsBySessionChunk(chunk, includeToolMetadata, scopedSpanId: null));
+
+    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySessionChunk(
+        IReadOnlyList<string> sessionKeys,
+        bool includeToolMetadata,
+        string? scopedSpanId)
     {
         Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0 && scopedSpanId is null)
@@ -3206,159 +3029,83 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
 
         // A span-scoped read filters the record tables by that span alone, so the span inspector
         // pays for one record rather than its session's whole conversation metadata.
-        string? spanExpr = scopedSpanId is null ? null : TextExpr(scopedSpanId);
-        string keyFilter = SessionKeyListFilter(sessionKeys);
-        string recordFilter = spanExpr is null
+        Dictionary<string, object?> parameters = new(StringComparer.Ordinal);
+        string? spanMarker = scopedSpanId is null ? null : Bind(parameters, scopedSpanId);
+        string keyFilter = SessionKeyListFilter(sessionKeys, parameters);
+        string recordFilter = spanMarker is null
             ? $" WHERE rsl.session_key IN ({keyFilter})"
-            : $" WHERE r.span_id = {spanExpr}";
-        string tokenFilter = spanExpr is null
+            : $" WHERE r.span_id = {spanMarker}";
+        string tokenFilter = spanMarker is null
             ? $" WHERE r.span_id IN (SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
-            : $" WHERE r.span_id = {spanExpr}";
-        string linkedSpanIds = spanExpr is null
+            : $" WHERE r.span_id = {spanMarker}";
+        string linkedSpanIds = spanMarker is null
             ? $"(SELECT rsl.span_id FROM record_session_link rsl WHERE rsl.session_key IN ({keyFilter}))"
-            : $"({spanExpr})";
+            : $"({spanMarker})";
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(
-            "SELECT 'REC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
-            "hex(CAST(r.name AS BLOB)), hex(CAST(r.started_at_utc AS BLOB)), hex(CAST(r.status AS BLOB)), " +
-            "typeof(rsl.session_key), COALESCE(hex(CAST(rsl.session_key AS BLOB)), ''), " +
-            "typeof(rp.parent_span_id), COALESCE(hex(CAST(rp.parent_span_id AS BLOB)), ''), " +
-            "typeof(rt.trace_id), COALESCE(hex(CAST(rt.trace_id AS BLOB)), ''), " +
-            "typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), " +
-            "typeof(re.ended_at_utc), COALESCE(hex(CAST(re.ended_at_utc AS BLOB)), ''), " +
-            "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
-            "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
-            "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
-            "typeof(rai.agent_instance_id), COALESCE(hex(CAST(rai.agent_instance_id AS BLOB)), ''), " +
-            "typeof(rerr.message), COALESCE(hex(CAST(rerr.message AS BLOB)), ''), " +
-            "typeof(ref.failure_count), COALESCE(CAST(ref.failure_count AS TEXT), ''), " +
-            "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
-            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
-            "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
-            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
-            RecordJoinIdColumns +
-            RecordSourceColumns +
-            "FROM record r " +
-            RecordSourceJoin +
-            RecordJoinIdJoin +
-            "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
-            "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
-            "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
-            "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
-            "LEFT JOIN record_end re ON re.span_id = r.span_id " +
-            "LEFT JOIN record_reported_duration rrd ON rrd.span_id = r.span_id " +
-            "LEFT JOIN record_reported_cost rrc ON rrc.span_id = r.span_id " +
-            "LEFT JOIN record_agent_instance rai ON rai.span_id = r.span_id " +
-            "LEFT JOIN record_error rerr ON rerr.span_id = r.span_id " +
-            "LEFT JOIN record_edit_failure ref ON ref.span_id = r.span_id " +
-            "LEFT JOIN record_correction_rule rcr ON rcr.span_id = r.span_id " +
-            "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = r.span_id " +
-            "LEFT JOIN record_reported_total rrti ON rrti.span_id = r.span_id AND rrti.direction = 'input' " +
-            "LEFT JOIN record_reported_total rrto ON rrto.span_id = r.span_id AND rrto.direction = 'output'" +
-            $"{recordFilter} ORDER BY r.rowid ASC;\n");
+        string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
 
-        sql.Append(
-            "SELECT 'TOK', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.token_class AS BLOB)), r.token_count " +
-            $"FROM record_token_count r{tokenFilter} ORDER BY r.rowid ASC;\n");
+        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
+                     "SELECT r.span_id, r.token_class, r.token_count " +
+                     $"FROM record_token_count r{tokenFilter} ORDER BY r.rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                         reader.GetInt64(reader.GetOrdinal("token_count")))))
+        {
+            GetOrCreateList(tokensBySpan, row.SpanId).Add(new CollectedTokenCount(row.TokenClass, row.Count));
+        }
 
+        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
+        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
         if (includeToolMetadata)
         {
-            sql.Append(
-                "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-                "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
-                "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
-                "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
-                "FROM tool_definition td " +
-                "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
-                "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
-                $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC;\n");
+            foreach ((string SpanId, CollectedToolDefinition Definition) row in QueryRows<(string SpanId, CollectedToolDefinition Definition)>(
+                         "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
+                         "tdt.tokenizer, tdt.is_model_own " +
+                         "FROM tool_definition td " +
+                         "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                         "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
+                         $" WHERE td.span_id IN {linkedSpanIds} ORDER BY td.span_id ASC, td.position ASC",
+                         parameters,
+                         static reader => (
+                             reader.GetString(reader.GetOrdinal("span_id")),
+                             new CollectedToolDefinition(
+                                 reader.GetInt32(reader.GetOrdinal("position")),
+                                 reader.GetString(reader.GetOrdinal("tool_name")),
+                                 ReadNullableString(reader, "server_name"),
+                                 reader.GetInt64(reader.GetOrdinal("schema_tokens")),
+                                 ReadNullableString(reader, "tokenizer"),
+                                 !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
+            {
+                GetOrCreateList(defsBySpan, row.SpanId).Add(row.Definition);
+            }
 
             // The tool-call metadata joins deliberately omit tool_call_input_text and
             // tool_call_result_text: sizes, fingerprints, outcomes, errors, and exit codes are
             // metadata, and those two tables hold the only tool content.
-            sql.Append("SELECT 'TC', hex(CAST(tc.span_id AS BLOB)), ");
-            sql.Append(BuildToolCallMetadataColumns("tc"));
-            sql.Append(" FROM tool_call tc " +
-                       "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
-                       "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
-                       $" WHERE tc.span_id IN {linkedSpanIds} ORDER BY tc.rowid ASC;\n");
-        }
-
-        string output = ExecuteSqlite(sql.ToString());
-        List<RawRecordHeader> rawRecords = [];
-        Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
-
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 1)
+            string toolCallSql =
+                "SELECT tc.span_id, " + BuildToolCallMetadataColumns("tc") +
+                " FROM tool_call tc " +
+                "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
+                "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
+                $" WHERE tc.span_id IN {linkedSpanIds} ORDER BY tc.rowid ASC";
+            foreach ((string SpanId, CollectedToolCall Call) row in QueryRows<(string SpanId, CollectedToolCall Call)>(
+                         toolCallSql,
+                         parameters,
+                         static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadToolCallColumns(reader))))
             {
-                throw new StoredDataException("Unexpected empty row in QueryContentFreeRecordsBySession.");
-            }
-
-            switch (cols[0])
-            {
-                case "REC":
-                    rawRecords.Add(ParseRawRecordHeader(cols));
-                    break;
-
-                case "TOK":
-                    {
-                        if (cols.Length != 4)
-                        {
-                            throw new StoredDataException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "record_token_count.span_id");
-                        TokenClass tokenClass = ParseTokenClass(ParseHexRequired(cols[2], "record_token_count.token_class"));
-                        long count = ParseInt64Required(cols[3], "record_token_count.token_count");
-                        GetOrCreateList(tokensBySpan, spanId).Add(new CollectedTokenCount(tokenClass, count));
-                        break;
-                    }
-
-                case "TDEF":
-                    {
-                        if (cols.Length != 11)
-                        {
-                            throw new StoredDataException($"Expected 11 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
-                        int position = ParseInt32Required(cols[2], "tool_definition.position");
-                        string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
-                        string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
-                        long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
-                        string? tokenizer = ParseNullableHex(cols[7], cols[8], "tool_definition_tokenizer.tokenizer");
-                        long? tokenizerIsModelOwn = ParseNullableInt64(cols[9], cols[10], "tool_definition_tokenizer.is_model_own");
-                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L));
-                        break;
-                    }
-
-                case "TC":
-                    {
-                        if (cols.Length != 34)
-                        {
-                            throw new StoredDataException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "tool_call.span_id");
-                        toolCallsBySpan[spanId] = ParseToolCallColumns(cols, startIndex: 2);
-                        break;
-                    }
-
-                default:
-                    throw new StoredDataException($"Unexpected content-free record query row tag '{cols[0]}'.");
+                toolCallsBySpan[row.SpanId] = row.Call;
             }
         }
 
@@ -3408,7 +3155,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return recordsBySession;
     }
 
-    private IReadOnlyList<CollectedRecord> QueryRecords(string? wherePredicate)
+    private IReadOnlyList<CollectedRecord> QueryRecords(string? wherePredicate, Dictionary<string, object?> parameters)
     {
         string recordFilter = wherePredicate is null ? string.Empty : $" WHERE {wherePredicate}";
         string childSpanFilter = wherePredicate is null
@@ -3427,230 +3174,124 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             ? string.Empty
             : $" WHERE ai.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(
-            "SELECT 'REC', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.op AS BLOB)), hex(CAST(r.kind AS BLOB)), " +
-            "hex(CAST(r.name AS BLOB)), hex(CAST(r.started_at_utc AS BLOB)), hex(CAST(r.status AS BLOB)), " +
-            "typeof(rsl.session_key), COALESCE(hex(CAST(rsl.session_key AS BLOB)), ''), " +
-            "typeof(rp.parent_span_id), COALESCE(hex(CAST(rp.parent_span_id AS BLOB)), ''), " +
-            "typeof(rt.trace_id), COALESCE(hex(CAST(rt.trace_id AS BLOB)), ''), " +
-            "typeof(rm.model_id), COALESCE(hex(CAST(rm.model_id AS BLOB)), ''), " +
-            "typeof(re.ended_at_utc), COALESCE(hex(CAST(re.ended_at_utc AS BLOB)), ''), " +
-            "typeof(rrd.duration_ms), COALESCE(CAST(rrd.duration_ms AS TEXT), ''), " +
-            "typeof(rrc.amount), COALESCE(CAST(rrc.amount AS TEXT), ''), " +
-            "typeof(rrc.currency), COALESCE(hex(CAST(rrc.currency AS BLOB)), ''), " +
-            "typeof(rai.agent_instance_id), COALESCE(hex(CAST(rai.agent_instance_id AS BLOB)), ''), " +
-            "typeof(rerr.message), COALESCE(hex(CAST(rerr.message AS BLOB)), ''), " +
-            "typeof(ref.failure_count), COALESCE(CAST(ref.failure_count AS TEXT), ''), " +
-            "typeof(rcr.correction_rule), COALESCE(hex(CAST(rcr.correction_rule AS BLOB)), ''), " +
-            "typeof(rdcw.declared_context_window), COALESCE(CAST(rdcw.declared_context_window AS TEXT), ''), " +
-            "typeof(rrti.token_count), COALESCE(CAST(rrti.token_count AS TEXT), ''), " +
-            "typeof(rrto.token_count), COALESCE(CAST(rrto.token_count AS TEXT), ''), " +
-            RecordJoinIdColumns +
-            RecordSourceColumns +
-            "FROM record r " +
-            RecordSourceJoin +
-            RecordJoinIdJoin +
-            "LEFT JOIN record_session_link rsl ON rsl.span_id = r.span_id " +
-            "LEFT JOIN record_parent rp ON rp.span_id = r.span_id " +
-            "LEFT JOIN record_trace rt ON rt.span_id = r.span_id " +
-            "LEFT JOIN record_model rm ON rm.span_id = r.span_id " +
-            "LEFT JOIN record_end re ON re.span_id = r.span_id " +
-            "LEFT JOIN record_reported_duration rrd ON rrd.span_id = r.span_id " +
-            "LEFT JOIN record_reported_cost rrc ON rrc.span_id = r.span_id " +
-            "LEFT JOIN record_agent_instance rai ON rai.span_id = r.span_id " +
-            "LEFT JOIN record_error rerr ON rerr.span_id = r.span_id " +
-            "LEFT JOIN record_edit_failure ref ON ref.span_id = r.span_id " +
-            "LEFT JOIN record_correction_rule rcr ON rcr.span_id = r.span_id " +
-            "LEFT JOIN record_declared_context_window rdcw ON rdcw.span_id = r.span_id " +
-            "LEFT JOIN record_reported_total rrti ON rrti.span_id = r.span_id AND rrti.direction = 'input' " +
-            "LEFT JOIN record_reported_total rrto ON rrto.span_id = r.span_id AND rrto.direction = 'output'" +
-            $"{recordFilter} ORDER BY r.rowid ASC;\n");
+        string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
 
-        sql.Append(
-            "SELECT 'TOK', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.token_class AS BLOB)), r.token_count " +
-            $"FROM record_token_count r{childSpanFilter} ORDER BY r.rowid ASC;\n");
-
-        sql.Append(
-            "SELECT 'SKL', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.skill_name AS BLOB)) " +
-            $"FROM record_skill_invocation r{childSpanFilter} ORDER BY r.rowid ASC;\n");
-
-        sql.Append(
-            "SELECT 'LST', hex(CAST(r.span_id AS BLOB)), hex(CAST(r.skill_name AS BLOB)) " +
-            $"FROM record_skill_listing r{childSpanFilter} ORDER BY r.span_id ASC, r.position ASC;\n");
-
-        sql.Append("SELECT 'PART', hex(CAST(cp.span_id AS BLOB)), ");
-        sql.Append(BuildContentPartColumns("cp"));
-        sql.Append(" FROM content_part cp " +
-                   "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
-                   "LEFT JOIN content_part_withheld cpw ON cpw.span_id = cp.span_id AND cpw.position = cp.position " +
-                   "LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = cp.span_id AND cpwt.position = cp.position " +
-                   "LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = cp.span_id AND cprt.position = cp.position " +
-                   "LEFT JOIN content_part_server cps ON cps.span_id = cp.span_id AND cps.position = cp.position " +
-                   "LEFT JOIN content_part_role cpr ON cpr.span_id = cp.span_id AND cpr.position = cp.position " +
-                   "LEFT JOIN content_part_residency cpres ON cpres.span_id = cp.span_id AND cpres.position = cp.position " +
-                   "LEFT JOIN content_part_truncation cptr ON cptr.span_id = cp.span_id AND cptr.position = cp.position" +
-                   $"{partFilter} ORDER BY cp.span_id ASC, cp.position ASC;\n");
-
-        sql.Append(
-            "SELECT 'TDEF', hex(CAST(td.span_id AS BLOB)), td.position, hex(CAST(td.tool_name AS BLOB)), " +
-            "typeof(tds.server_name), COALESCE(hex(CAST(tds.server_name AS BLOB)), ''), td.schema_tokens, " +
-            "typeof(tdt.tokenizer), COALESCE(hex(CAST(tdt.tokenizer AS BLOB)), ''), " +
-            "typeof(tdt.is_model_own), COALESCE(CAST(tdt.is_model_own AS TEXT), '') " +
-            "FROM tool_definition td " +
-            "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
-            "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
-            $"{defFilter} ORDER BY td.span_id ASC, td.position ASC;\n");
-
-        sql.Append("SELECT 'TC', hex(CAST(tc.span_id AS BLOB)), ");
-        sql.Append(BuildToolCallColumns("tc"));
-        sql.Append(" FROM tool_call tc " +
-                   "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_input_text tcit ON tcit.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
-                   "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
-                   $"{tcFilter} ORDER BY tc.rowid ASC;\n");
-
-        sql.Append("SELECT 'AI', hex(CAST(ai.span_id AS BLOB)), ");
-        sql.Append(BuildAgentInvocationColumns("ai"));
-        sql.Append(" FROM agent_invocation ai " +
-                   "LEFT JOIN agent_invocation_spawn ais ON ais.span_id = ai.span_id " +
-                   "LEFT JOIN agent_invocation_outcome aio ON aio.span_id = ai.span_id " +
-                   "LEFT JOIN agent_invocation_error aie ON aie.span_id = ai.span_id" +
-                   $"{aiFilter} ORDER BY ai.rowid ASC;\n");
-
-        string output = ExecuteSqlite(sql.ToString());
-        List<RawRecordHeader> rawRecords = [];
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, List<string>> skillsBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, List<string>> listedBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, List<CollectedContentPart>> partsBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
-        Dictionary<string, CollectedAgentInvocation> agentCallsBySpan = new(StringComparer.Ordinal);
-
-        foreach (string line in TabLines(output))
+        foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
+                     "SELECT r.span_id, r.token_class, r.token_count " +
+                     $"FROM record_token_count r{childSpanFilter} ORDER BY r.rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                         reader.GetInt64(reader.GetOrdinal("token_count")))))
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 1)
-            {
-                throw new StoredDataException("Unexpected empty row in QueryRecords.");
-            }
+            GetOrCreateList(tokensBySpan, row.SpanId).Add(new CollectedTokenCount(row.TokenClass, row.Count));
+        }
 
-            switch (cols[0])
-            {
-                case "REC":
-                    {
-                        rawRecords.Add(ParseRawRecordHeader(cols));
-                        break;
-                    }
+        Dictionary<string, List<string>> skillsBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, string SkillName) row in QueryRows<(string SpanId, string SkillName)>(
+                     "SELECT r.span_id, r.skill_name " +
+                     $"FROM record_skill_invocation r{childSpanFilter} ORDER BY r.rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(skillsBySpan, row.SpanId).Add(row.SkillName);
+        }
 
-                case "TOK":
-                    {
-                        if (cols.Length != 4)
-                        {
-                            throw new StoredDataException($"Expected 4 columns for TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
+        Dictionary<string, List<string>> listedBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, string SkillName) row in QueryRows<(string SpanId, string SkillName)>(
+                     "SELECT r.span_id, r.skill_name " +
+                     $"FROM record_skill_listing r{childSpanFilter} ORDER BY r.span_id ASC, r.position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(listedBySpan, row.SpanId).Add(row.SkillName);
+        }
 
-                        string spanId = ParseHexRequired(cols[1], "record_token_count.span_id");
-                        TokenClass tokenClass = ParseTokenClass(ParseHexRequired(cols[2], "record_token_count.token_class"));
-                        long count = ParseInt64Required(cols[3], "record_token_count.token_count");
-                        GetOrCreateList(tokensBySpan, spanId).Add(new CollectedTokenCount(tokenClass, count));
-                        break;
-                    }
+        Dictionary<string, List<CollectedContentPart>> partsBySpan = new(StringComparer.Ordinal);
+        string partSql =
+            "SELECT cp.span_id, " + BuildContentPartColumns("cp") +
+            " FROM content_part cp " +
+            "LEFT JOIN content_part_text cpt ON cpt.span_id = cp.span_id AND cpt.position = cp.position " +
+            "LEFT JOIN content_part_withheld cpw ON cpw.span_id = cp.span_id AND cpw.position = cp.position " +
+            "LEFT JOIN content_part_withheld_tokenizer cpwt ON cpwt.span_id = cp.span_id AND cpwt.position = cp.position " +
+            "LEFT JOIN content_part_reported_tokens cprt ON cprt.span_id = cp.span_id AND cprt.position = cp.position " +
+            "LEFT JOIN content_part_server cps ON cps.span_id = cp.span_id AND cps.position = cp.position " +
+            "LEFT JOIN content_part_role cpr ON cpr.span_id = cp.span_id AND cpr.position = cp.position " +
+            "LEFT JOIN content_part_residency cpres ON cpres.span_id = cp.span_id AND cpres.position = cp.position " +
+            "LEFT JOIN content_part_truncation cptr ON cptr.span_id = cp.span_id AND cptr.position = cp.position" +
+            $"{partFilter} ORDER BY cp.span_id ASC, cp.position ASC";
+        foreach ((string SpanId, CollectedContentPart Part) row in QueryRows<(string SpanId, CollectedContentPart Part)>(
+                     partSql,
+                     parameters,
+                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadContentPartColumns(reader))))
+        {
+            GetOrCreateList(partsBySpan, row.SpanId).Add(row.Part);
+        }
 
-                case "SKL":
-                    {
-                        if (cols.Length != 3)
-                        {
-                            throw new StoredDataException($"Expected 3 columns for SKL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
+        Dictionary<string, List<CollectedToolDefinition>> defsBySpan = new(StringComparer.Ordinal);
+        foreach ((string SpanId, CollectedToolDefinition Definition) row in QueryRows<(string SpanId, CollectedToolDefinition Definition)>(
+                     "SELECT td.span_id, td.position, td.tool_name, tds.server_name, td.schema_tokens, " +
+                     "tdt.tokenizer, tdt.is_model_own " +
+                     "FROM tool_definition td " +
+                     "LEFT JOIN tool_definition_server tds ON tds.span_id = td.span_id AND tds.position = td.position " +
+                     "LEFT JOIN tool_definition_tokenizer tdt ON tdt.span_id = td.span_id AND tdt.position = td.position" +
+                     $"{defFilter} ORDER BY td.span_id ASC, td.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("span_id")),
+                         new CollectedToolDefinition(
+                             reader.GetInt32(reader.GetOrdinal("position")),
+                             reader.GetString(reader.GetOrdinal("tool_name")),
+                             ReadNullableString(reader, "server_name"),
+                             reader.GetInt64(reader.GetOrdinal("schema_tokens")),
+                             ReadNullableString(reader, "tokenizer"),
+                             !reader.IsDBNull(reader.GetOrdinal("is_model_own")) && reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
+        {
+            GetOrCreateList(defsBySpan, row.SpanId).Add(row.Definition);
+        }
 
-                        string spanId = ParseHexRequired(cols[1], "record_skill_invocation.span_id");
-                        string skill = ParseHexRequired(cols[2], "record_skill_invocation.skill_name");
-                        GetOrCreateList(skillsBySpan, spanId).Add(skill);
-                        break;
-                    }
+        Dictionary<string, CollectedToolCall> toolCallsBySpan = new(StringComparer.Ordinal);
+        string toolCallSql =
+            "SELECT tc.span_id, " + BuildToolCallColumns("tc") +
+            " FROM tool_call tc " +
+            "LEFT JOIN tool_call_mcp tcm ON tcm.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_size tcis ON tcis.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_text tcit ON tcit.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_fingerprint tcif ON tcif.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_input_truncation tcitrc ON tcitrc.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_result_size tcrs ON tcrs.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_result_text tcrt ON tcrt.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_result_truncation tcrtrc ON tcrtrc.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_outcome tco ON tco.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_error tce ON tce.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_error_code tcec ON tcec.span_id = tc.span_id " +
+            "LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = tc.span_id" +
+            $"{tcFilter} ORDER BY tc.rowid ASC";
+        foreach ((string SpanId, CollectedToolCall Call) row in QueryRows<(string SpanId, CollectedToolCall Call)>(
+                     toolCallSql,
+                     parameters,
+                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadToolCallColumns(reader))))
+        {
+            toolCallsBySpan[row.SpanId] = row.Call;
+        }
 
-                case "LST":
-                    {
-                        if (cols.Length != 3)
-                        {
-                            throw new StoredDataException($"Expected 3 columns for LST row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "record_skill_listing.span_id");
-                        string skill = ParseHexRequired(cols[2], "record_skill_listing.skill_name");
-                        GetOrCreateList(listedBySpan, spanId).Add(skill);
-                        break;
-                    }
-
-                case "PART":
-                    {
-                        if (cols.Length != ContentPartColumnCount + 2)
-                        {
-                            throw new StoredDataException($"Expected {(ContentPartColumnCount + 2).ToString(CultureInfo.InvariantCulture)} columns for PART row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "content_part.span_id");
-                        CollectedContentPart part = ParseContentPartColumns(cols, startIndex: 2);
-                        GetOrCreateList(partsBySpan, spanId).Add(part);
-                        break;
-                    }
-
-                case "TDEF":
-                    {
-                        if (cols.Length != 11)
-                        {
-                            throw new StoredDataException($"Expected 11 columns for TDEF row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "tool_definition.span_id");
-                        int position = ParseInt32Required(cols[2], "tool_definition.position");
-                        string toolName = ParseHexRequired(cols[3], "tool_definition.tool_name");
-                        string? server = ParseNullableHex(cols[4], cols[5], "tool_definition_server.server_name");
-                        long schemaTokens = ParseInt64Required(cols[6], "tool_definition.schema_tokens");
-                        string? tokenizer = ParseNullableHex(cols[7], cols[8], "tool_definition_tokenizer.tokenizer");
-                        long? tokenizerIsModelOwn = ParseNullableInt64(cols[9], cols[10], "tool_definition_tokenizer.is_model_own");
-                        GetOrCreateList(defsBySpan, spanId).Add(new CollectedToolDefinition(position, toolName, server, schemaTokens, tokenizer, tokenizerIsModelOwn == 1L));
-                        break;
-                    }
-
-                case "TC":
-                    {
-                        if (cols.Length != 34)
-                        {
-                            throw new StoredDataException($"Expected 34 columns for TC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "tool_call.span_id");
-                        toolCallsBySpan[spanId] = ParseToolCallColumns(cols, startIndex: 2);
-                        break;
-                    }
-
-                case "AI":
-                    {
-                        if (cols.Length != 9)
-                        {
-                            throw new StoredDataException($"Expected 9 columns for AI row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string spanId = ParseHexRequired(cols[1], "agent_invocation.span_id");
-                        agentCallsBySpan[spanId] = ParseAgentInvocationColumns(cols, startIndex: 2);
-                        break;
-                    }
-
-                default:
-                    throw new StoredDataException($"Unexpected record query row tag '{cols[0]}'.");
-            }
+        Dictionary<string, CollectedAgentInvocation> agentCallsBySpan = new(StringComparer.Ordinal);
+        string agentSql =
+            "SELECT ai.span_id, " + BuildAgentInvocationColumns("ai") +
+            " FROM agent_invocation ai " +
+            "LEFT JOIN agent_invocation_spawn ais ON ais.span_id = ai.span_id " +
+            "LEFT JOIN agent_invocation_outcome aio ON aio.span_id = ai.span_id " +
+            "LEFT JOIN agent_invocation_error aie ON aie.span_id = ai.span_id" +
+            $"{aiFilter} ORDER BY ai.rowid ASC";
+        foreach ((string SpanId, CollectedAgentInvocation Invocation) row in QueryRows<(string SpanId, CollectedAgentInvocation Invocation)>(
+                     agentSql,
+                     parameters,
+                     static reader => (reader.GetString(reader.GetOrdinal("span_id")), ReadAgentInvocationColumns(reader))))
+        {
+            agentCallsBySpan[row.SpanId] = row.Invocation;
         }
 
         List<CollectedRecord> materialized = new(rawRecords.Count);
@@ -3691,80 +3332,55 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return materialized;
     }
 
-    private IReadOnlyList<CollectedSession> QuerySessions(string? sessionPredicate, string? usagePredicate)
+    private IReadOnlyList<CollectedSession> QuerySessions(string? sessionPredicate, string? usagePredicate, Dictionary<string, object?> parameters)
     {
         string sessionFilter = sessionPredicate is null ? string.Empty : $" WHERE {sessionPredicate}";
         string usageFilter = usagePredicate is null ? string.Empty : $" WHERE {usagePredicate}";
 
-        string sql = TabReadScriptHeader +
-                     "SELECT 'SESS', hex(CAST(s.session_id AS BLOB)), hex(CAST(s.harness_id AS BLOB)), hex(CAST(s.native_session_id AS BLOB)), " +
-                     "typeof(sw.working_directory), COALESCE(hex(CAST(sw.working_directory AS BLOB)), ''), " +
-                     "typeof(sr.repo_name), COALESCE(hex(CAST(sr.repo_name AS BLOB)), ''), " +
-                     "typeof(sb.branch_name), COALESCE(hex(CAST(sb.branch_name AS BLOB)), ''), " +
-                     "typeof(st.title), COALESCE(hex(CAST(st.title AS BLOB)), '') " +
-                     "FROM session s " +
-                     "LEFT JOIN session_workspace sw ON sw.session_id = s.session_id " +
-                     "LEFT JOIN session_repository sr ON sr.session_id = s.session_id " +
-                     "LEFT JOIN session_branch sb ON sb.session_id = s.session_id " +
-                     "LEFT JOIN session_title st ON st.session_id = s.session_id" +
-                     $"{sessionFilter} ORDER BY s.rowid ASC;\n" +
-                     "SELECT 'USAGE', hex(CAST(u.session_id AS BLOB)), u.snapshot_position, hex(CAST(u.model_id AS BLOB)), hex(CAST(u.token_class AS BLOB)), u.token_count " +
-                     $"FROM session_model_usage u{usageFilter} ORDER BY u.session_id ASC, u.snapshot_position ASC, u.model_id ASC, u.token_class ASC;\n";
+        string sessionSql =
+            "SELECT s.session_id, s.harness_id, s.native_session_id, " +
+            "sw.working_directory, sr.repo_name, sb.branch_name, st.title " +
+            "FROM session s " +
+            "LEFT JOIN session_workspace sw ON sw.session_id = s.session_id " +
+            "LEFT JOIN session_repository sr ON sr.session_id = s.session_id " +
+            "LEFT JOIN session_branch sb ON sb.session_id = s.session_id " +
+            "LEFT JOIN session_title st ON st.session_id = s.session_id" +
+            $"{sessionFilter} ORDER BY s.rowid ASC";
+        List<RawSessionHeader> headers = [.. QueryRows<RawSessionHeader>(
+            sessionSql,
+            parameters,
+            static reader =>
+            {
+                string? workingDir = ReadNullableString(reader, "working_directory");
+                string? repo = ReadNullableString(reader, "repo_name");
+                string? branch = ReadNullableString(reader, "branch_name");
+                CollectedWorkspace? workspace = workingDir is null && repo is null && branch is null
+                    ? null
+                    : new CollectedWorkspace(workingDir, repo, branch);
+                return new RawSessionHeader(
+                    reader.GetString(reader.GetOrdinal("session_id")),
+                    reader.GetString(reader.GetOrdinal("harness_id")),
+                    reader.GetString(reader.GetOrdinal("native_session_id")),
+                    workspace,
+                    ReadNullableString(reader, "title"));
+            })];
 
-        string output = ExecuteSqlite(sql);
-        List<RawSessionHeader> headers = [];
         Dictionary<string, List<CollectedModelUsage>> usagesBySession = new(StringComparer.Ordinal);
-
-        foreach (string line in TabLines(output))
+        string usageSql =
+            "SELECT u.session_id, u.snapshot_position, u.model_id, u.token_class, u.token_count " +
+            $"FROM session_model_usage u{usageFilter} ORDER BY u.session_id ASC, u.snapshot_position ASC, u.model_id ASC, u.token_class ASC";
+        foreach ((string SessionId, CollectedModelUsage Usage) row in QueryRows<(string SessionId, CollectedModelUsage Usage)>(
+                     usageSql,
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new CollectedModelUsage(
+                             reader.GetInt32(reader.GetOrdinal("snapshot_position")),
+                             reader.GetString(reader.GetOrdinal("model_id")),
+                             ParseTokenClass(reader.GetString(reader.GetOrdinal("token_class"))),
+                             reader.GetInt64(reader.GetOrdinal("token_count"))))))
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 1)
-            {
-                throw new StoredDataException("Unexpected empty row in QuerySessions.");
-            }
-
-            switch (cols[0])
-            {
-                case "SESS":
-                    {
-                        if (cols.Length != 12)
-                        {
-                            throw new StoredDataException($"Expected 12 columns for SESS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string sessionId = ParseHexRequired(cols[1], "session.session_id");
-                        string harnessId = ParseHexRequired(cols[2], "session.harness_id");
-                        string nativeId = ParseHexRequired(cols[3], "session.native_session_id");
-                        string? workingDir = ParseNullableHex(cols[4], cols[5], "session_workspace.working_directory");
-                        string? repo = ParseNullableHex(cols[6], cols[7], "session_repository.repo_name");
-                        string? branch = ParseNullableHex(cols[8], cols[9], "session_branch.branch_name");
-                        string? title = ParseNullableHex(cols[10], cols[11], "session_title.title");
-                        CollectedWorkspace? workspace = workingDir is null && repo is null && branch is null
-                            ? null
-                            : new CollectedWorkspace(workingDir, repo, branch);
-                        headers.Add(new RawSessionHeader(sessionId, harnessId, nativeId, workspace, title));
-                        break;
-                    }
-
-                case "USAGE":
-                    {
-                        if (cols.Length != 6)
-                        {
-                            throw new StoredDataException($"Expected 6 columns for USAGE row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        string sessionId = ParseHexRequired(cols[1], "session_model_usage.session_id");
-                        int position = ParseInt32Required(cols[2], "session_model_usage.snapshot_position");
-                        string modelId = ParseHexRequired(cols[3], "session_model_usage.model_id");
-                        TokenClass tokenClass = ParseTokenClass(ParseHexRequired(cols[4], "session_model_usage.token_class"));
-                        long count = ParseInt64Required(cols[5], "session_model_usage.token_count");
-                        GetOrCreateList(usagesBySession, sessionId).Add(new CollectedModelUsage(position, modelId, tokenClass, count));
-                        break;
-                    }
-
-                default:
-                    throw new StoredDataException($"Unexpected session query row tag '{cols[0]}'.");
-            }
+            GetOrCreateList(usagesBySession, row.SessionId).Add(row.Usage);
         }
 
         List<CollectedSession> sessions = new(headers.Count);
@@ -3782,7 +3398,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return sessions;
     }
 
-    private IReadOnlyList<StoredSessionProjection> QuerySessionProjections(string? filterPredicate)
+    private IReadOnlyList<StoredSessionProjection> QuerySessionProjections(string? filterPredicate, Dictionary<string, object?> parameters)
     {
         string projWhere = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
         string subSelect = filterPredicate is null
@@ -3791,330 +3407,220 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         string childWhere = filterPredicate is null ? string.Empty : $" WHERE session_id IN ({subSelect})";
         string childAliasedWhere = filterPredicate is null ? string.Empty : $" WHERE t.session_id IN ({subSelect})";
 
-        StringBuilder sql = new(TabReadScriptHeader);
-        sql.Append(
-            "SELECT 'PROJ', " + SessionProjectionHeaderColumns + " " +
+        List<StoredSessionHeader> projHeaders = [.. QueryRows<StoredSessionHeader>(
+            "SELECT " + SessionProjectionHeaderColumns + " " +
             "FROM session_projection sp " + SessionProjectionHeaderJoins +
-            $"{projWhere} ORDER BY sp.started_at_utc DESC, sp.rowid ASC;\n");
+            $"{projWhere} ORDER BY sp.started_at_utc DESC, sp.rowid ASC",
+            parameters,
+            static reader => ReadSessionHeader(reader, 0))];
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'REQ', hex(CAST(session_id AS BLOB)), hex(CAST(request_span_id AS BLOB)) FROM session_request{childWhere} ORDER BY session_id ASC, position ASC;\n");
+        Dictionary<string, List<string>> requestsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string RequestSpanId) row in QueryRows<(string SessionId, string RequestSpanId)>(
+                     $"SELECT session_id, request_span_id FROM session_request{childWhere} ORDER BY session_id ASC, position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(requestsBySess, row.SessionId).Add(row.RequestSpanId);
+        }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'TURN', hex(CAST(session_id AS BLOB)), position, hex(CAST(span_id AS BLOB)) FROM session_turn{childWhere} ORDER BY session_id ASC, position ASC;\n");
+        Dictionary<string, List<StoredSessionTurn>> turnsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int Position, string SpanId) row in QueryRows<(string SessionId, int Position, string SpanId)>(
+                     $"SELECT session_id, position, span_id FROM session_turn{childWhere} ORDER BY session_id ASC, position ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetInt32(1), reader.GetString(2))))
+        {
+            GetOrCreateList(turnsBySess, row.SessionId).Add(new StoredSessionTurn(row.SessionId, row.Position, row.SpanId));
+        }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX', hex(CAST(session_id AS BLOB)), context_limit, hex(CAST(context_limit_source AS BLOB)), residual_total, fresh_jump_factor, accumulation_rate FROM session_context{childWhere};\n");
+        Dictionary<string, RawContextHeader> ctxHeadersBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, RawContextHeader Header) row in QueryRows<(string SessionId, RawContextHeader Header)>(
+                     $"SELECT session_id, context_limit, context_limit_source, residual_total, fresh_jump_factor, accumulation_rate FROM session_context{childWhere}",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new RawContextHeader(
+                             reader.GetInt64(reader.GetOrdinal("context_limit")),
+                             reader.GetString(reader.GetOrdinal("context_limit_source")),
+                             reader.GetInt64(reader.GetOrdinal("residual_total")),
+                             reader.GetDouble(reader.GetOrdinal("fresh_jump_factor")),
+                             reader.GetDouble(reader.GetOrdinal("accumulation_rate"))))))
+        {
+            ctxHeadersBySess[row.SessionId] = row.Header;
+        }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX_OBS', hex(CAST(session_id AS BLOB)), hex(CAST(bucket AS BLOB)) FROM session_context_observed_part{childWhere} ORDER BY session_id ASC, rowid ASC;\n");
+        Dictionary<string, List<string>> obsBucketsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string Bucket) row in QueryRows<(string SessionId, string Bucket)>(
+                     $"SELECT session_id, bucket FROM session_context_observed_part{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(obsBucketsBySess, row.SessionId).Add(row.Bucket);
+        }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX_DER', hex(CAST(session_id AS BLOB)), hex(CAST(counter AS BLOB)), count FROM session_context_derived_count{childWhere} ORDER BY session_id ASC, rowid ASC;\n");
+        Dictionary<string, List<StoredSessionContextDerivedCount>> derivedBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, StoredSessionContextDerivedCount Count) row in QueryRows<(string SessionId, StoredSessionContextDerivedCount Count)>(
+                     $"SELECT session_id, counter, count FROM session_context_derived_count{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new StoredSessionContextDerivedCount(
+                             reader.GetString(reader.GetOrdinal("counter")),
+                             reader.GetInt64(reader.GetOrdinal("count"))))))
+        {
+            GetOrCreateList(derivedBySess, row.SessionId).Add(row.Count);
+        }
 
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX_FLAG', hex(CAST(session_id AS BLOB)), turn_index FROM session_context_flagged_turn{childWhere} ORDER BY session_id ASC, turn_index ASC;\n");
+        Dictionary<string, List<int>> flaggedBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int TurnIndex) row in QueryRows<(string SessionId, int TurnIndex)>(
+                     $"SELECT session_id, turn_index FROM session_context_flagged_turn{childWhere} ORDER BY session_id ASC, turn_index ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetInt32(1))))
+        {
+            GetOrCreateList(flaggedBySess, row.SessionId).Add(row.TurnIndex);
+        }
 
-        sql.Append(
-            "SELECT 'CTX_TURN', hex(CAST(t.session_id AS BLOB)), t.position, t.input_tokens, t.bucketed_tokens, t.residual_tokens, " +
-            "hex(CAST(t.residual_attribution AS BLOB)), t.builtin_tool_definition_tokens, t.fresh_input, " +
-            "typeof(h.headroom), COALESCE(CAST(h.headroom AS TEXT), ''), " +
-            "typeof(h.pressure), COALESCE(CAST(h.pressure AS TEXT), ''), " +
-            "typeof(a.rate), COALESCE(CAST(a.rate AS TEXT), ''), " +
-            "typeof(si.block_count), COALESCE(CAST(si.block_count AS TEXT), ''), " +
-            "typeof(si.tokens), COALESCE(CAST(si.tokens AS TEXT), ''), " +
-            "typeof(fj.previous_fresh_input), COALESCE(CAST(fj.previous_fresh_input AS TEXT), ''), " +
-            "typeof(fj.factor), COALESCE(CAST(fj.factor AS TEXT), ''), " +
-            "typeof(nr.tokens), COALESCE(CAST(nr.tokens AS TEXT), '') " +
+        Dictionary<string, List<RawContextTurnHeader>> ctxTurnsBySess = new(StringComparer.Ordinal);
+        string ctxTurnSql =
+            "SELECT t.session_id, t.position, t.input_tokens, t.bucketed_tokens, t.residual_tokens, " +
+            "t.residual_attribution, t.builtin_tool_definition_tokens, t.fresh_input, " +
+            "h.headroom, h.pressure, a.rate, si.block_count, si.tokens, " +
+            "fj.previous_fresh_input, fj.factor, nr.tokens AS non_resident_tokens " +
             "FROM session_context_turn t " +
             "LEFT JOIN session_context_turn_headroom h ON h.session_id = t.session_id AND h.position = t.position " +
             "LEFT JOIN session_context_turn_accumulation a ON a.session_id = t.session_id AND a.position = t.position " +
             "LEFT JOIN session_context_turn_stripped_instructions si ON si.session_id = t.session_id AND si.position = t.position " +
             "LEFT JOIN session_context_turn_fresh_jump fj ON fj.session_id = t.session_id AND fj.position = t.position " +
             "LEFT JOIN session_context_turn_non_resident nr ON nr.session_id = t.session_id AND nr.position = t.position" +
-            $"{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC;\n");
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX_T_BKT', hex(CAST(session_id AS BLOB)), position, hex(CAST(bucket AS BLOB)), tokens FROM session_context_turn_bucket{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC;\n");
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX_T_SRV', hex(CAST(session_id AS BLOB)), position, hex(CAST(server AS BLOB)), tokens FROM session_context_turn_server_definitions{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC;\n");
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'CTX_T_TOK', hex(CAST(session_id AS BLOB)), position, hex(CAST(tokenizer AS BLOB)), is_model_own FROM session_context_turn_tokenizer{childWhere} ORDER BY session_id ASC, position ASC, tokenizer ASC;\n");
-
-        sql.Append(
-            "SELECT 'SCH', hex(CAST(t.session_id AS BLOB)), t.invocation_count, t.turn_count, " +
-            "typeof(u.token_residencies), COALESCE(CAST(u.token_residencies AS TEXT), '') " +
-            "FROM session_schema t " +
-            $"LEFT JOIN session_schema_unused u ON u.session_id = t.session_id{childAliasedWhere};\n");
-
-        sql.Append(
-            "SELECT 'SCH_TOOL', hex(CAST(t.session_id AS BLOB)), t.position, hex(CAST(t.tool_name AS BLOB)), t.cost_tokens, t.invoked, " +
-            "typeof(s.server_name), COALESCE(hex(CAST(s.server_name AS BLOB)), '') " +
-            "FROM session_schema_ranked_tool t " +
-            $"LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC;\n");
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'SCH_SRV', hex(CAST(session_id AS BLOB)), hex(CAST(server_name AS BLOB)), tokens FROM session_schema_server{childWhere} ORDER BY session_id ASC, rowid ASC;\n");
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'TL_SUB', hex(CAST(session_id AS BLOB)), hex(CAST(span_id AS BLOB)) FROM session_timeline_subagent{childWhere} ORDER BY session_id ASC, rowid ASC;\n");
-
-        sql.Append(
-            CultureInfo.InvariantCulture,
-            $"SELECT 'TL_AUX', hex(CAST(session_id AS BLOB)), hex(CAST(span_id AS BLOB)) FROM session_timeline_auxiliary{childWhere} ORDER BY session_id ASC, rowid ASC;\n");
-
-        string output = ExecuteSqlite(sql.ToString());
-        List<StoredSessionHeader> projHeaders = [];
-        Dictionary<string, List<string>> requestsBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<StoredSessionTurn>> turnsBySess = new(StringComparer.Ordinal);
-        Dictionary<string, RawContextHeader> ctxHeadersBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<string>> obsBucketsBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<StoredSessionContextDerivedCount>> derivedBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<int>> flaggedBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<RawContextTurnHeader>> ctxTurnsBySess = new(StringComparer.Ordinal);
-        Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> ctxBucketsByTurn = [];
-        Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> ctxServersByTurn = [];
-        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> ctxTokenizersByTurn = [];
-        Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> schemaHeadersBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<StoredSchemaRankedTool>> rankedToolsBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<StoredSchemaServerTokens>> schemaServersBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<string>> subagentsBySess = new(StringComparer.Ordinal);
-        Dictionary<string, List<string>> auxiliariesBySess = new(StringComparer.Ordinal);
-
-        foreach (string line in TabLines(output))
+            $"{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC";
+        foreach ((string SessionId, RawContextTurnHeader Header) row in QueryRows<(string SessionId, RawContextTurnHeader Header)>(
+                     ctxTurnSql,
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new RawContextTurnHeader(
+                             reader.GetInt32(reader.GetOrdinal("position")),
+                             reader.GetInt64(reader.GetOrdinal("input_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("bucketed_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("residual_tokens")),
+                             reader.GetString(reader.GetOrdinal("residual_attribution")),
+                             reader.GetInt64(reader.GetOrdinal("builtin_tool_definition_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("fresh_input")),
+                             ReadNullableInt64(reader, "headroom"),
+                             ReadNullableDouble(reader, "pressure"),
+                             ReadNullableDouble(reader, "rate"),
+                             ReadNullableInt64(reader, "block_count"),
+                             ReadNullableInt64(reader, "tokens"),
+                             ReadNullableInt64(reader, "previous_fresh_input"),
+                             ReadNullableDouble(reader, "factor"),
+                             ReadNullableInt64(reader, "non_resident_tokens")))))
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 2)
-            {
-                throw new StoredDataException("Unexpected short row in QuerySessionProjections.");
-            }
+            GetOrCreateList(ctxTurnsBySess, row.SessionId).Add(row.Header);
+        }
 
-            switch (cols[0])
-            {
-                case "PROJ":
-                    if (cols.Length != 16)
-                    {
-                        throw new StoredDataException($"Expected 16 columns for PROJ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
+        Dictionary<(string SessionId, int Position), List<StoredTurnBucketTokens>> ctxBucketsByTurn = [];
+        foreach ((string SessionId, int Position, StoredTurnBucketTokens Bucket) row in QueryRows<(string SessionId, int Position, StoredTurnBucketTokens Bucket)>(
+                     $"SELECT session_id, position, bucket, tokens FROM session_context_turn_bucket{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         new StoredTurnBucketTokens(
+                             reader.GetString(reader.GetOrdinal("bucket")),
+                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
+        {
+            GetOrCreateList(ctxBucketsByTurn, (row.SessionId, row.Position)).Add(row.Bucket);
+        }
 
-                    projHeaders.Add(ParseSessionHeader(cols, 1));
-                    break;
+        Dictionary<(string SessionId, int Position), List<StoredTurnServerDefinitionTokens>> ctxServersByTurn = [];
+        foreach ((string SessionId, int Position, StoredTurnServerDefinitionTokens Server) row in QueryRows<(string SessionId, int Position, StoredTurnServerDefinitionTokens Server)>(
+                     $"SELECT session_id, position, server, tokens FROM session_context_turn_server_definitions{childWhere} ORDER BY session_id ASC, position ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         new StoredTurnServerDefinitionTokens(
+                             reader.GetString(reader.GetOrdinal("server")),
+                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
+        {
+            GetOrCreateList(ctxServersByTurn, (row.SessionId, row.Position)).Add(row.Server);
+        }
 
-                case "REQ":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for REQ row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
+        Dictionary<(string SessionId, int Position), List<TokenizerLabel>> ctxTokenizersByTurn = [];
+        foreach ((string SessionId, int Position, TokenizerLabel Label) row in QueryRows<(string SessionId, int Position, TokenizerLabel Label)>(
+                     $"SELECT session_id, position, tokenizer, is_model_own FROM session_context_turn_tokenizer{childWhere} ORDER BY session_id ASC, position ASC, tokenizer ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("position")),
+                         new TokenizerLabel(
+                             reader.GetString(reader.GetOrdinal("tokenizer")),
+                             reader.GetInt64(reader.GetOrdinal("is_model_own")) == 1L))))
+        {
+            GetOrCreateList(ctxTokenizersByTurn, (row.SessionId, row.Position)).Add(row.Label);
+        }
 
-                    GetOrCreateList(requestsBySess, ParseHexRequired(cols[1], "session_request.session_id"))
-                        .Add(ParseHexRequired(cols[2], "session_request.request_span_id"));
-                    break;
+        Dictionary<string, (int InvocationCount, int TurnCount, long? Unused)> schemaHeadersBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, int InvocationCount, int TurnCount, long? Unused) row in QueryRows<(string SessionId, int InvocationCount, int TurnCount, long? Unused)>(
+                     "SELECT t.session_id, t.invocation_count, t.turn_count, u.token_residencies " +
+                     "FROM session_schema t " +
+                     $"LEFT JOIN session_schema_unused u ON u.session_id = t.session_id{childAliasedWhere}",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         reader.GetInt32(reader.GetOrdinal("invocation_count")),
+                         reader.GetInt32(reader.GetOrdinal("turn_count")),
+                         ReadNullableInt64(reader, "token_residencies"))))
+        {
+            schemaHeadersBySess[row.SessionId] = (row.InvocationCount, row.TurnCount, row.Unused);
+        }
 
-                case "TURN":
-                    {
-                        if (cols.Length != 4)
-                        {
-                            throw new StoredDataException($"Expected 4 columns for TURN row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
+        Dictionary<string, List<StoredSchemaRankedTool>> rankedToolsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, StoredSchemaRankedTool Tool) row in QueryRows<(string SessionId, StoredSchemaRankedTool Tool)>(
+                     "SELECT t.session_id, t.position, t.tool_name, t.cost_tokens, t.invoked, s.server_name " +
+                     "FROM session_schema_ranked_tool t " +
+                     $"LEFT JOIN session_schema_ranked_tool_server s ON s.session_id = t.session_id AND s.position = t.position{childAliasedWhere} ORDER BY t.session_id ASC, t.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new StoredSchemaRankedTool(
+                             reader.GetInt32(reader.GetOrdinal("position")),
+                             reader.GetString(reader.GetOrdinal("tool_name")),
+                             reader.GetInt64(reader.GetOrdinal("cost_tokens")),
+                             reader.GetInt64(reader.GetOrdinal("invoked")) == 1L,
+                             ReadNullableString(reader, "server_name")))))
+        {
+            GetOrCreateList(rankedToolsBySess, row.SessionId).Add(row.Tool);
+        }
 
-                        string sid = ParseHexRequired(cols[1], "session_turn.session_id");
-                        int pos = ParseInt32Required(cols[2], "session_turn.position");
-                        string spid = ParseHexRequired(cols[3], "session_turn.span_id");
-                        GetOrCreateList(turnsBySess, sid).Add(new StoredSessionTurn(sid, pos, spid));
-                        break;
-                    }
+        Dictionary<string, List<StoredSchemaServerTokens>> schemaServersBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, StoredSchemaServerTokens Server) row in QueryRows<(string SessionId, StoredSchemaServerTokens Server)>(
+                     $"SELECT session_id, server_name, tokens FROM session_schema_server{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("session_id")),
+                         new StoredSchemaServerTokens(
+                             reader.GetString(reader.GetOrdinal("server_name")),
+                             reader.GetInt64(reader.GetOrdinal("tokens"))))))
+        {
+            GetOrCreateList(schemaServersBySess, row.SessionId).Add(row.Server);
+        }
 
-                case "CTX":
-                    {
-                        if (cols.Length != 7)
-                        {
-                            throw new StoredDataException($"Expected 7 columns for CTX row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
+        Dictionary<string, List<string>> subagentsBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string SpanId) row in QueryRows<(string SessionId, string SpanId)>(
+                     $"SELECT session_id, span_id FROM session_timeline_subagent{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(subagentsBySess, row.SessionId).Add(row.SpanId);
+        }
 
-                        string sid = ParseHexRequired(cols[1], "session_context.session_id");
-                        ctxHeadersBySess[sid] = new RawContextHeader(
-                            ParseInt64Required(cols[2], "session_context.context_limit"),
-                            ParseHexRequired(cols[3], "session_context.context_limit_source"),
-                            ParseInt64Required(cols[4], "session_context.residual_total"),
-                            ParseDoubleRequired(cols[5], "session_context.fresh_jump_factor"),
-                            ParseDoubleRequired(cols[6], "session_context.accumulation_rate"));
-                        break;
-                    }
-
-                case "CTX_OBS":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for CTX_OBS row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(obsBucketsBySess, ParseHexRequired(cols[1], "session_context_observed_part.session_id"))
-                        .Add(ParseHexRequired(cols[2], "session_context_observed_part.bucket"));
-                    break;
-
-                case "CTX_DER":
-                    if (cols.Length != 4)
-                    {
-                        throw new StoredDataException($"Expected 4 columns for CTX_DER row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(derivedBySess, ParseHexRequired(cols[1], "session_context_derived_count.session_id"))
-                        .Add(new StoredSessionContextDerivedCount(
-                            ParseHexRequired(cols[2], "session_context_derived_count.counter"),
-                            ParseInt64Required(cols[3], "session_context_derived_count.count")));
-                    break;
-
-                case "CTX_FLAG":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for CTX_FLAG row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(flaggedBySess, ParseHexRequired(cols[1], "session_context_flagged_turn.session_id"))
-                        .Add(ParseInt32Required(cols[2], "session_context_flagged_turn.turn_index"));
-                    break;
-
-                case "CTX_TURN":
-                    if (cols.Length != 25)
-                    {
-                        throw new StoredDataException($"Expected 25 columns for CTX_TURN row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(ctxTurnsBySess, ParseHexRequired(cols[1], "session_context_turn.session_id"))
-                        .Add(new RawContextTurnHeader(
-                            ParseInt32Required(cols[2], "session_context_turn.position"),
-                            ParseInt64Required(cols[3], "session_context_turn.input_tokens"),
-                            ParseInt64Required(cols[4], "session_context_turn.bucketed_tokens"),
-                            ParseInt64Required(cols[5], "session_context_turn.residual_tokens"),
-                            ParseHexRequired(cols[6], "session_context_turn.residual_attribution"),
-                            ParseInt64Required(cols[7], "session_context_turn.builtin_tool_definition_tokens"),
-                            ParseInt64Required(cols[8], "session_context_turn.fresh_input"),
-                            ParseNullableInt64(cols[9], cols[10], "session_context_turn_headroom.headroom"),
-                            ParseNullableDouble(cols[11], cols[12], "session_context_turn_headroom.pressure"),
-                            ParseNullableDouble(cols[13], cols[14], "session_context_turn_accumulation.rate"),
-                            ParseNullableInt64(cols[15], cols[16], "session_context_turn_stripped_instructions.block_count"),
-                            ParseNullableInt64(cols[17], cols[18], "session_context_turn_stripped_instructions.tokens"),
-                            ParseNullableInt64(cols[19], cols[20], "session_context_turn_fresh_jump.previous_fresh_input"),
-                            ParseNullableDouble(cols[21], cols[22], "session_context_turn_fresh_jump.factor"),
-                            ParseNullableInt64(cols[23], cols[24], "session_context_turn_non_resident.tokens")));
-                    break;
-
-                case "CTX_T_BKT":
-                    {
-                        if (cols.Length != 5)
-                        {
-                            throw new StoredDataException($"Expected 5 columns for CTX_T_BKT row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_bucket.session_id"), ParseInt32Required(cols[2], "session_context_turn_bucket.position"));
-                        GetOrCreateList(ctxBucketsByTurn, key).Add(new StoredTurnBucketTokens(
-                            ParseHexRequired(cols[3], "session_context_turn_bucket.bucket"),
-                            ParseInt64Required(cols[4], "session_context_turn_bucket.tokens")));
-                        break;
-                    }
-
-                case "CTX_T_SRV":
-                    {
-                        if (cols.Length != 5)
-                        {
-                            throw new StoredDataException($"Expected 5 columns for CTX_T_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_server_definitions.session_id"), ParseInt32Required(cols[2], "session_context_turn_server_definitions.position"));
-                        GetOrCreateList(ctxServersByTurn, key).Add(new StoredTurnServerDefinitionTokens(
-                            ParseHexRequired(cols[3], "session_context_turn_server_definitions.server"),
-                            ParseInt64Required(cols[4], "session_context_turn_server_definitions.tokens")));
-                        break;
-                    }
-
-                case "CTX_T_TOK":
-                    {
-                        if (cols.Length != 5)
-                        {
-                            throw new StoredDataException($"Expected 5 columns for CTX_T_TOK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        (string, int) key = (ParseHexRequired(cols[1], "session_context_turn_tokenizer.session_id"), ParseInt32Required(cols[2], "session_context_turn_tokenizer.position"));
-                        GetOrCreateList(ctxTokenizersByTurn, key).Add(new TokenizerLabel(
-                            ParseHexRequired(cols[3], "session_context_turn_tokenizer.tokenizer"),
-                            ParseInt64Required(cols[4], "session_context_turn_tokenizer.is_model_own") == 1L));
-                        break;
-                    }
-
-                case "SCH":
-                    if (cols.Length != 6)
-                    {
-                        throw new StoredDataException($"Expected 6 columns for SCH row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    schemaHeadersBySess[ParseHexRequired(cols[1], "session_schema.session_id")] = (
-                        ParseInt32Required(cols[2], "session_schema.invocation_count"),
-                        ParseInt32Required(cols[3], "session_schema.turn_count"),
-                        ParseNullableInt64(cols[4], cols[5], "session_schema_unused.token_residencies"));
-                    break;
-
-                case "SCH_TOOL":
-                    if (cols.Length != 8)
-                    {
-                        throw new StoredDataException($"Expected 8 columns for SCH_TOOL row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(rankedToolsBySess, ParseHexRequired(cols[1], "session_schema_ranked_tool.session_id"))
-                        .Add(new StoredSchemaRankedTool(
-                            ParseInt32Required(cols[2], "session_schema_ranked_tool.position"),
-                            ParseHexRequired(cols[3], "session_schema_ranked_tool.tool_name"),
-                            ParseInt64Required(cols[4], "session_schema_ranked_tool.cost_tokens"),
-                            ParseBoolFlag(cols[5], "session_schema_ranked_tool.invoked"),
-                            ParseNullableHex(cols[6], cols[7], "session_schema_ranked_tool_server.server_name")));
-                    break;
-
-                case "SCH_SRV":
-                    if (cols.Length != 4)
-                    {
-                        throw new StoredDataException($"Expected 4 columns for SCH_SRV row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(schemaServersBySess, ParseHexRequired(cols[1], "session_schema_server.session_id"))
-                        .Add(new StoredSchemaServerTokens(
-                            ParseHexRequired(cols[2], "session_schema_server.server_name"),
-                            ParseInt64Required(cols[3], "session_schema_server.tokens")));
-                    break;
-
-                case "TL_SUB":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for TL_SUB row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(subagentsBySess, ParseHexRequired(cols[1], "session_timeline_subagent.session_id"))
-                        .Add(ParseHexRequired(cols[2], "session_timeline_subagent.span_id"));
-                    break;
-
-                case "TL_AUX":
-                    if (cols.Length != 3)
-                    {
-                        throw new StoredDataException($"Expected 3 columns for TL_AUX row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(auxiliariesBySess, ParseHexRequired(cols[1], "session_timeline_auxiliary.session_id"))
-                        .Add(ParseHexRequired(cols[2], "session_timeline_auxiliary.span_id"));
-                    break;
-
-                default:
-                    throw new StoredDataException($"Unexpected projection query row tag '{cols[0]}'.");
-            }
+        Dictionary<string, List<string>> auxiliariesBySess = new(StringComparer.Ordinal);
+        foreach ((string SessionId, string SpanId) row in QueryRows<(string SessionId, string SpanId)>(
+                     $"SELECT session_id, span_id FROM session_timeline_auxiliary{childWhere} ORDER BY session_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (reader.GetString(0), reader.GetString(1))))
+        {
+            GetOrCreateList(auxiliariesBySess, row.SessionId).Add(row.SpanId);
         }
 
         List<StoredSessionProjection> projections = new(projHeaders.Count);
@@ -4209,131 +3715,80 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return projections;
     }
 
-    private IReadOnlyList<StoredRun> QueryRuns(string? filterPredicate)
+    private IReadOnlyList<StoredRun> QueryRuns(string? filterPredicate, Dictionary<string, object?> parameters)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(r.run_id AS BLOB)), hex(CAST(r.harness_id AS BLOB)), hex(CAST(r.grouping_basis AS BLOB)), hex(CAST(r.grouping_rule AS BLOB)), " +
-                     "r.execution_count, " +
-                     "typeof(rl.label), COALESCE(hex(CAST(rl.label AS BLOB)), ''), " +
-                     "typeof(rw.working_directory), COALESCE(hex(CAST(rw.working_directory AS BLOB)), ''), " +
-                     "typeof(rb.started_at_utc), COALESCE(hex(CAST(rb.started_at_utc AS BLOB)), ''), " +
-                     "typeof(rb.ended_at_utc), COALESCE(hex(CAST(rb.ended_at_utc AS BLOB)), '') " +
-                     "FROM run r " +
-                     "LEFT JOIN run_label rl ON rl.run_id = r.run_id " +
-                     "LEFT JOIN run_working_directory rw ON rw.run_id = r.run_id " +
-                     $"LEFT JOIN run_bounds rb ON rb.run_id = r.run_id{whereClause} ORDER BY r.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredRun> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 13, "run");
-            results.Add(new StoredRun(
-                ParseHexRequired(cols[0], "run.run_id"),
-                ParseHexRequired(cols[1], "run.harness_id"),
-                ParseHexRequired(cols[2], "run.grouping_basis"),
-                ParseHexRequired(cols[3], "run.grouping_rule"),
-                ParseInt32Required(cols[4], "run.execution_count"),
-                ParseNullableHex(cols[5], cols[6], "run_label.label"),
-                ParseNullableHex(cols[7], cols[8], "run_working_directory.working_directory"),
-                ParseNullableHex(cols[9], cols[10], "run_bounds.started_at_utc"),
-                ParseNullableHex(cols[11], cols[12], "run_bounds.ended_at_utc")));
-        }
-
-        return results;
+        string sql =
+            "SELECT r.run_id, r.harness_id, r.grouping_basis, r.grouping_rule, r.execution_count, " +
+            "rl.label, rw.working_directory, rb.started_at_utc, rb.ended_at_utc " +
+            "FROM run r " +
+            "LEFT JOIN run_label rl ON rl.run_id = r.run_id " +
+            "LEFT JOIN run_working_directory rw ON rw.run_id = r.run_id " +
+            $"LEFT JOIN run_bounds rb ON rb.run_id = r.run_id{whereClause} ORDER BY r.rowid ASC";
+        return QueryRows<StoredRun>(sql, parameters, static reader => new StoredRun(
+            reader.GetString(reader.GetOrdinal("run_id")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            reader.GetString(reader.GetOrdinal("grouping_basis")),
+            reader.GetString(reader.GetOrdinal("grouping_rule")),
+            reader.GetInt32(reader.GetOrdinal("execution_count")),
+            ReadNullableString(reader, "label"),
+            ReadNullableString(reader, "working_directory"),
+            ReadNullableString(reader, "started_at_utc"),
+            ReadNullableString(reader, "ended_at_utc")));
     }
 
-    private IReadOnlyList<StoredExecution> QueryExecutions(string? filterPredicate)
+    private IReadOnlyList<StoredExecution> QueryExecutions(string? filterPredicate, Dictionary<string, object?> parameters)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(e.execution_id AS BLOB)), hex(CAST(e.run_id AS BLOB)), hex(CAST(e.harness_id AS BLOB)), e.is_root, " +
-                     "typeof(es.session_id), COALESCE(hex(CAST(es.session_id AS BLOB)), ''), " +
-                     "typeof(ep.parent_execution_id), COALESCE(hex(CAST(ep.parent_execution_id AS BLOB)), ''), " +
-                     "typeof(ea.agent_name), COALESCE(hex(CAST(ea.agent_name AS BLOB)), ''), " +
-                     "typeof(eb.started_at_utc), COALESCE(hex(CAST(eb.started_at_utc AS BLOB)), ''), " +
-                     "typeof(eb.ended_at_utc), COALESCE(hex(CAST(eb.ended_at_utc AS BLOB)), '') " +
-                     "FROM execution e " +
-                     "LEFT JOIN execution_session es ON es.execution_id = e.execution_id " +
-                     "LEFT JOIN execution_parent ep ON ep.execution_id = e.execution_id " +
-                     "LEFT JOIN execution_agent ea ON ea.execution_id = e.execution_id " +
-                     $"LEFT JOIN execution_bounds eb ON eb.execution_id = e.execution_id{whereClause} ORDER BY e.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredExecution> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 14, "execution");
-            results.Add(new StoredExecution(
-                ParseHexRequired(cols[0], "execution.execution_id"),
-                ParseHexRequired(cols[1], "execution.run_id"),
-                ParseHexRequired(cols[2], "execution.harness_id"),
-                ParseBoolFlag(cols[3], "execution.is_root"),
-                ParseNullableHex(cols[4], cols[5], "execution_session.session_id"),
-                ParseNullableHex(cols[6], cols[7], "execution_parent.parent_execution_id"),
-                ParseNullableHex(cols[8], cols[9], "execution_agent.agent_name"),
-                ParseNullableHex(cols[10], cols[11], "execution_bounds.started_at_utc"),
-                ParseNullableHex(cols[12], cols[13], "execution_bounds.ended_at_utc")));
-        }
-
-        return results;
+        string sql =
+            "SELECT e.execution_id, e.run_id, e.harness_id, e.is_root, " +
+            "es.session_id, ep.parent_execution_id, ea.agent_name, eb.started_at_utc, eb.ended_at_utc " +
+            "FROM execution e " +
+            "LEFT JOIN execution_session es ON es.execution_id = e.execution_id " +
+            "LEFT JOIN execution_parent ep ON ep.execution_id = e.execution_id " +
+            "LEFT JOIN execution_agent ea ON ea.execution_id = e.execution_id " +
+            $"LEFT JOIN execution_bounds eb ON eb.execution_id = e.execution_id{whereClause} ORDER BY e.rowid ASC";
+        return QueryRows<StoredExecution>(sql, parameters, static reader => new StoredExecution(
+            reader.GetString(reader.GetOrdinal("execution_id")),
+            reader.GetString(reader.GetOrdinal("run_id")),
+            reader.GetString(reader.GetOrdinal("harness_id")),
+            reader.GetInt64(reader.GetOrdinal("is_root")) == 1L,
+            ReadNullableString(reader, "session_id"),
+            ReadNullableString(reader, "parent_execution_id"),
+            ReadNullableString(reader, "agent_name"),
+            ReadNullableString(reader, "started_at_utc"),
+            ReadNullableString(reader, "ended_at_utc")));
     }
 
-    private IReadOnlyList<StoredHarnessRollup> QueryHarnessRollups(string? filterPredicate)
+    private IReadOnlyList<StoredHarnessRollup> QueryHarnessRollups(string? filterPredicate, Dictionary<string, object?> parameters)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql = TabReadScriptHeader +
-                     "SELECT 'ROLLUP', hex(CAST(harness_id AS BLOB)), session_count, run_count, execution_count, unknown_window_sessions, window_sessions_total " +
-                     $"FROM harness_rollup{whereClause} ORDER BY harness_id ASC;\n" +
-                     "SELECT 'METRIC', hex(CAST(harness_id AS BLOB)), hex(CAST(metric AS BLOB)), value, hex(CAST(basis AS BLOB)) " +
-                     $"FROM harness_rollup_metric{whereClause} ORDER BY harness_id ASC, rowid ASC;\n";
+        List<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)> headers =
+            [.. QueryRows<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)>(
+                "SELECT harness_id, session_count, run_count, execution_count, unknown_window_sessions, window_sessions_total " +
+                $"FROM harness_rollup{whereClause} ORDER BY harness_id ASC",
+                parameters,
+                static reader => (
+                    reader.GetString(reader.GetOrdinal("harness_id")),
+                    reader.GetInt32(reader.GetOrdinal("session_count")),
+                    reader.GetInt32(reader.GetOrdinal("run_count")),
+                    reader.GetInt32(reader.GetOrdinal("execution_count")),
+                    reader.GetInt32(reader.GetOrdinal("unknown_window_sessions")),
+                    reader.GetInt32(reader.GetOrdinal("window_sessions_total"))))];
 
-        string output = ExecuteSqlite(sql);
-        List<(string HarnessId, int Sessions, int Runs, int Executions, int Unknown, int Total)> headers = [];
         Dictionary<string, List<StoredHarnessRollupMetric>> metricsByHarness = new(StringComparer.Ordinal);
-
-        foreach (string line in TabLines(output))
+        foreach ((string HarnessId, StoredHarnessRollupMetric Metric) row in QueryRows<(string HarnessId, StoredHarnessRollupMetric Metric)>(
+                     "SELECT harness_id, metric, value, basis " +
+                     $"FROM harness_rollup_metric{whereClause} ORDER BY harness_id ASC, rowid ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("harness_id")),
+                         new StoredHarnessRollupMetric(
+                             reader.GetString(reader.GetOrdinal("metric")),
+                             reader.GetDouble(reader.GetOrdinal("value")),
+                             reader.GetString(reader.GetOrdinal("basis"))))))
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 1)
-            {
-                throw new StoredDataException("Unexpected empty row in QueryHarnessRollups.");
-            }
-
-            switch (cols[0])
-            {
-                case "ROLLUP":
-                    if (cols.Length != 7)
-                    {
-                        throw new StoredDataException($"Expected 7 columns for ROLLUP row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    headers.Add((
-                        ParseHexRequired(cols[1], "harness_rollup.harness_id"),
-                        ParseInt32Required(cols[2], "harness_rollup.session_count"),
-                        ParseInt32Required(cols[3], "harness_rollup.run_count"),
-                        ParseInt32Required(cols[4], "harness_rollup.execution_count"),
-                        ParseInt32Required(cols[5], "harness_rollup.unknown_window_sessions"),
-                        ParseInt32Required(cols[6], "harness_rollup.window_sessions_total")));
-                    break;
-
-                case "METRIC":
-                    if (cols.Length != 5)
-                    {
-                        throw new StoredDataException($"Expected 5 columns for METRIC row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(metricsByHarness, ParseHexRequired(cols[1], "harness_rollup_metric.harness_id"))
-                        .Add(new StoredHarnessRollupMetric(
-                            ParseHexRequired(cols[2], "harness_rollup_metric.metric"),
-                            ParseDoubleRequired(cols[3], "harness_rollup_metric.value"),
-                            ParseHexRequired(cols[4], "harness_rollup_metric.basis")));
-                    break;
-
-                default:
-                    throw new StoredDataException($"Unexpected harness rollup query row tag '{cols[0]}'.");
-            }
+            GetOrCreateList(metricsByHarness, row.HarnessId).Add(row.Metric);
         }
 
         List<StoredHarnessRollup> rollups = new(headers.Count);
@@ -4352,112 +3807,80 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return rollups;
     }
 
-    private IReadOnlyList<StoredFinding> QueryFindings(string? filterPredicate)
+    private IReadOnlyList<StoredFinding> QueryFindings(string? filterPredicate, Dictionary<string, object?> parameters)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
         string linkFilter = filterPredicate is null
             ? string.Empty
             : " WHERE fel.finding_id IN (SELECT f.finding_id FROM finding f LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id WHERE " + filterPredicate + ")";
 
-        string sql = TabReadScriptHeader +
-                     "SELECT 'FIND', hex(CAST(f.finding_id AS BLOB)), hex(CAST(f.detector_id AS BLOB)), hex(CAST(f.title AS BLOB)), hex(CAST(f.mechanism AS BLOB)), " +
-                     "hex(CAST(f.confidence AS BLOB)), hex(CAST(f.recommendation AS BLOB)), hex(CAST(f.outcome_risk_caveat AS BLOB)), f.rank_score, " +
-                     "typeof(few.tokens), COALESCE(CAST(few.tokens AS TEXT), ''), " +
-                     "typeof(feb.lower), COALESCE(CAST(feb.lower AS TEXT), ''), " +
-                     "typeof(feb.upper), COALESCE(CAST(feb.upper AS TEXT), ''), " +
-                     "typeof(fr.run_id), COALESCE(hex(CAST(fr.run_id AS BLOB)), ''), " +
-                     "typeof(fs.session_id), COALESCE(hex(CAST(fs.session_id AS BLOB)), ''), " +
-                     "typeof(fmc.measurement_class), COALESCE(hex(CAST(fmc.measurement_class AS BLOB)), ''), " +
-                     "typeof(fcb.confidence_basis), COALESCE(hex(CAST(fcb.confidence_basis AS BLOB)), ''), " +
-                     "typeof(fww.text), COALESCE(hex(CAST(fww.text AS BLOB)), ''), " +
-                     "typeof(fch.context_limit), COALESCE(CAST(fch.context_limit AS TEXT), ''), " +
-                     "typeof(fch.context_limit_source), COALESCE(hex(CAST(fch.context_limit_source AS BLOB)), '') " +
-                     "FROM finding f " +
-                     "LEFT JOIN finding_estimated_waste few ON few.finding_id = f.finding_id " +
-                     "LEFT JOIN finding_error_bar feb ON feb.finding_id = f.finding_id " +
-                     "LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id " +
-                     "LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id " +
-                     "LEFT JOIN finding_measurement_class fmc ON fmc.finding_id = f.finding_id " +
-                     "LEFT JOIN finding_confidence_basis fcb ON fcb.finding_id = f.finding_id " +
-                     "LEFT JOIN finding_what_would_raise_it fww ON fww.finding_id = f.finding_id " +
-                     $"LEFT JOIN finding_compaction_hazard fch ON fch.finding_id = f.finding_id{whereClause} " +
-                     "ORDER BY f.rank_score DESC, f.rowid ASC;\n" +
-                     "SELECT 'LINK', hex(CAST(fel.finding_id AS BLOB)), hex(CAST(fel.span_id AS BLOB)), fel.turn_index, hex(CAST(fel.description AS BLOB)) " +
-                     $"FROM finding_evidence_link fel{linkFilter} ORDER BY fel.finding_id ASC, fel.position ASC;\n";
+        string findSql =
+            "SELECT f.finding_id, f.detector_id, f.title, f.mechanism, f.confidence, f.recommendation, " +
+            "f.outcome_risk_caveat, f.rank_score, few.tokens, feb.lower, feb.upper, fr.run_id, fs.session_id, " +
+            "fmc.measurement_class, fcb.confidence_basis, fww.text, fch.context_limit, fch.context_limit_source " +
+            "FROM finding f " +
+            "LEFT JOIN finding_estimated_waste few ON few.finding_id = f.finding_id " +
+            "LEFT JOIN finding_error_bar feb ON feb.finding_id = f.finding_id " +
+            "LEFT JOIN finding_run fr ON fr.finding_id = f.finding_id " +
+            "LEFT JOIN finding_session fs ON fs.finding_id = f.finding_id " +
+            "LEFT JOIN finding_measurement_class fmc ON fmc.finding_id = f.finding_id " +
+            "LEFT JOIN finding_confidence_basis fcb ON fcb.finding_id = f.finding_id " +
+            "LEFT JOIN finding_what_would_raise_it fww ON fww.finding_id = f.finding_id " +
+            $"LEFT JOIN finding_compaction_hazard fch ON fch.finding_id = f.finding_id{whereClause} " +
+            "ORDER BY f.rank_score DESC, f.rowid ASC";
+        List<RawFindingHeader> headers = [.. QueryRows<RawFindingHeader>(
+            findSql,
+            parameters,
+            static reader =>
+            {
+                double? lower = ReadNullableDouble(reader, "lower");
+                double? upper = ReadNullableDouble(reader, "upper");
+                FindingErrorBar? errorBar = lower.HasValue && upper.HasValue
+                    ? new FindingErrorBar((long)lower.Value, (long)upper.Value)
+                    : lower.HasValue || upper.HasValue
+                        ? throw new StoredDataException("Partial finding_error_bar row returned.")
+                        : null;
 
-        string output = ExecuteSqlite(sql);
-        List<RawFindingHeader> headers = [];
+                long? hazardLimit = ReadNullableInt64(reader, "context_limit");
+                string? hazardSource = ReadNullableString(reader, "context_limit_source");
+                StoredCompactionHazard? hazard = hazardLimit.HasValue && hazardSource is not null
+                    ? new StoredCompactionHazard(hazardLimit.Value, hazardSource)
+                    : hazardLimit.HasValue || hazardSource is not null
+                        ? throw new StoredDataException("Partial finding_compaction_hazard row returned.")
+                        : null;
+
+                return new RawFindingHeader(
+                    reader.GetString(reader.GetOrdinal("finding_id")),
+                    reader.GetString(reader.GetOrdinal("detector_id")),
+                    reader.GetString(reader.GetOrdinal("title")),
+                    reader.GetString(reader.GetOrdinal("mechanism")),
+                    reader.GetString(reader.GetOrdinal("confidence")),
+                    reader.GetString(reader.GetOrdinal("recommendation")),
+                    reader.GetString(reader.GetOrdinal("outcome_risk_caveat")),
+                    reader.GetDouble(reader.GetOrdinal("rank_score")),
+                    ReadNullableInt64(reader, "tokens"),
+                    errorBar,
+                    ReadNullableString(reader, "run_id"),
+                    ReadNullableString(reader, "session_id"),
+                    ReadNullableString(reader, "measurement_class"),
+                    ReadNullableString(reader, "confidence_basis"),
+                    ReadNullableString(reader, "text"),
+                    hazard);
+            })];
+
         Dictionary<string, List<FindingEvidenceLink>> linksByFinding = new(StringComparer.Ordinal);
-
-        foreach (string line in TabLines(output))
+        foreach ((string FindingId, FindingEvidenceLink Link) row in QueryRows<(string FindingId, FindingEvidenceLink Link)>(
+                     "SELECT fel.finding_id, fel.span_id, fel.turn_index, fel.description " +
+                     $"FROM finding_evidence_link fel{linkFilter} ORDER BY fel.finding_id ASC, fel.position ASC",
+                     parameters,
+                     static reader => (
+                         reader.GetString(reader.GetOrdinal("finding_id")),
+                         new FindingEvidenceLink(
+                             reader.GetString(reader.GetOrdinal("span_id")),
+                             reader.GetInt32(reader.GetOrdinal("turn_index")),
+                             reader.GetString(reader.GetOrdinal("description"))))))
         {
-            string[] cols = line.Split('\t');
-            if (cols.Length < 1)
-            {
-                throw new StoredDataException("Unexpected empty row in QueryFindings.");
-            }
-
-            switch (cols[0])
-            {
-                case "FIND":
-                    {
-                        if (cols.Length != 29)
-                        {
-                            throw new StoredDataException($"Expected 29 columns for FIND row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                        }
-
-                        double? lower = ParseNullableDouble(cols[11], cols[12], "finding_error_bar.lower");
-                        double? upper = ParseNullableDouble(cols[13], cols[14], "finding_error_bar.upper");
-                        FindingErrorBar? errorBar = lower.HasValue && upper.HasValue
-                            ? new FindingErrorBar((long)lower.Value, (long)upper.Value)
-                            : lower.HasValue || upper.HasValue
-                                ? throw new StoredDataException("Partial finding_error_bar row returned.")
-                                : null;
-
-                        long? hazardLimit = ParseNullableInt64(cols[25], cols[26], "finding_compaction_hazard.context_limit");
-                        string? hazardSource = ParseNullableHex(cols[27], cols[28], "finding_compaction_hazard.context_limit_source");
-                        StoredCompactionHazard? hazard = hazardLimit.HasValue && hazardSource is not null
-                            ? new StoredCompactionHazard(hazardLimit.Value, hazardSource)
-                            : hazardLimit.HasValue || hazardSource is not null
-                                ? throw new StoredDataException("Partial finding_compaction_hazard row returned.")
-                                : null;
-
-                        headers.Add(new RawFindingHeader(
-                            ParseHexRequired(cols[1], "finding.finding_id"),
-                            ParseHexRequired(cols[2], "finding.detector_id"),
-                            ParseHexRequired(cols[3], "finding.title"),
-                            ParseHexRequired(cols[4], "finding.mechanism"),
-                            ParseHexRequired(cols[5], "finding.confidence"),
-                            ParseHexRequired(cols[6], "finding.recommendation"),
-                            ParseHexRequired(cols[7], "finding.outcome_risk_caveat"),
-                            ParseDoubleRequired(cols[8], "finding.rank_score"),
-                            ParseNullableInt64(cols[9], cols[10], "finding_estimated_waste.tokens"),
-                            errorBar,
-                            ParseNullableHex(cols[15], cols[16], "finding_run.run_id"),
-                            ParseNullableHex(cols[17], cols[18], "finding_session.session_id"),
-                            ParseNullableHex(cols[19], cols[20], "finding_measurement_class.measurement_class"),
-                            ParseNullableHex(cols[21], cols[22], "finding_confidence_basis.confidence_basis"),
-                            ParseNullableHex(cols[23], cols[24], "finding_what_would_raise_it.text"),
-                            hazard));
-                        break;
-                    }
-
-                case "LINK":
-                    if (cols.Length != 5)
-                    {
-                        throw new StoredDataException($"Expected 5 columns for LINK row, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-                    }
-
-                    GetOrCreateList(linksByFinding, ParseHexRequired(cols[1], "finding_evidence_link.finding_id"))
-                        .Add(new FindingEvidenceLink(
-                            ParseHexRequired(cols[2], "finding_evidence_link.span_id"),
-                            ParseInt32Required(cols[3], "finding_evidence_link.turn_index"),
-                            ParseHexRequired(cols[4], "finding_evidence_link.description")));
-                    break;
-
-                default:
-                    throw new StoredDataException($"Unexpected finding query row tag '{cols[0]}'.");
-            }
+            GetOrCreateList(linksByFinding, row.FindingId).Add(row.Link);
         }
 
         List<StoredFinding> findings = new(headers.Count);
@@ -4486,62 +3909,50 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return findings;
     }
 
-    private IReadOnlyList<StoredPrediction> QueryPredictions(string? filterPredicate)
+    private IReadOnlyList<StoredPrediction> QueryPredictions(string? filterPredicate, Dictionary<string, object?> parameters)
     {
         string whereClause = filterPredicate is null ? string.Empty : $" WHERE {filterPredicate}";
-        string sql = TabReadScriptHeader +
-                     "SELECT hex(CAST(p.prediction_id AS BLOB)), hex(CAST(p.finding_id AS BLOB)), hex(CAST(p.run_id AS BLOB)), " +
-                     "p.predicted_waste_tokens, p.confidence, hex(CAST(p.confidence_tier AS BLOB)), hex(CAST(p.created_at_utc AS BLOB)), " +
-                     "typeof(pc.comparison_run_id), COALESCE(hex(CAST(pc.comparison_run_id AS BLOB)), ''), " +
-                     "typeof(pod.tokens), COALESCE(CAST(pod.tokens AS TEXT), ''), " +
-                     "typeof(pcal.score), COALESCE(CAST(pcal.score AS TEXT), '') " +
-                     "FROM prediction p " +
-                     "LEFT JOIN prediction_comparison pc ON pc.prediction_id = p.prediction_id " +
-                     "LEFT JOIN prediction_observed_delta pod ON pod.prediction_id = p.prediction_id " +
-                     $"LEFT JOIN prediction_calibration pcal ON pcal.prediction_id = p.prediction_id{whereClause} " +
-                     "ORDER BY p.rowid ASC;\n";
-
-        string output = ExecuteSqlite(sql);
-        List<StoredPrediction> results = [];
-        foreach (string line in TabLines(output))
-        {
-            string[] cols = SplitTabLine(line, 13, "prediction");
-            results.Add(new StoredPrediction(
-                ParseHexRequired(cols[0], "prediction.prediction_id"),
-                ParseHexRequired(cols[1], "prediction.finding_id"),
-                ParseHexRequired(cols[2], "prediction.run_id"),
-                ParseInt64Required(cols[3], "prediction.predicted_waste_tokens"),
-                ParseDoubleRequired(cols[4], "prediction.confidence"),
-                ParseHexRequired(cols[5], "prediction.confidence_tier"),
-                ParseHexRequired(cols[6], "prediction.created_at_utc"),
-                ParseNullableHex(cols[7], cols[8], "prediction_comparison.comparison_run_id"),
-                ParseNullableInt64(cols[9], cols[10], "prediction_observed_delta.tokens"),
-                ParseNullableDouble(cols[11], cols[12], "prediction_calibration.score")));
-        }
-
-        return results;
+        string sql =
+            "SELECT p.prediction_id, p.finding_id, p.run_id, p.predicted_waste_tokens, p.confidence, " +
+            "p.confidence_tier, p.created_at_utc, pc.comparison_run_id, pod.tokens, pcal.score " +
+            "FROM prediction p " +
+            "LEFT JOIN prediction_comparison pc ON pc.prediction_id = p.prediction_id " +
+            "LEFT JOIN prediction_observed_delta pod ON pod.prediction_id = p.prediction_id " +
+            $"LEFT JOIN prediction_calibration pcal ON pcal.prediction_id = p.prediction_id{whereClause} " +
+            "ORDER BY p.rowid ASC";
+        return QueryRows<StoredPrediction>(sql, parameters, static reader => new StoredPrediction(
+            reader.GetString(reader.GetOrdinal("prediction_id")),
+            reader.GetString(reader.GetOrdinal("finding_id")),
+            reader.GetString(reader.GetOrdinal("run_id")),
+            reader.GetInt64(reader.GetOrdinal("predicted_waste_tokens")),
+            reader.GetDouble(reader.GetOrdinal("confidence")),
+            reader.GetString(reader.GetOrdinal("confidence_tier")),
+            reader.GetString(reader.GetOrdinal("created_at_utc")),
+            ReadNullableString(reader, "comparison_run_id"),
+            ReadNullableInt64(reader, "tokens"),
+            ReadNullableDouble(reader, "score")));
     }
 
-    private static string BuildSpanFilterWhere(string alias, string? spanId, string? sessionKey)
+    private static string BuildSpanFilterWhere(string alias, string? spanId, string? sessionKey, Dictionary<string, object?> parameters)
     {
         List<string> predicates = [];
         if (spanId is not null)
         {
-            predicates.Add($"{alias}.span_id = {TextExpr(spanId)}");
+            predicates.Add($"{alias}.span_id = {Bind(parameters, spanId)}");
         }
 
         if (sessionKey is not null)
         {
-            predicates.Add($"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = {alias}.span_id AND rsl.session_key = {TextExpr(sessionKey)})");
+            predicates.Add($"EXISTS (SELECT 1 FROM record_session_link rsl WHERE rsl.span_id = {alias}.span_id AND rsl.session_key = {Bind(parameters, sessionKey)})");
         }
 
         return predicates.Count > 0 ? " WHERE " + string.Join(" AND ", predicates) : string.Empty;
     }
 
     private static string BuildContentPartSelect(string alias, string whereClause, string orderBy) =>
-        $"SELECT hex(CAST({alias}.span_id AS BLOB)), {BuildContentPartColumns(alias)} " +
+        $"SELECT {alias}.span_id, {BuildContentPartColumns(alias)} " +
         BuildContentPartFrom(alias) +
-        $"{whereClause} {orderBy};\n";
+        $"{whereClause} {orderBy}";
 
     /// <summary>
     /// Builds the budgeted content-part read: the scoped rows are wrapped in a subquery whose
@@ -4555,13 +3966,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     /// <param name="budget">Maximum UTF-8 bytes of part text to keep.</param>
     private static string BuildBudgetedContentPartSelect(string alias, string whereClause, int budget) =>
         "SELECT * FROM (" +
-        $"SELECT hex(CAST({alias}.span_id AS BLOB)) AS span_id, {BuildContentPartColumns(alias)}, " +
+        $"SELECT {alias}.span_id AS span_id, {BuildContentPartColumns(alias)}, " +
         "COALESCE(SUM(COALESCE(length(CAST(cpt.part_text AS BLOB)), 0)) OVER (" +
         $"ORDER BY {alias}.span_id ASC, {alias}.position ASC " +
         "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS bytes_before " +
         BuildContentPartFrom(alias) +
         $"{whereClause}) WHERE bytes_before < {budget.ToString(CultureInfo.InvariantCulture)} " +
-        "ORDER BY span_id ASC, position ASC;\n";
+        "ORDER BY span_id ASC, position ASC";
 
     private static string BuildContentPartFrom(string alias) =>
         $"FROM content_part {alias} " +
@@ -4574,33 +3985,30 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         $"LEFT JOIN content_part_residency cpres ON cpres.span_id = {alias}.span_id AND cpres.position = {alias}.position " +
         $"LEFT JOIN content_part_truncation cptr ON cptr.span_id = {alias}.span_id AND cptr.position = {alias}.position";
 
-    /// <summary>Number of columns <see cref="BuildContentPartColumns"/> selects and <see cref="ParseContentPartColumns"/> reads.</summary>
-    private const int ContentPartColumnCount = 24;
-
     private static string BuildContentPartColumns(string alias) =>
-        $"{alias}.position, hex(CAST({alias}.bucket AS BLOB)), " +
-        "typeof(cpt.part_text), COALESCE(hex(CAST(cpt.part_text AS BLOB)), ''), " +
-        "typeof(cpw.utf8_bytes), COALESCE(CAST(cpw.utf8_bytes AS TEXT), ''), " +
-        "typeof(cpw.characters), COALESCE(CAST(cpw.characters AS TEXT), ''), " +
-        "typeof(cpw.measured_tokens), COALESCE(CAST(cpw.measured_tokens AS TEXT), ''), " +
-        "typeof(cprt.token_count), COALESCE(CAST(cprt.token_count AS TEXT), ''), " +
-        "typeof(cps.server_name), COALESCE(hex(CAST(cps.server_name AS BLOB)), ''), " +
-        "typeof(cpr.role_name), COALESCE(hex(CAST(cpr.role_name AS BLOB)), ''), " +
-        "typeof(cpres.is_resident), COALESCE(CAST(cpres.is_resident AS TEXT), ''), " +
-        "typeof(cptr.original_utf8_bytes), COALESCE(CAST(cptr.original_utf8_bytes AS TEXT), ''), " +
-        "typeof(cpwt.tokenizer), COALESCE(hex(CAST(cpwt.tokenizer AS BLOB)), ''), " +
-        "typeof(cpwt.is_model_own), COALESCE(CAST(cpwt.is_model_own AS TEXT), '')";
+        $"{alias}.position, {alias}.bucket, " +
+        "cpt.part_text, " +
+        "cpw.utf8_bytes, " +
+        "cpw.characters, " +
+        "cpw.measured_tokens, " +
+        "cprt.token_count, " +
+        "cps.server_name, " +
+        "cpr.role_name, " +
+        "cpres.is_resident, " +
+        "cptr.original_utf8_bytes, " +
+        "cpwt.tokenizer, " +
+        "cpwt.is_model_own";
 
-    private static CollectedContentPart ParseContentPartColumns(string[] cols, int startIndex)
+    private static CollectedContentPart ReadContentPartColumns(SqliteDataReader reader)
     {
-        int position = ParseInt32Required(cols[startIndex], "content_part.position");
-        ContentBucket bucket = ParseContentBucket(ParseHexRequired(cols[startIndex + 1], "content_part.bucket"));
-        string? plainText = ParseNullableHex(cols[startIndex + 2], cols[startIndex + 3], "content_part_text.part_text");
-        long? wBytes = ParseNullableInt64(cols[startIndex + 4], cols[startIndex + 5], "content_part_withheld.utf8_bytes");
-        long? wChars = ParseNullableInt64(cols[startIndex + 6], cols[startIndex + 7], "content_part_withheld.characters");
-        long? wTokens = ParseNullableInt64(cols[startIndex + 8], cols[startIndex + 9], "content_part_withheld.measured_tokens");
-        string? wTokenizer = ParseNullableHex(cols[startIndex + 20], cols[startIndex + 21], "content_part_withheld_tokenizer.tokenizer");
-        long? wModelOwnRaw = ParseNullableInt64(cols[startIndex + 22], cols[startIndex + 23], "content_part_withheld_tokenizer.is_model_own");
+        int position = reader.GetInt32(reader.GetOrdinal("position"));
+        ContentBucket bucket = ParseContentBucket(reader.GetString(reader.GetOrdinal("bucket")));
+        string? plainText = ReadNullableString(reader, "part_text");
+        long? wBytes = ReadNullableInt64(reader, "utf8_bytes");
+        long? wChars = ReadNullableInt64(reader, "characters");
+        long? wTokens = ReadNullableInt64(reader, "measured_tokens");
+        string? wTokenizer = ReadNullableString(reader, "tokenizer");
+        long? wModelOwnRaw = ReadNullableInt64(reader, "is_model_own");
         bool wModelOwn = wModelOwnRaw switch
         {
             null => false,
@@ -4618,10 +4026,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             : wBytes.HasValue || wChars.HasValue || wTokens.HasValue
                 ? throw new StoredDataException("Partial content_part_withheld row returned.")
                 : null;
-        long? reportedTokens = ParseNullableInt64(cols[startIndex + 10], cols[startIndex + 11], "content_part_reported_tokens.token_count");
-        string? server = ParseNullableHex(cols[startIndex + 12], cols[startIndex + 13], "content_part_server.server_name");
-        string? role = ParseNullableHex(cols[startIndex + 14], cols[startIndex + 15], "content_part_role.role_name");
-        long? residentRaw = ParseNullableInt64(cols[startIndex + 16], cols[startIndex + 17], "content_part_residency.is_resident");
+        long? reportedTokens = ReadNullableInt64(reader, "token_count");
+        string? server = ReadNullableString(reader, "server_name");
+        string? role = ReadNullableString(reader, "role_name");
+        long? residentRaw = ReadNullableInt64(reader, "is_resident");
         bool? resident = residentRaw.HasValue
             ? residentRaw.Value switch
             {
@@ -4630,13 +4038,13 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 _ => throw new StoredDataException($"Invalid boolean flag '{residentRaw.Value.ToString(CultureInfo.InvariantCulture)}' in content_part_residency.is_resident."),
             }
             : null;
-        long? originalBytes = ParseNullableInt64(cols[startIndex + 18], cols[startIndex + 19], "content_part_truncation.original_utf8_bytes");
+        long? originalBytes = ReadNullableInt64(reader, "original_utf8_bytes");
 
         return new CollectedContentPart(position, bucket, plainText, withheld, reportedTokens, server, role, resident, originalBytes);
     }
 
     private static string BuildToolCallSelect(string alias, string whereClause, string orderBy) =>
-        $"SELECT hex(CAST({alias}.span_id AS BLOB)), {BuildToolCallColumns(alias)} " +
+        $"SELECT {alias}.span_id, {BuildToolCallColumns(alias)} " +
         $"FROM tool_call {alias} " +
         $"LEFT JOIN tool_call_mcp tcm ON tcm.span_id = {alias}.span_id " +
         $"LEFT JOIN tool_call_input_size tcis ON tcis.span_id = {alias}.span_id " +
@@ -4650,92 +4058,73 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         $"LEFT JOIN tool_call_error tce ON tce.span_id = {alias}.span_id " +
         $"LEFT JOIN tool_call_error_code tcec ON tcec.span_id = {alias}.span_id " +
         $"LEFT JOIN tool_call_exit_code tcex ON tcex.span_id = {alias}.span_id" +
-        $"{whereClause} {orderBy};\n";
+        $"{whereClause} {orderBy}";
 
     private static string BuildToolCallColumns(string alias) =>
-        $"hex(CAST({alias}.call_id AS BLOB)), hex(CAST({alias}.tool_name AS BLOB)), " +
-        "typeof(tcm.server_name), COALESCE(hex(CAST(tcm.server_name AS BLOB)), ''), " +
-        "typeof(tcm.server_tool_name), COALESCE(hex(CAST(tcm.server_tool_name AS BLOB)), ''), " +
-        "typeof(tcis.utf8_bytes), COALESCE(CAST(tcis.utf8_bytes AS TEXT), ''), " +
-        "typeof(tcis.characters), COALESCE(CAST(tcis.characters AS TEXT), ''), " +
-        "typeof(tcit.text), COALESCE(hex(CAST(tcit.text AS BLOB)), ''), " +
-        "typeof(tcif.sha256), COALESCE(hex(CAST(tcif.sha256 AS BLOB)), ''), " +
-        "typeof(tcitrc.original_utf8_bytes), COALESCE(CAST(tcitrc.original_utf8_bytes AS TEXT), ''), " +
-        "typeof(tcrs.utf8_bytes), COALESCE(CAST(tcrs.utf8_bytes AS TEXT), ''), " +
-        "typeof(tcrs.characters), COALESCE(CAST(tcrs.characters AS TEXT), ''), " +
-        "typeof(tcrt.text), COALESCE(hex(CAST(tcrt.text AS BLOB)), ''), " +
-        "typeof(tcrtrc.original_utf8_bytes), COALESCE(CAST(tcrtrc.original_utf8_bytes AS TEXT), ''), " +
-        "typeof(tco.succeeded), COALESCE(CAST(tco.succeeded AS TEXT), ''), " +
-        "typeof(tce.message), COALESCE(hex(CAST(tce.message AS BLOB)), ''), " +
-        "typeof(tcec.code), COALESCE(hex(CAST(tcec.code AS BLOB)), ''), " +
-        "typeof(tcex.exit_code), COALESCE(CAST(tcex.exit_code AS TEXT), '')";
+        $"{alias}.call_id, {alias}.tool_name, " +
+        "tcm.server_name, " +
+        "tcm.server_tool_name, " +
+        "tcis.utf8_bytes AS input_utf8_bytes, " +
+        "tcis.characters AS input_characters, " +
+        "tcit.text AS input_text, " +
+        "tcif.sha256 AS input_sha256, " +
+        "tcitrc.original_utf8_bytes AS input_original_utf8_bytes, " +
+        "tcrs.utf8_bytes AS result_utf8_bytes, " +
+        "tcrs.characters AS result_characters, " +
+        "tcrt.text AS result_text, " +
+        "tcrtrc.original_utf8_bytes AS result_original_utf8_bytes, " +
+        "tco.succeeded, " +
+        "tce.message AS error_message, " +
+        "tcec.code AS error_code, " +
+        "tcex.exit_code";
 
     /// <summary>
-    /// Tool-call columns without the two content-bearing text expressions, in the same order as
+    /// Tool-call columns without the two content-bearing text expressions, in the same shape as
     /// <see cref="BuildToolCallColumns"/> so both parses share one reader.
     /// </summary>
     private static string BuildToolCallMetadataColumns(string alias) =>
-        $"hex(CAST({alias}.call_id AS BLOB)), hex(CAST({alias}.tool_name AS BLOB)), " +
-        "typeof(tcm.server_name), COALESCE(hex(CAST(tcm.server_name AS BLOB)), ''), " +
-        "typeof(tcm.server_tool_name), COALESCE(hex(CAST(tcm.server_tool_name AS BLOB)), ''), " +
-        "typeof(tcis.utf8_bytes), COALESCE(CAST(tcis.utf8_bytes AS TEXT), ''), " +
-        "typeof(tcis.characters), COALESCE(CAST(tcis.characters AS TEXT), ''), " +
-        "'null', '', " +
-        "typeof(tcif.sha256), COALESCE(hex(CAST(tcif.sha256 AS BLOB)), ''), " +
-        "typeof(tcitrc.original_utf8_bytes), COALESCE(CAST(tcitrc.original_utf8_bytes AS TEXT), ''), " +
-        "typeof(tcrs.utf8_bytes), COALESCE(CAST(tcrs.utf8_bytes AS TEXT), ''), " +
-        "typeof(tcrs.characters), COALESCE(CAST(tcrs.characters AS TEXT), ''), " +
-        "'null', '', " +
-        "typeof(tcrtrc.original_utf8_bytes), COALESCE(CAST(tcrtrc.original_utf8_bytes AS TEXT), ''), " +
-        "typeof(tco.succeeded), COALESCE(CAST(tco.succeeded AS TEXT), ''), " +
-        "typeof(tce.message), COALESCE(hex(CAST(tce.message AS BLOB)), ''), " +
-        "typeof(tcec.code), COALESCE(hex(CAST(tcec.code AS BLOB)), ''), " +
-        "typeof(tcex.exit_code), COALESCE(CAST(tcex.exit_code AS TEXT), '')";
+        $"{alias}.call_id, {alias}.tool_name, " +
+        "tcm.server_name, " +
+        "tcm.server_tool_name, " +
+        "tcis.utf8_bytes AS input_utf8_bytes, " +
+        "tcis.characters AS input_characters, " +
+        "NULL AS input_text, " +
+        "tcif.sha256 AS input_sha256, " +
+        "tcitrc.original_utf8_bytes AS input_original_utf8_bytes, " +
+        "tcrs.utf8_bytes AS result_utf8_bytes, " +
+        "tcrs.characters AS result_characters, " +
+        "NULL AS result_text, " +
+        "tcrtrc.original_utf8_bytes AS result_original_utf8_bytes, " +
+        "tco.succeeded, " +
+        "tce.message AS error_message, " +
+        "tcec.code AS error_code, " +
+        "tcex.exit_code";
 
-    private static CollectedToolCall ParseToolCallColumns(string[] cols, int startIndex)
+    private static CollectedToolCall ReadToolCallColumns(SqliteDataReader reader)
     {
-        // Count: 2 + (16 * 2)? Let's verify exact count:
-        // +0: call_id
-        // +1: tool_name
-        // +2,+3: tcm.server_name
-        // +4,+5: tcm.server_tool_name
-        // +6,+7: tcis.utf8_bytes
-        // +8,+9: tcis.characters
-        // +10,+11: tcit.text
-        // +12,+13: tcif.sha256
-        // +14,+15: tcitrc.original_utf8_bytes
-        // +16,+17: tcrs.utf8_bytes
-        // +18,+19: tcrs.characters
-        // +20,+21: tcrt.text
-        // +22,+23: tcrtrc.original_utf8_bytes
-        // +24,+25: tco.succeeded
-        // +26,+27: tce.message
-        // +28,+29: tcec.code
-        // +30,+31: tcex.exit_code
-        // Total = 32 columns!
-        string callId = ParseHexRequired(cols[startIndex], "tool_call.call_id");
-        string toolName = ParseHexRequired(cols[startIndex + 1], "tool_call.tool_name");
-        string? mcpServer = ParseNullableHex(cols[startIndex + 2], cols[startIndex + 3], "tool_call_mcp.server_name");
-        string? mcpTool = ParseNullableHex(cols[startIndex + 4], cols[startIndex + 5], "tool_call_mcp.server_tool_name");
+        string callId = reader.GetString(reader.GetOrdinal("call_id"));
+        string toolName = reader.GetString(reader.GetOrdinal("tool_name"));
+        string? mcpServer = ReadNullableString(reader, "server_name");
+        string? mcpTool = ReadNullableString(reader, "server_tool_name");
 
-        long? inBytes = ParseNullableInt64(cols[startIndex + 6], cols[startIndex + 7], "tool_call_input_size.utf8_bytes");
-        long? inChars = ParseNullableInt64(cols[startIndex + 8], cols[startIndex + 9], "tool_call_input_size.characters");
-        string? inText = ParseNullableHex(cols[startIndex + 10], cols[startIndex + 11], "tool_call_input_text.text");
-        string? inSha = ParseNullableHex(cols[startIndex + 12], cols[startIndex + 13], "tool_call_input_fingerprint.sha256");
-        long? inTrunc = ParseNullableInt64(cols[startIndex + 14], cols[startIndex + 15], "tool_call_input_truncation.original_utf8_bytes");
+        long? inBytes = ReadNullableInt64(reader, "input_utf8_bytes");
+        long? inChars = ReadNullableInt64(reader, "input_characters");
+        string? inText = ReadNullableString(reader, "input_text");
+        string? inSha = ReadNullableString(reader, "input_sha256");
+        long? inTrunc = ReadNullableInt64(reader, "input_original_utf8_bytes");
         CollectedToolContent? input = inBytes.HasValue && inChars.HasValue
             ? new CollectedToolContent(inText, inBytes.Value, inChars.Value, inSha, inTrunc)
             : null;
 
-        long? resBytes = ParseNullableInt64(cols[startIndex + 16], cols[startIndex + 17], "tool_call_result_size.utf8_bytes");
-        long? resChars = ParseNullableInt64(cols[startIndex + 18], cols[startIndex + 19], "tool_call_result_size.characters");
-        string? resText = ParseNullableHex(cols[startIndex + 20], cols[startIndex + 21], "tool_call_result_text.text");
-        long? resTrunc = ParseNullableInt64(cols[startIndex + 22], cols[startIndex + 23], "tool_call_result_truncation.original_utf8_bytes");
+        long? resBytes = ReadNullableInt64(reader, "result_utf8_bytes");
+        long? resChars = ReadNullableInt64(reader, "result_characters");
+        string? resText = ReadNullableString(reader, "result_text");
+        long? resTrunc = ReadNullableInt64(reader, "result_original_utf8_bytes");
         CollectedToolContent? result = resBytes.HasValue && resChars.HasValue
             ? new CollectedToolContent(resText, resBytes.Value, resChars.Value, null, resTrunc)
             : null;
 
-        long? succeededRaw = ParseNullableInt64(cols[startIndex + 24], cols[startIndex + 25], "tool_call_outcome.succeeded");
+        long? succeededRaw = ReadNullableInt64(reader, "succeeded");
         bool? succeeded = succeededRaw.HasValue
             ? succeededRaw.Value switch
             {
@@ -4745,34 +4134,33 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             }
             : null;
 
-        string? errorMsg = ParseNullableHex(cols[startIndex + 26], cols[startIndex + 27], "tool_call_error.message");
-        string? errorCode = ParseNullableHex(cols[startIndex + 28], cols[startIndex + 29], "tool_call_error_code.code");
+        string? errorMsg = ReadNullableString(reader, "error_message");
+        string? errorCode = ReadNullableString(reader, "error_code");
         CollectedError? error = errorMsg is not null ? new CollectedError(errorMsg, errorCode) : null;
 
-        long? exitCode = ParseNullableInt64(cols[startIndex + 30], cols[startIndex + 31], "tool_call_exit_code.exit_code");
+        long? exitCode = ReadNullableInt64(reader, "exit_code");
         return new CollectedToolCall(callId, toolName, mcpServer, mcpTool, input, result, succeeded, error, exitCode);
     }
 
     private static string BuildAgentInvocationSelect(string alias, string whereClause, string orderBy) =>
-        $"SELECT hex(CAST({alias}.span_id AS BLOB)), {BuildAgentInvocationColumns(alias)} " +
+        $"SELECT {alias}.span_id, {BuildAgentInvocationColumns(alias)} " +
         $"FROM agent_invocation {alias} " +
         $"LEFT JOIN agent_invocation_spawn ais ON ais.span_id = {alias}.span_id " +
         $"LEFT JOIN agent_invocation_outcome aio ON aio.span_id = {alias}.span_id " +
         $"LEFT JOIN agent_invocation_error aie ON aie.span_id = {alias}.span_id" +
-        $"{whereClause} {orderBy};\n";
+        $"{whereClause} {orderBy}";
 
     private static string BuildAgentInvocationColumns(string alias) =>
-        $"hex(CAST({alias}.agent_name AS BLOB)), " +
-        "typeof(ais.spawning_record_id), COALESCE(hex(CAST(ais.spawning_record_id AS BLOB)), ''), " +
-        "typeof(aio.succeeded), COALESCE(CAST(aio.succeeded AS TEXT), ''), " +
-        "typeof(aie.message), COALESCE(hex(CAST(aie.message AS BLOB)), '')";
+        $"{alias}.agent_name, " +
+        "ais.spawning_record_id, " +
+        "aio.succeeded, " +
+        "aie.message AS error_message";
 
-    private static CollectedAgentInvocation ParseAgentInvocationColumns(string[] cols, int startIndex)
+    private static CollectedAgentInvocation ReadAgentInvocationColumns(SqliteDataReader reader)
     {
-        // Total = 1 + 6 = 7 columns.
-        string agentName = ParseHexRequired(cols[startIndex], "agent_invocation.agent_name");
-        string? spawnId = ParseNullableHex(cols[startIndex + 1], cols[startIndex + 2], "agent_invocation_spawn.spawning_record_id");
-        long? succeededRaw = ParseNullableInt64(cols[startIndex + 3], cols[startIndex + 4], "agent_invocation_outcome.succeeded");
+        string agentName = reader.GetString(reader.GetOrdinal("agent_name"));
+        string? spawnId = ReadNullableString(reader, "spawning_record_id");
+        long? succeededRaw = ReadNullableInt64(reader, "succeeded");
         bool? succeeded = succeededRaw.HasValue
             ? succeededRaw.Value switch
             {
@@ -4781,7 +4169,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 _ => throw new StoredDataException($"Invalid boolean flag '{succeededRaw.Value.ToString(CultureInfo.InvariantCulture)}' in agent_invocation_outcome.succeeded."),
             }
             : null;
-        string? error = ParseNullableHex(cols[startIndex + 5], cols[startIndex + 6], "agent_invocation_error.message");
+        string? error = ReadNullableString(reader, "error_message");
         return new CollectedAgentInvocation(agentName, spawnId, succeeded, error);
     }
 
@@ -4845,21 +4233,44 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return null;
     }
 
-    /// <summary>Appends the <c>typeof</c> tag and value expression pair one stored column is read with.</summary>
-    private static void AppendStoredFieldValueSelect(StringBuilder sql, TableDefinition table, ColumnDefinition column)
+    /// <summary>Reads one row, in catalog column order, from the raw column values.</summary>
+    private static StoredFieldRow ReadStoredFieldRow(SqliteDataReader reader, TableDefinition table)
     {
-        switch (column.Type)
+        List<StoredFieldCell> cells = new(table.Columns.Count);
+        for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
         {
-            case SqliteColumnType.SqliteText:
-                sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(hex(CAST({column.Name} AS BLOB)), '')");
-                break;
-            case SqliteColumnType.SqliteInteger:
-            case SqliteColumnType.SqliteReal:
-                sql.Append(CultureInfo.InvariantCulture, $", typeof({column.Name}), COALESCE(CAST({column.Name} AS TEXT), '')");
-                break;
-            default:
-                throw new StoredDataException($"Unsupported catalog column type '{column.Type}' on '{table.Name}.{column.Name}'.");
+            cells.Add(ReadStoredFieldCell(reader, table.Columns[colIndex]));
         }
+
+        return new StoredFieldRow(cells);
+    }
+
+    private static StoredFieldCell ReadStoredFieldCell(SqliteDataReader reader, ColumnDefinition column)
+    {
+        int ordinal = reader.GetOrdinal(column.Name);
+        if (reader.IsDBNull(ordinal))
+        {
+            return new StoredFieldCell(column.Name, column.Type);
+        }
+
+        object value = reader.GetValue(ordinal);
+        string site = column.Name;
+        return column.Type switch
+        {
+            SqliteColumnType.SqliteText => value is string text
+                ? new StoredFieldCell(column.Name, column.Type, TextValue: text)
+                : throw new StoredDataException($"Unexpected SQLite storage type for text column '{site}'."),
+            SqliteColumnType.SqliteInteger => value is long integer
+                ? new StoredFieldCell(column.Name, column.Type, IntegerValue: integer)
+                : throw new StoredDataException($"Unexpected SQLite storage type for integer column '{site}'."),
+            SqliteColumnType.SqliteReal => value switch
+            {
+                long integer => new StoredFieldCell(column.Name, column.Type, RealValue: integer),
+                double real => new StoredFieldCell(column.Name, column.Type, RealValue: real),
+                _ => throw new StoredDataException($"Unexpected SQLite storage type for real column '{site}'."),
+            },
+            _ => throw new StoredDataException($"Unsupported column type '{column.Type}' on '{site}'."),
+        };
     }
 
     /// <summary>
@@ -4905,52 +4316,6 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         }
 
         return keyColumnsByTable;
-    }
-
-    /// <summary>Parses one row's <c>typeof</c>/value pairs, in catalog column order, into a row.</summary>
-    private static StoredFieldRow ParseStoredFieldRow(TableDefinition table, string[] pairs)
-    {
-        if (pairs.Length != table.Columns.Count * 2)
-        {
-            throw new StoredDataException(
-                $"Expected {(table.Columns.Count * 2).ToString(CultureInfo.InvariantCulture)} value columns for stored-fields table '{table.Name}', got {pairs.Length.ToString(CultureInfo.InvariantCulture)}.");
-        }
-
-        List<StoredFieldCell> cells = new(table.Columns.Count);
-        for (int colIndex = 0; colIndex < table.Columns.Count; colIndex++)
-        {
-            ColumnDefinition column = table.Columns[colIndex];
-            cells.Add(ParseStoredFieldCell(table.Name, column, pairs[colIndex * 2], pairs[(colIndex * 2) + 1]));
-        }
-
-        return new StoredFieldRow(cells);
-    }
-
-    private static StoredFieldCell ParseStoredFieldCell(
-        string tableName,
-        ColumnDefinition column,
-        string typeCell,
-        string valCell)
-    {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return new StoredFieldCell(column.Name, column.Type);
-        }
-
-        string site = $"{tableName}.{column.Name}";
-        return column.Type switch
-        {
-            SqliteColumnType.SqliteText => string.Equals(typeCell, "text", StringComparison.Ordinal)
-                ? new StoredFieldCell(column.Name, column.Type, TextValue: ParseHexRequired(valCell, site))
-                : throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for text column '{site}'."),
-            SqliteColumnType.SqliteInteger => string.Equals(typeCell, "integer", StringComparison.Ordinal)
-                ? new StoredFieldCell(column.Name, column.Type, IntegerValue: ParseInt64Required(valCell, site))
-                : throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for integer column '{site}'."),
-            SqliteColumnType.SqliteReal => typeCell is "real" or "integer"
-                ? new StoredFieldCell(column.Name, column.Type, RealValue: ParseDoubleRequired(valCell, site))
-                : throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for real column '{site}'."),
-            _ => throw new StoredDataException($"Unsupported column type '{column.Type}' on '{site}'."),
-        };
     }
 
     private static List<string> ComputeStoredFieldsMissingParentKeys(
@@ -5745,68 +5110,30 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return new UnusedSchemaRange(residencies, 0, residencies, null);
     }
 
-    private static string[] SplitTabLine(string line, int expectedColumns, string context)
+    /// <summary>Executes a parameterized read; a seam for observing the statements a read issues.</summary>
+    /// <typeparam name="T">Mapped row type.</typeparam>
+    /// <param name="sql">SQL text whose values are supplied as <c>$name</c> parameters.</param>
+    /// <param name="parameters">Parameter values keyed by their <c>$name</c> marker.</param>
+    /// <param name="map">Maps one row.</param>
+    protected virtual IReadOnlyList<T> QueryRows<T>(
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        Func<SqliteDataReader, T> map)
     {
-        string[] cols = line.Split('\t');
-        if (cols.Length != expectedColumns)
-        {
-            throw new StoredDataException(
-                $"Expected {expectedColumns.ToString(CultureInfo.InvariantCulture)} columns for {context}, got {cols.Length.ToString(CultureInfo.InvariantCulture)}.");
-        }
-
-        return cols;
+        ArgumentNullException.ThrowIfNull(sql);
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(map);
+        EnsureDatabaseDirectoryIfMissing();
+        return Query(sql, parameters, map);
     }
 
-    private static string ParseHexRequired(string hexCell, string columnName)
+    /// <summary>Binds one value to the query and returns its <c>$pN</c> marker.</summary>
+    private static string Bind(Dictionary<string, object?> parameters, object? value)
     {
-        try
-        {
-            return DecodeHexText(hexCell);
-        }
-        catch (FormatException ex)
-        {
-            throw new StoredDataException($"Invalid hexadecimal UTF-8 payload in '{columnName}': '{hexCell}'.", ex);
-        }
-    }
-
-    private static string? ParseNullableHex(string typeCell, string hexCell, string columnName)
-    {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        if (string.Equals(typeCell, "text", StringComparison.Ordinal))
-        {
-            return ParseHexRequired(hexCell, columnName);
-        }
-
-        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable text column '{columnName}'.");
-    }
-
-    private static long ParseInt64Required(string cell, string columnName)
-    {
-        if (long.TryParse(cell, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value))
-        {
-            return value;
-        }
-
-        throw new StoredDataException($"Invalid integer value '{cell}' for '{columnName}'.");
-    }
-
-    private static long? ParseNullableInt64(string typeCell, string valCell, string columnName)
-    {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        if (string.Equals(typeCell, "integer", StringComparison.Ordinal))
-        {
-            return ParseInt64Required(valCell, columnName);
-        }
-
-        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable integer column '{columnName}'.");
+        ArgumentNullException.ThrowIfNull(parameters);
+        string name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
+        parameters.Add(name, value);
+        return name;
     }
 
     private static int ParseInt32Required(string cell, string columnName)
@@ -5826,43 +5153,22 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         _ => throw new StoredDataException($"Invalid boolean flag '{cell}' for '{columnName}'."),
     };
 
-    /// <summary>Parses a nullable boolean stored as an integer, absent when the column is null.</summary>
-    private static bool? ParseOptionalBool(string typeCell, string valCell, string columnName) => typeCell switch
+    private static string? ReadNullableString(SqliteDataReader reader, string columnName)
     {
-        "null" => null,
-        "integer" => valCell switch
-        {
-            "0" => false,
-            "1" => true,
-            _ => throw new StoredDataException($"Invalid boolean flag '{valCell}' for '{columnName}'."),
-        },
-        _ => throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable boolean column '{columnName}'."),
-    };
-
-    private static double ParseDoubleRequired(string cell, string columnName)
-    {
-        if (double.TryParse(cell, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double value) &&
-            double.IsFinite(value))
-        {
-            return value;
-        }
-
-        throw new StoredDataException($"Invalid finite floating-point value '{cell}' for '{columnName}'.");
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
-    private static double? ParseNullableDouble(string typeCell, string valCell, string columnName)
+    private static long? ReadNullableInt64(SqliteDataReader reader, string columnName)
     {
-        if (string.Equals(typeCell, "null", StringComparison.Ordinal))
-        {
-            return null;
-        }
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
+    }
 
-        if (typeCell is "real" or "integer")
-        {
-            return ParseDoubleRequired(valCell, columnName);
-        }
-
-        throw new StoredDataException($"Unexpected SQLite storage type '{typeCell}' for nullable real column '{columnName}'.");
+    private static double? ReadNullableDouble(SqliteDataReader reader, string columnName)
+    {
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
     }
 
     private static DateTimeOffset ParseTimestampRequired(string text, string columnName)

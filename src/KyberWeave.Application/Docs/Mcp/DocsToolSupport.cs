@@ -12,6 +12,7 @@ public static class DocsToolSupport
     /// <param name="diagnostic">The finding.</param>
     public static string FormatGateFinding(Diagnostic diagnostic)
     {
+        ArgumentNullException.ThrowIfNull(diagnostic);
         StringBuilder sb = new();
         sb.Append(diagnostic.Code)
           .Append(" [")

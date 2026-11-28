@@ -73,8 +73,11 @@ public static class ReviewGateReporting
 
     /// <summary><c>windows</c> or <c>unix</c>, for a gate's <c>os</c> filter, read from the environment seam.</summary>
     /// <param name="environment">Reports the operating-system family the process runs on.</param>
-    public static string CurrentOs(IProcessEnvironment environment) =>
-        environment.OperatingSystem == OperatingSystemKind.Windows ? "windows" : "unix";
+    public static string CurrentOs(IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        return environment.OperatingSystem == OperatingSystemKind.Windows ? "windows" : "unix";
+    }
 
     /// <summary>
     ///     The declared gates the caller named with <c>--gate</c>, in declaration order, or an empty list with a
@@ -91,6 +94,9 @@ public static class ReviewGateReporting
     public static IReadOnlyList<ReviewGate> SelectNamedGates(
         IReadOnlyList<ReviewGate> gates, IReadOnlyList<string> named, ICollection<string> refusals)
     {
+        ArgumentNullException.ThrowIfNull(named);
+        ArgumentNullException.ThrowIfNull(refusals);
+
         HashSet<string> wanted = new(named, StringComparer.Ordinal);
         List<string> unknown = [];
         foreach (string id in named)
@@ -124,6 +130,11 @@ public static class ReviewGateReporting
     public static GateReport WithCarriedGates(
         IReadOnlyList<ReviewGate> declared, GateReport ran, ReviewCyclePlan plan, DiagnosticReport report)
     {
+        ArgumentNullException.ThrowIfNull(declared);
+        ArgumentNullException.ThrowIfNull(ran);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(report);
+
         List<GateResult> results = [];
         foreach (ReviewGate gate in declared)
         {
@@ -160,6 +171,10 @@ public static class ReviewGateReporting
     /// <param name="existing">The report already on disk.</param>
     public static GateReport MergedWithExisting(IReadOnlyList<ReviewGate> declared, GateReport ran, GateReport existing)
     {
+        ArgumentNullException.ThrowIfNull(declared);
+        ArgumentNullException.ThrowIfNull(ran);
+        ArgumentNullException.ThrowIfNull(existing);
+
         List<GateResult> results = [];
         foreach (ReviewGate gate in declared)
         {
@@ -178,6 +193,9 @@ public static class ReviewGateReporting
     /// <param name="skipped">The skipped gates.</param>
     public static void AddSkips(DiagnosticReport report, IEnumerable<SkippedTaskGate> skipped)
     {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(skipped);
+
         foreach (SkippedTaskGate skip in skipped)
             report.Add(new Diagnostic(
                 GateSkipped,
@@ -192,6 +210,9 @@ public static class ReviewGateReporting
     /// <param name="hint">The remedy, or null for the default one.</param>
     public static void AddRefusals(DiagnosticReport report, IEnumerable<string> reasons, string? hint = null)
     {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(reasons);
+
         string defaultHint = "Refused before any gate started. Pass repository-relative paths, and a task slug " +
                              "made of lowercase alphanumerics and single hyphens.";
         foreach (string reason in reasons)
@@ -212,6 +233,9 @@ public static class ReviewGateReporting
     /// <param name="index">What the index guard found.</param>
     public static void AddIndexDiagnostic(DiagnosticReport report, string root, WorktreeIndexOutcome index)
     {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(index);
+
         if (index.Status is WorktreeIndexStatus.Ready)
         {
             report.Add(new Diagnostic(
@@ -232,8 +256,11 @@ public static class ReviewGateReporting
 
     /// <summary>The first failed check's reason, or a plain line when none says why.</summary>
     /// <param name="index">What the index guard found.</param>
-    public static string IndexReason(WorktreeIndexOutcome index) =>
-        index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason was reported";
+    public static string IndexReason(WorktreeIndexOutcome index)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        return index.Checks.FirstOrDefault(check => !check.Passed)?.Reason ?? "no reason was reported";
+    }
 
     /// <summary>
     ///     Reports one gate. A gate whose program never started is <see cref="GateNotStarted" />, kept apart from a
@@ -247,6 +274,9 @@ public static class ReviewGateReporting
     /// <param name="timeIsNotRun">Whether a gate stopped for time is reported as not run.</param>
     public static void AddGateDiagnostic(DiagnosticReport report, GateResult gate, bool timeIsNotRun)
     {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(gate);
+
         string detail = $"{gate.Id}: {gate.Summary} ({gate.DurationMilliseconds} ms)";
 
         if (gate.NotApplicableReason is not null)
@@ -314,6 +344,10 @@ public static class ReviewGateReporting
         string? canonicalRepositoryRoot = null,
         bool isFileSystemCaseInsensitive = false)
     {
+        ArgumentNullException.ThrowIfNull(report);
+        ArgumentNullException.ThrowIfNull(ran);
+        ArgumentNullException.ThrowIfNull(outputs);
+
         foreach (GateResult gate in ran.Gates.Where(result => !result.Passed))
         {
             PlannedTaskGate? plannedGate = planned.FirstOrDefault(candidate => string.Equals(candidate.Id, gate.Id, StringComparison.Ordinal));
@@ -366,6 +400,10 @@ public static class ReviewGateReporting
         string? canonicalRepositoryRoot = null,
         bool isFileSystemCaseInsensitive = false)
     {
+        ArgumentNullException.ThrowIfNull(ran);
+        ArgumentNullException.ThrowIfNull(outputs);
+        ArgumentNullException.ThrowIfNull(report);
+
         List<RedGateObservation> observations = [];
         foreach (GateResult gate in ran.Gates)
         {
@@ -431,6 +469,9 @@ public static class ReviewGateReporting
     /// <param name="runCount">The ordinal of this task-gate run, counting from 1.</param>
     public static IReadOnlyList<string> RedLines(RedOutcome outcome, string agent, GateReport report, string? reportPath, int runCount)
     {
+        ArgumentNullException.ThrowIfNull(outcome);
+        ArgumentNullException.ThrowIfNull(report);
+
         int skipped = report.Gates.Count(gate => gate.NotApplicable);
         string failed = outcome.Passed
             ? "none"

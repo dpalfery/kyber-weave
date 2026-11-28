@@ -63,6 +63,7 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     {
         _host.Dispose();
         _console.Dispose();
+        _streams.Dispose();
     }
 
     // The commands resolve the injected home, file system, config store, state and key input, never the real home,

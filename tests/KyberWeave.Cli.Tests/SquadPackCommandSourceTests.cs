@@ -15,7 +15,7 @@ namespace KyberWeave.Tests;
 /// the markers must sit in the working directory itself, no parent is searched, no embedded copy exists, and a
 /// valid root packs every format.
 /// </summary>
-public sealed class SquadPackCommandSourceTests
+public sealed class SquadPackCommandSourceTests : IDisposable
 {
     private readonly InMemoryFileSystem _files = new();
     private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
@@ -33,6 +33,8 @@ public sealed class SquadPackCommandSourceTests
         _locator = new SquadPackSourceLocator(_files, new FakePathResolver(_files), _environment);
         _services = new InMemorySquadServices(_files);
     }
+
+    public void Dispose() => _ansi.Dispose();
 
     [Fact]
     public void Pack_OutsideRepositoryRoot_FailsWithMaintainerGuidanceBeforeSideEffects()

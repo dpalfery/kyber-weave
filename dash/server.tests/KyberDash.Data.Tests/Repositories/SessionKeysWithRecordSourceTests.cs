@@ -12,18 +12,17 @@ namespace KyberDash.Data.Tests.Repositories;
 /// source, newest record timestamp first then session key, distinct, capped by the limit, and a
 /// limit below one refused.
 /// </summary>
-public class SessionKeysWithRecordSourceTests : IDisposable
+public sealed class SessionKeysWithRecordSourceTests : IDisposable
 {
     private const string PluginLocator = "kyberdash-factory-plugin";
     private const string FileLocator = "/home/dev/.factory/sessions/repo/sess-file.jsonl";
 
     private readonly TempDirectory directory = new();
 
-    /// <inheritdoc />
+    /// <summary>Deletes the scratch directory when disposing.</summary>
     public void Dispose()
     {
         directory.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     /// <summary>Only sessions whose records come from the named harness and source are returned.</summary>

@@ -210,6 +210,7 @@ public static class ProjectRootDetection
 
     public static bool IsUnderExcludedDirectory(string file)
     {
+        ArgumentNullException.ThrowIfNull(file);
         string[] segments = file.Split('/');
         for (int i = 0; i < segments.Length - 1; i++)
         {

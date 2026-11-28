@@ -14,6 +14,8 @@ public sealed class AgentScanCommand(IAgentGovernanceService agents, IAnsiConsol
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentScanSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         AgentAnalysis analysis = agents.Scan(settings.Path, settings.Harness);
         DiagnosticReport report = analysis.Report;
 

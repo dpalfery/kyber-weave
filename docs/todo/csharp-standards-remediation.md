@@ -32,6 +32,8 @@ under `docs/plans/` on the branch that delivers it, and that plan is archived in
 - The string comparison and culture analyzers (CA1304, CA1305, CA1307, CA1309, CA1310, CA1311) had
   no violations, so they fail the build now.
 - CA1062 does not apply to test code (`.editorconfig`, `[{tests,dash/server.tests}/**.cs]`).
+- CA1502 and CA1506 do not apply to test code either (same `.editorconfig` section); CA1001 and
+  CA1063 do, since leaked handles make tests flaky. The owner approved this on 2026-11-26.
 
 ## Baseline (2026-11-26, branch `claude/csharp-practices-review-edb1a8` at `409e1a879` plus this change)
 
@@ -196,9 +198,8 @@ The searched rules in the second baseline table have no remaining real violation
 
 ## Open questions for the owner
 
-1. Do CA1001, CA1063, CA1031, CA1502 and CA1506 apply to test code? Test code holds 214 of the 699
-   violations, including 127 of the 132 disposal ones. Recommendation: keep CA1001 and CA1063 for
-   tests, since leaked handles make tests flaky, and exempt tests from CA1502 and CA1506 like CA1062.
+1. Decided 2026-11-26: CA1001, CA1063 and CA1031 apply to test code; CA1502 and CA1506 do not
+   (see the scope list above).
 2. Sonar: none of the Sonar ids in `Directory.Build.props` `NoWarn` do anything, because SonarAnalyzer
    is not referenced. So magic numbers (S109), nesting (S134), method length (S138), cognitive
    complexity (S3776) and concatenation in loops (S1643) have no analyzer. Recommendation: keep them

@@ -108,6 +108,8 @@ public static class CopilotPromptFile
     /// </remarks>
     public static bool SamePath(IPathResolver paths, string baseDirectory, string left, string right)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+
         try
         {
             return string.Equals(

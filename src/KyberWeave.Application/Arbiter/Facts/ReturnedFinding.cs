@@ -31,6 +31,7 @@ public sealed record ReturnedFinding(string Id, string Text, string? Severity)
     /// <param name="id">A finding id, bare or lens-qualified.</param>
     public static string IdKey(string id)
     {
+        ArgumentNullException.ThrowIfNull(id);
         int slash = id.LastIndexOf('/');
         return slash < 0 ? id : id[(slash + 1)..];
     }

@@ -55,6 +55,8 @@ public sealed partial class RoutingLinter
     /// <summary>Per-skill lint (no cross-skill checks).</summary>
     public IEnumerable<Diagnostic> LintSkill(Skill skill)
     {
+        ArgumentNullException.ThrowIfNull(skill);
+
         string id = skill.Frontmatter.Name ?? skill.DirectoryName;
         string file = skill.SkillFilePath;
 
@@ -120,6 +122,8 @@ public sealed partial class RoutingLinter
     /// <summary>Cross-skill checks over a set: name collisions and description overlap.</summary>
     public IEnumerable<Diagnostic> LintSet(SkillSet set)
     {
+        ArgumentNullException.ThrowIfNull(set);
+
         IReadOnlyList<Skill> skills = set.Skills;
 
         // Exact name collisions

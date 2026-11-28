@@ -50,6 +50,7 @@ public sealed class DocsTasksCommand(
     /// </summary>
     public override int Execute(CommandContext context, DocsTasksSettings settings, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
         if (settings.List && (settings.Write || settings.Check || settings.Convert))
         {

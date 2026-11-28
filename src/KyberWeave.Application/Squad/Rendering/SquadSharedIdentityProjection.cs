@@ -35,12 +35,15 @@ public static class SquadSharedIdentityProjection
     /// <summary>The shared identities whose same-name agent is a primary-invocation wrapper.</summary>
     public static HashSet<string> PrimaryIdentities(
         SquadSource source,
-        IReadOnlySet<string> sharedIdentities) =>
-        source.Agents
+        IReadOnlySet<string> sharedIdentities)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        return source.Agents
             .Where(agent => agent.Invocation == SquadInvocation.Primary &&
                             sharedIdentities.Contains(agent.Name))
             .Select(agent => agent.Name)
             .ToHashSet(StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// The shared identities whose canonical skill a renderer suppresses because the emitted
@@ -60,6 +63,7 @@ public static class SquadSharedIdentityProjection
     /// </summary>
     public static bool IsPrimarySharedIdentity(SquadSource source, string identity)
     {
+        ArgumentNullException.ThrowIfNull(source);
         bool shared = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .Contains(identity, StringComparer.Ordinal);
