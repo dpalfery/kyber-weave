@@ -891,10 +891,6 @@ public partial class SqliteRelationalStore : BaseSqliteRepository, IRelationalSt
         return text;
     }
 
-    /// <summary>Keeps the legacy guarded-text validation on the write path while returning the value to bind.</summary>
-    private static readonly Func<string, string, string?, string> GuardedTextExpr =
-        static (tableName, columnName, value) => GuardedText(tableName, columnName, value);
-
     private static string IntSql(int value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static string LongSql(long value) => value.ToString(CultureInfo.InvariantCulture);

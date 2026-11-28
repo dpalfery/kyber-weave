@@ -26,9 +26,6 @@ public partial class SqliteRelationalStore : IOperationalStore
         "metric_point_source",
     ];
 
-    private static readonly Func<string, string, string?, string> LegacyGuardedTextValidator =
-        GuardedTextExpr;
-
     /// <inheritdoc />
     public SettingsView ReadSettings()
     {
@@ -1320,13 +1317,9 @@ public partial class SqliteRelationalStore : IOperationalStore
 
     private static Dictionary<string, object?> NewParameters() => new(StringComparer.Ordinal);
 
-    /// <summary>Keeps the legacy guarded-text validation on the write path while returning the value to bind.</summary>
-    private static string GuardedTextValue(string tableName, string columnName, string? value)
-    {
-        string validated = GuardedText(tableName, columnName, value);
-        _ = LegacyGuardedTextValidator(tableName, columnName, validated);
-        return validated;
-    }
+    /// <summary>Validates a guarded TEXT value on the write path and returns it to bind.</summary>
+    private static string GuardedTextValue(string tableName, string columnName, string? value) =>
+        GuardedText(tableName, columnName, value);
 
     private static string AddParameter(Dictionary<string, object?> parameters, object? value)
     {
