@@ -34,7 +34,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A finding on a task's file, a Markdown file and a file no task lists each reach their own packet.</summary>
     [Fact]
-    public void FindingsAreGroupedByTaskByDocumentationAndByNoTaskAtAll()
+    public async Task FindingsAreGroupedByTaskByDocumentationAndByNoTaskAtAll()
     {
         WritePlan("""
             schema-version: 1
@@ -49,7 +49,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs", "src/Review/B.cs", "docs/guide.md", "src/Other/C.cs");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding("correctness/a", "src/Core/A.cs"),
                 Finding("correctness/b", "src/Review/B.cs"),
@@ -72,11 +72,11 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>The header's rules are written once, in the packet, so each worker reads the same seven instructions.</summary>
     [Fact]
-    public void EveryPacketCarriesTheFixedHeaderRules()
+    public async Task EveryPacketCarriesTheFixedHeaderRules()
     {
         ScriptChange();
 
-        _ = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        _ = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         string packet = Read("unassigned");
         Assert.StartsWith("# Fix packet: unassigned\n\nRead every finding here before you change anything.\n", packet, StringComparison.Ordinal);
@@ -88,14 +88,14 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>Every earlier cycle's finding on a file of the packet is in its history, oldest cycle first.</summary>
     [Fact]
-    public void TheHistoryNamesEveryEarlierFindingOnThePacketsFiles()
+    public async Task TheHistoryNamesEveryEarlierFindingOnThePacketsFiles()
     {
         WriteEarlierCycle(1, head: "aaaaaaa", Finding("correctness/first", "src/Core/A.cs", line: 4, claim: "The first defect."));
         WriteEarlierCycle(2, head: "bbbbbbb", Finding("correctness/second", "src/Core/A.cs", line: 9, claim: "The second defect."));
         ScriptChange("src/Core/A.cs");
         ScriptLog("aaaaaaa..HEAD", "ccccccc later fix");
 
-        FixPacketOutcome outcome = Write([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-2"));
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-2"));
 
         string packet = Read(GroupOf(outcome.DispatchBlocks[0]));
         Assert.Contains("## Earlier cycles' findings on these files (line numbers are from that cycle's commit; not necessarily still open)", packet, StringComparison.Ordinal);
@@ -105,25 +105,25 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A file no earlier finding touched says <c>none</c> rather than leaving the section blank.</summary>
     [Fact]
-    public void AHistoryWithNoEarlierFindingSaysNone()
+    public async Task AHistoryWithNoEarlierFindingSaysNone()
     {
         WriteEarlierCycle(1, head: null, Finding("correctness/first", "src/Core/A.cs"));
         ScriptChange();
 
-        _ = Write([Finding("correctness/other", "src/Other/C.cs")], [], prior: Path.Combine(_review, "cycle-1"));
+        _ = await WriteAsync([Finding("correctness/other", "src/Other/C.cs")], [], prior: Path.Combine(_review, "cycle-1"));
 
         Assert.Contains("## Earlier cycles' findings on these files (line numbers are from that cycle's commit; not necessarily still open)\n\nnone\n", Read("unassigned"), StringComparison.Ordinal);
     }
 
     /// <summary>The commits on the packet's files since cycle 1 are its last section.</summary>
     [Fact]
-    public void TheCommitsOnThePacketsFilesSinceCycleOneAreListed()
+    public async Task TheCommitsOnThePacketsFilesSinceCycleOneAreListed()
     {
         WriteEarlierCycle(1, head: "aaaaaaa", Finding("correctness/first", "src/Core/A.cs"));
         ScriptChange("src/Core/A.cs");
         ScriptLog("aaaaaaa..HEAD", "ccccccc first fix", "ddddddd second fix");
 
-        _ = Write([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-1"));
+        _ = await WriteAsync([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-1"));
 
         string packet = Read("unassigned");
         Assert.Contains("## Commits on these files since cycle 1\n\nccccccc first fix\nddddddd second fix\n", packet, StringComparison.Ordinal);
@@ -132,12 +132,12 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>Cycle 1 with no head omits the commits section and says why in one line.</summary>
     [Fact]
-    public void ACycleOneWithNoHeadOmitsTheCommitsSectionAndSaysWhy()
+    public async Task ACycleOneWithNoHeadOmitsTheCommitsSectionAndSaysWhy()
     {
         WriteEarlierCycle(1, head: null, Finding("correctness/first", "src/Core/A.cs"));
         ScriptChange();
 
-        _ = Write([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-1"));
+        _ = await WriteAsync([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-1"));
 
         string packet = Read("unassigned");
         Assert.DoesNotContain("## Commits on these files since cycle 1", packet, StringComparison.Ordinal);
@@ -146,7 +146,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A git failure omits the commits section and states the reason on one line.</summary>
     [Fact]
-    public void AGitFailureOmitsTheCommitsSectionAndSaysWhy()
+    public async Task AGitFailureOmitsTheCommitsSectionAndSaysWhy()
     {
         WriteEarlierCycle(1, head: "aaaaaaa", Finding("correctness/first", "src/Core/A.cs"));
         ScriptChange();
@@ -161,7 +161,7 @@ public sealed class FixPacketWriterTests : IDisposable
             "--",
             "src/Core/A.cs");
 
-        _ = Write([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-1"));
+        _ = await WriteAsync([Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-1"));
 
         string packet = Read("unassigned");
         Assert.DoesNotContain("## Commits on these files since cycle 1", packet, StringComparison.Ordinal);
@@ -173,7 +173,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A task packet's block names the plan, the task and the packet's absolute path, and nothing else.</summary>
     [Fact]
-    public void ATaskDispatchBlockNamesThePlanTheTaskAndThePacketPath()
+    public async Task ATaskDispatchBlockNamesThePlanTheTaskAndThePacketPath()
     {
         WritePlan("""
             schema-version: 1
@@ -185,7 +185,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs");
 
-        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         Assert.Equal(
             $"--- fix T1 ---\nKYBER-ARBITER: true\nPLAN_FILE: {Plan}\nTASK: T1\n" +
@@ -195,11 +195,11 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>The documentation and unassigned blocks name their agent or say who must assign the work.</summary>
     [Fact]
-    public void TheDocumentationAndUnassignedBlocksNameTheirOwner()
+    public async Task TheDocumentationAndUnassignedBlocksNameTheirOwner()
     {
         ScriptChange();
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [Finding("documentation-accuracy/guide", "docs/guide.md"), Finding("correctness/other", "src/Other/C.cs")],
             []);
 
@@ -219,7 +219,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// last and tells the conductor to integrate every other block of the round first.
     /// </summary>
     [Fact]
-    public void ACodeRoundWritesTheDocumentationBlockLastAndItWaitsForTheOtherBlocks()
+    public async Task ACodeRoundWritesTheDocumentationBlockLastAndItWaitsForTheOtherBlocks()
     {
         WritePlan("""
             schema-version: 1
@@ -231,7 +231,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs", "docs/guide.md");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [Finding("correctness/a", "src/Core/A.cs"), Finding("documentation-accuracy/guide", "docs/guide.md")],
             []);
 
@@ -245,11 +245,11 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A round whose only packet is the documentation one has nothing to wait for, so it carries no <c>After:</c> line.</summary>
     [Fact]
-    public void ADocumentationOnlyRoundHasNoAfterLine()
+    public async Task ADocumentationOnlyRoundHasNoAfterLine()
     {
         ScriptChange("docs/guide.md");
 
-        FixPacketOutcome outcome = Write([Finding("documentation-accuracy/guide", "docs/guide.md")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("documentation-accuracy/guide", "docs/guide.md")], []);
 
         string docs = Assert.Single(outcome.DispatchBlocks);
         Assert.StartsWith("--- fix docs ---\n", docs, StringComparison.Ordinal);
@@ -262,7 +262,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// documentation packet's name and two groups that sanitize to the same name are still distinct files.
     /// </summary>
     [Fact]
-    public void PacketFileNamesAreSafeUniqueAndNeverTakeABuiltInGroupsName()
+    public async Task PacketFileNamesAreSafeUniqueAndNeverTakeABuiltInGroupsName()
     {
         WritePlan("""
             schema-version: 1
@@ -280,7 +280,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs", "src/Core/B.cs", "src/Core/C.cs", "docs/guide.md");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding("correctness/a", "src/Core/A.cs"),
                 Finding("correctness/b", "src/Core/B.cs"),
@@ -300,14 +300,14 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>Packet files an earlier round wrote and this round does not are deleted before the new packets land.</summary>
     [Fact]
-    public void APacketFileFromAnEarlierRoundThatThisRoundDoesNotWriteIsDeleted()
+    public async Task APacketFileFromAnEarlierRoundThatThisRoundDoesNotWriteIsDeleted()
     {
         _services.Files.CreateDirectory(Path.Combine(_cycle, "fix-packets"));
         _services.Files.WriteAllText(Path.Combine(_cycle, "fix-packets", "old-group.md"), "an earlier round's packet");
         _services.Files.WriteAllText(Path.Combine(_cycle, "fix-packets", "notes.txt"), "not a packet");
         ScriptChange();
 
-        _ = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        _ = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         Assert.False(PacketExists("old-group"));
         Assert.True(PacketExists("unassigned"));
@@ -316,7 +316,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A file two tasks list stays with the first in plan order, and that packet names the other task.</summary>
     [Fact]
-    public void AFileTwoTasksListStaysWithTheFirstAndItsPacketNamesTheOther()
+    public async Task AFileTwoTasksListStaysWithTheFirstAndItsPacketNamesTheOther()
     {
         WritePlan("""
             schema-version: 1
@@ -331,7 +331,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs");
 
-        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         Assert.Equal(["T1"], outcome.DispatchBlocks.Select(GroupOf));
         Assert.Contains(
@@ -346,7 +346,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// edit them and the Arbiter's scope check reads them as part of this fix.
     /// </summary>
     [Fact]
-    public void AFindingThatSpansTwoTasksFilesIsOnePacketThatNamesTheOtherTasksFiles()
+    public async Task AFindingThatSpansTwoTasksFilesIsOnePacketThatNamesTheOtherTasksFiles()
     {
         WritePlan("""
             schema-version: 1
@@ -361,7 +361,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding(
                     "contract/page-envelope",
@@ -388,7 +388,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// task's file.
     /// </summary>
     [Fact]
-    public void ACitationBeyondTheSeatTextLimitDoesNotExtendTheScope()
+    public async Task ACitationBeyondTheSeatTextLimitDoesNotExtendTheScope()
     {
         WritePlan("""
             schema-version: 1
@@ -404,7 +404,7 @@ public sealed class FixPacketWriterTests : IDisposable
         ScriptChange(Plan, "src/Contract/OrderDto.cs");
         string padding = string.Concat(Enumerable.Repeat("# ", ReviewSeatInput.MaxTextCharacters / 2));
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding(
                     "contract/page-envelope",
@@ -423,7 +423,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// there is not lost to the worker that must edit it.
     /// </summary>
     [Fact]
-    public void ACoupledPacketsHistoryAndCommitsCoverTheOtherTasksFiles()
+    public async Task ACoupledPacketsHistoryAndCommitsCoverTheOtherTasksFiles()
     {
         WritePlan("""
             schema-version: 1
@@ -453,7 +453,7 @@ public sealed class FixPacketWriterTests : IDisposable
             "src/Contract/OrderDto.cs",
             "src/Http/OrdersController.cs");
 
-        _ = Write(
+        _ = await WriteAsync(
             [
                 Finding(
                     "contract/page-envelope",
@@ -473,7 +473,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>Findings that touch the same file are one fix even when the file is cited from another task's file.</summary>
     [Fact]
-    public void FindingsThatShareAFileAreOnePacket()
+    public async Task FindingsThatShareAFileAreOnePacket()
     {
         WritePlan("""
             schema-version: 1
@@ -488,7 +488,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Contract/OrderDto.cs", "src/Http/OrdersController.cs");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding(
                     "contract/page-envelope",
@@ -508,7 +508,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A packet that cannot be written is reported, and the blocks of the packets already written are kept.</summary>
     [Fact]
-    public void APacketThatCannotBeWrittenKeepsTheBlocksOfThePacketsBeforeIt()
+    public async Task APacketThatCannotBeWrittenKeepsTheBlocksOfThePacketsBeforeIt()
     {
         WritePlan("""
             schema-version: 1
@@ -528,7 +528,7 @@ public sealed class FixPacketWriterTests : IDisposable
                          && path.EndsWith("task-T2.md", StringComparison.Ordinal),
             new IOException("disk full"));
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [Finding("correctness/a", "src/Core/A.cs"), Finding("correctness/b", "src/Core/B.cs")],
             []);
 
@@ -541,7 +541,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>Git failing to name the change is reported, and the finding still reaches the unassigned packet.</summary>
     [Fact]
-    public void AChangeGitCannotListIsReportedAsANote()
+    public async Task AChangeGitCannotListIsReportedAsANote()
     {
         _services.Processes.Script(
             "git",
@@ -550,7 +550,7 @@ public sealed class FixPacketWriterTests : IDisposable
             "origin/HEAD",
             "HEAD");
 
-        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         Assert.Contains(outcome.Notes, note => note.Contains("git could not list the change", StringComparison.Ordinal));
         Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
@@ -560,7 +560,7 @@ public sealed class FixPacketWriterTests : IDisposable
     [Theory]
     [InlineData(false, "no plan was found for this change")]
     [InlineData(true, "the change touches 2 plans")]
-    public void AChangeWithoutExactlyOnePlanIsReportedAsANote(bool several, string reason)
+    public async Task AChangeWithoutExactlyOnePlanIsReportedAsANote(bool several, string reason)
     {
         WritePlan("""
             schema-version: 1
@@ -580,7 +580,7 @@ public sealed class FixPacketWriterTests : IDisposable
             ScriptChange("src/Core/A.cs");
         }
 
-        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         Assert.Contains(outcome.Notes, note => note.Contains(reason, StringComparison.Ordinal));
         Assert.Contains("### correctness/a", Read("unassigned"), StringComparison.Ordinal);
@@ -588,12 +588,12 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A task file the plan names but the tree does not hold is reported, and its findings go to unassigned.</summary>
     [Fact]
-    public void AMissingTaskFileIsReportedAsANote()
+    public async Task AMissingTaskFileIsReportedAsANote()
     {
         Write("repo/" + Plan, "---\nid: demo\ntitle: Demo\ndoc-type: plan\nstatus: Ready\n---\n\n# Demo\n");
         ScriptChange(Plan, "src/Core/A.cs");
 
-        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         Assert.Contains(outcome.Notes, note => note.Contains("docs/plans/demo.tasks.yml", StringComparison.Ordinal)
                                               && note.Contains("missing or could not be read", StringComparison.Ordinal));
@@ -602,13 +602,13 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A task file that cannot be parsed is reported with its reason, so it reads differently from a missing one.</summary>
     [Fact]
-    public void ACorruptTaskFileIsReportedWithItsReason()
+    public async Task ACorruptTaskFileIsReportedWithItsReason()
     {
         Write("repo/" + Plan, "---\nid: demo\ntitle: Demo\ndoc-type: plan\nstatus: Ready\n---\n\n# Demo\n");
         Write("repo/docs/plans/demo.tasks.yml", "tasks: [unclosed\n: : :\n");
         ScriptChange(Plan, "src/Core/A.cs");
 
-        FixPacketOutcome outcome = Write([Finding("correctness/a", "src/Core/A.cs")], []);
+        FixPacketOutcome outcome = await WriteAsync([Finding("correctness/a", "src/Core/A.cs")], []);
 
         string note = Assert.Single(outcome.Notes, note => note.Contains("docs/plans/demo.tasks.yml", StringComparison.Ordinal));
         Assert.Contains("could not be read (", note, StringComparison.Ordinal);
@@ -621,7 +621,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// commits section names the first cycle it could actually read.
     /// </summary>
     [Fact]
-    public void AnUnreadableEarlierCycleIsNamedAndDoesNotHideTheReadableOnes()
+    public async Task AnUnreadableEarlierCycleIsNamedAndDoesNotHideTheReadableOnes()
     {
         WriteEarlierCycle(1, head: "aaaaaaa", Finding("correctness/first", "src/Core/A.cs", line: 4));
         WriteEarlierCycle(2, head: "bbbbbbb", Finding("correctness/second", "src/Core/A.cs", line: 9));
@@ -634,7 +634,7 @@ public sealed class FixPacketWriterTests : IDisposable
         ScriptChange("src/Core/A.cs");
         ScriptLog("bbbbbbb..HEAD", "ccccccc fix");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [Finding("correctness/third", "src/Core/A.cs")], [], prior: Path.Combine(_review, "cycle-2"));
 
         string packet = Read("unassigned");
@@ -649,7 +649,7 @@ public sealed class FixPacketWriterTests : IDisposable
     /// cannot carry, so the forged file never reaches the dispatch's scope.
     /// </summary>
     [Fact]
-    public void APathThatForgesASecondAlsoInScopeLineIsNotEmitted()
+    public async Task APathThatForgesASecondAlsoInScopeLineIsNotEmitted()
     {
         WritePlan("""
             schema-version: 1
@@ -664,7 +664,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs", "src/Http/OrdersController.cs");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding("correctness/a", "src/Core/A.cs"),
                 Finding(
@@ -681,7 +681,7 @@ public sealed class FixPacketWriterTests : IDisposable
 
     /// <summary>A path with a comma would split into two entries, so the writer does not emit it at all.</summary>
     [Fact]
-    public void APathWithACommaIsNotEmitted()
+    public async Task APathWithACommaIsNotEmitted()
     {
         WritePlan("""
             schema-version: 1
@@ -696,7 +696,7 @@ public sealed class FixPacketWriterTests : IDisposable
             """);
         ScriptChange(Plan, "src/Core/A.cs", "src/Http/OrdersController.cs");
 
-        FixPacketOutcome outcome = Write(
+        FixPacketOutcome outcome = await WriteAsync(
             [
                 Finding("correctness/a", "src/Core/A.cs"),
                 Finding(
@@ -738,13 +738,14 @@ public sealed class FixPacketWriterTests : IDisposable
             Kind: FindingKind.Defect,
             Basis: "AC-2: every element is processed.");
 
-    private FixPacketOutcome Write(
+    private Task<FixPacketOutcome> WriteAsync(
         IReadOnlyList<ReviewFinding> findings, IReadOnlyList<GateResult> gates, string? prior = null) =>
-        FixPacketWriter.Write(
+        FixPacketWriter.WriteAsync(
             new FixPacketInput(_tree, _cycle, prior, null, "docs/plans", findings, gates),
             _services.Cycles,
             _services.Get<IGitChangeReader>(),
-            _services.Files);
+            _services.Files,
+            CancellationToken.None);
 
     private string Read(string group) => _services.Files.ReadAllText(Path.Combine(_cycle, "fix-packets", group + ".md"));
 

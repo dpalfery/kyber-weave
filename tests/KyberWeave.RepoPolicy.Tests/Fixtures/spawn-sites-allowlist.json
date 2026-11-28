@@ -1082,6 +1082,54 @@
       "bound": "ProcessRunner.RunAsync with the caller's timeout: the child's tree is killed on expiry, both pipes are drained before the wait, and the awaited call surfaces a start failure."
     },
     {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/sh\");",
+      "count": 2,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/sh\")",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"kyber-weave-no-such-program-for-the-interactive-test\");",
+      "count": 1,
+      "bound": "Starts nothing: the program does not exist, so the launch fails with a Win32Exception before any child runs."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "int exitCode = ProcessRunner.RunInteractive(startInfo);",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "Assert.Equal(0, ProcessRunner.RunInteractive(startInfo));",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "_ = ProcessRunner.RunInteractive(startInfo);",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "_ = Assert.Throws<Win32Exception>(() => ProcessRunner.RunInteractive(startInfo));",
+      "count": 1,
+      "bound": "Starts nothing: the program does not exist, so the launch fails with a Win32Exception before any child runs."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "_ = Assert.Throws<ArgumentNullException>(() => ProcessRunner.RunInteractive(null!));",
+      "count": 1,
+      "bound": "Starts nothing: a null start info is refused before any launch."
+    },
+    {
       "file": "tests/KyberWeave.RepoPolicy.Tests/DistributionManifestTests.cs",
       "text": "ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);",
       "count": 5,
