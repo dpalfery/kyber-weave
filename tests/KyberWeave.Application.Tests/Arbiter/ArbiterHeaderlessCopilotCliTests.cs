@@ -32,9 +32,9 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     }
 
     [Fact]
-    public void ARootDispatchWithNoHeaders_IsEvaluatedAndAllowed()
+    public async Task ARootDispatchWithNoHeaders_IsEvaluatedAndAllowed()
     {
-        string stdout = Run(Payload("dev-medium", "Add the status cards to the dashboard."));
+        string stdout = await Run(Payload("dev-medium", "Add the status cards to the dashboard."));
 
         Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
         ArbiterDecisionRecord record = Assert.Single(Decisions(), decision => decision.Trigger != "delegate.model");
@@ -46,27 +46,27 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     }
 
     [Fact]
-    public void ARootDispatchWithNoHeaders_IsAllowedWhenTheModelFaults()
+    public async Task ARootDispatchWithNoHeaders_IsAllowedWhenTheModelFaults()
     {
-        string stdout = Run(Payload("dev-medium", "Add the status cards to the dashboard."), new FaultingProvider());
+        string stdout = await Run(Payload("dev-medium", "Add the status cards to the dashboard."), new FaultingProvider());
 
         Assert.DoesNotContain("\"deny\"", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain(Decisions().SelectMany(decision => decision.Rules), rule => rule.Effect == "escalate");
     }
 
     [Fact]
-    public void ADispatchToAnAgentOutsideTheSquad_StillPasses()
+    public async Task ADispatchToAnAgentOutsideTheSquad_StillPasses()
     {
-        string stdout = Run(Payload("explore", "Find the dashboard."));
+        string stdout = await Run(Payload("explore", "Find the dashboard."));
 
         Assert.Empty(stdout);
         Assert.Empty(Decisions());
     }
 
     [Fact]
-    public void ASubagentCaller_IsReadFromThePayload_AndItsWriterDispatchNeedsARun()
+    public async Task ASubagentCaller_IsReadFromThePayload_AndItsWriterDispatchNeedsARun()
     {
-        string stdout = Run(Payload(
+        string stdout = await Run(Payload(
             "dev-medium",
             "Fix the parser.",
             new Dictionary<string, string> { ["agentId"] = "a1", ["parentAgentId"] = "p1", ["agentType"] = "bug-crusher" }));
@@ -113,14 +113,14 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
         return JsonSerializer.Serialize(payload);
     }
 
-    private string Run(string stdin, IArbiterProvider? provider = null)
+    private async Task<string> Run(string stdin, IArbiterProvider? provider = null)
     {
         ArbiterHookDecisionEngine engine = _host.Engine(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _host.HomeDirectory);
         HookCommand command = _host.HookCommand(_host.Registry(engine), _host.LoadHostConfig, () => "cli-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: _host.HomeDirectory));
+        Assert.Equal(0, await command.RunAsync("copilot-cli", null, stdin, stdout, log, homeDirectory: _host.HomeDirectory));
         return stdout.ToString();
     }
 

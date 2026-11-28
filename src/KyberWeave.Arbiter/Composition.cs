@@ -110,7 +110,8 @@ public static class Composition
                 }
 
                 HookCommand command = (commandFactory ?? CreateDefault)(stderr);
-                return command.Run(harness, caller, stdinText, stdout, stderr, scope, home);
+                return await command.RunAsync(harness, caller, stdinText, stdout, stderr, scope, home)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex) when (IsBoundaryFailure(ex))
             {

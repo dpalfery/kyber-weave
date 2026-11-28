@@ -19,7 +19,7 @@ public sealed class ArbiterGlobalHookCoverageTests
     private static readonly string ConductorSkill = Path.Combine(".claude", "skills", "conductor", "SKILL.md");
 
     [Fact]
-    public void GlobalScope_WhenAgentFileDispatchHookClaimedTheDispatch_DefersNamingTheAgentFile()
+    public async Task GlobalScope_WhenAgentFileDispatchHookClaimedTheDispatch_DefersNamingTheAgentFile()
     {
         // The agent file's own PreToolUse dispatch hook is a candidate for csharp-dev dispatches.
         // A project claim already exists, so the user-level hook must defer and name that file
@@ -35,7 +35,7 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, "csharp-dev", "csharp-dev", "Implement the plan parser.");
 
-        HookRun run = scenario.RunGlobal(payload);
+        HookRun run = await scenario.RunGlobal(payload);
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
@@ -46,7 +46,7 @@ public sealed class ArbiterGlobalHookCoverageTests
     }
 
     [Fact]
-    public void GlobalScope_WhenAgentFileHookMatchesOnlyReadTools_EvaluatesWithoutWaiting()
+    public async Task GlobalScope_WhenAgentFileHookMatchesOnlyReadTools_EvaluatesWithoutWaiting()
     {
         // The same agent file, but its only PreToolUse entry matches Read tools. It does not cover
         // Agent or Task, so it is not a candidate and the user-level hook evaluates at once.
@@ -60,7 +60,7 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, "csharp-dev", "csharp-dev", "Implement the plan parser.");
 
-        HookRun run = scenario.RunGlobal(payload);
+        HookRun run = await scenario.RunGlobal(payload);
 
         // The log, not the clock: a hook that waited for a claim says the candidates did not fire, and
         // elapsed time under a loaded test run says nothing about whether it waited.
@@ -70,7 +70,7 @@ public sealed class ArbiterGlobalHookCoverageTests
     }
 
     [Fact]
-    public void GlobalScope_WhenMainThreadDispatchHasOnlyAnAgentFileHook_EvaluatesWithoutWaiting()
+    public async Task GlobalScope_WhenMainThreadDispatchHasOnlyAnAgentFileHook_EvaluatesWithoutWaiting()
     {
         // A main-thread dispatch has no agent type, so no agent file is effective even when
         // .claude/agents/conductor.md carries the dispatch hook. Nothing can claim it, so no wait.
@@ -84,7 +84,7 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, null, "architect", ArbiterGlobalHookScenario.UnmarkedPrompt);
 
-        HookRun run = scenario.RunGlobal(payload);
+        HookRun run = await scenario.RunGlobal(payload);
 
         // The log, not the clock: a hook that waited for a claim says the candidates did not fire, and
         // elapsed time under a loaded test run says nothing about whether it waited.
@@ -94,7 +94,7 @@ public sealed class ArbiterGlobalHookCoverageTests
     }
 
     [Fact]
-    public void GlobalScope_WhenPersonalSkillShadowsProjectHookSkill_EvaluatesWithoutWaiting()
+    public async Task GlobalScope_WhenPersonalSkillShadowsProjectHookSkill_EvaluatesWithoutWaiting()
     {
         // The personal skill of the same name shadows the project skill, and it carries no hook.
         // The project skill's dispatch hook is therefore not effective, so nothing can claim.
@@ -110,7 +110,7 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, null, "architect", ArbiterGlobalHookScenario.UnmarkedPrompt);
 
-        HookRun run = scenario.RunGlobal(payload);
+        HookRun run = await scenario.RunGlobal(payload);
 
         // The log, not the clock: a hook that waited for a claim says the candidates did not fire, and
         // elapsed time under a loaded test run says nothing about whether it waited.
@@ -122,7 +122,7 @@ public sealed class ArbiterGlobalHookCoverageTests
     [Theory]
     [InlineData("../../etc/x")]
     [InlineData("plugin:agent")]
-    public void GlobalScope_WhenAgentTypeIsNotAValidAgentFileName_EvaluatesWithoutReadingAgentFile(string agentType)
+    public async Task GlobalScope_WhenAgentTypeIsNotAValidAgentFileName_EvaluatesWithoutReadingAgentFile(string agentType)
     {
         // A traversal name would resolve to etc/x.md beside .claude. The decoy there carries the
         // dispatch hook, so reading it would defer. An invalid name must use no agent file at all.
@@ -143,7 +143,7 @@ public sealed class ArbiterGlobalHookCoverageTests
         string payload = ArbiterGlobalHookScenario.Dispatch(
             scenario.ProjectRoot, ToolUseId, agentType, "csharp-dev", "Implement the plan parser.");
 
-        HookRun run = scenario.RunGlobal(payload);
+        HookRun run = await scenario.RunGlobal(payload);
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.EvaluatingLog, run.Stderr, StringComparison.Ordinal);
@@ -152,14 +152,14 @@ public sealed class ArbiterGlobalHookCoverageTests
     }
 
     [Fact]
-    public void GlobalScope_WhenHarnessHasNoPerDispatchProbe_DefersNamingTheHarness()
+    public async Task GlobalScope_WhenHarnessHasNoPerDispatchProbe_DefersNamingTheHarness()
     {
         // Codex has no per-dispatch probe for the user-level hook. The project's own Codex hooks
         // decide, so the user-level hook defers and names the harness, and allows nothing itself.
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         string payload = ArbiterGlobalHookScenario.CodexTaskDispatch(scenario.ProjectRoot);
 
-        HookRun run = scenario.RunGlobal(payload, "codex");
+        HookRun run = await scenario.RunGlobal(payload, "codex");
 
         Assert.Equal(0, run.Exit);
         Assert.True(string.IsNullOrWhiteSpace(run.Stdout),

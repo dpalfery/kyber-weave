@@ -187,7 +187,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     private static string Fixture(string name) =>
         EmbeddedFixtureText.Read(typeof(AntigravityHookAdapterTests).Assembly, $"arbiter-hooks/antigravity/{name}");
 
-    private (int Exit, string Stdout, string Log) Run(
+    private async Task<(int Exit, string Stdout, string Log)> Run(
         string stdin,
         string? caller,
         IHookDecisionEngine engine,
@@ -199,12 +199,12 @@ public sealed class AntigravityHookAdapterTests : IDisposable
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(AntigravityHookAdapter.Token, caller, stdin, stdout, log);
+        int exit = await command.RunAsync(AntigravityHookAdapter.Token, caller, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
     [Fact]
-    public void PreInvoke_EscalatingSubagent_WritesDenyShapeWithEnvelope()
+    public async Task PreInvoke_EscalatingSubagent_WritesDenyShapeWithEnvelope()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
@@ -212,7 +212,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
         engine.PreResults.Enqueue(new HookOutcome(HookOutcomeKind.Allow));
         engine.PreResults.Enqueue(new HookOutcome(HookOutcomeKind.Deny, envelope));
 
-        (int exit, string stdout, _) = Run(Fixture("pre-invoke-subagent-multi.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-invoke-subagent-multi.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(2, engine.SeenPre.Count);
@@ -223,11 +223,11 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_EveryElementIsOneDispatch_WithTypeNameAndPrompt()
+    public async Task PreInvoke_EveryElementIsOneDispatch_WithTypeNameAndPrompt()
     {
         ContextualEngine engine = new();
 
-        (int exit, _, _) = Run(Fixture("pre-invoke-subagent-multi.json"), null, engine);
+        (int exit, _, _) = await Run(Fixture("pre-invoke-subagent-multi.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(2, engine.SeenPre.Count);
@@ -238,14 +238,14 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_EmptyPrompt_AllowsAndLogs()
+    public async Task PreInvoke_EmptyPrompt_AllowsAndLogs()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
         subagent["Prompt"] = string.Empty;
 
-        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = await Run(root.ToJsonString(), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -255,14 +255,14 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_EmptyTypeName_AllowsAndLogs()
+    public async Task PreInvoke_EmptyTypeName_AllowsAndLogs()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
         subagent["TypeName"] = string.Empty;
 
-        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = await Run(root.ToJsonString(), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -272,14 +272,14 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_MissingTypeName_AllowsWithoutEvaluatingATargetlessDispatch()
+    public async Task PreInvoke_MissingTypeName_AllowsWithoutEvaluatingATargetlessDispatch()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
         subagent.Remove("TypeName");
 
-        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = await Run(root.ToJsonString(), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -289,9 +289,9 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_AllAllow_WritesTheExplicitAllow()
+    public async Task PreInvoke_AllAllow_WritesTheExplicitAllow()
     {
-        (int exit, string stdout, _) = Run(Fixture("pre-invoke-subagent-multi.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("pre-invoke-subagent-multi.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(AllowDocument, stdout);
@@ -299,12 +299,12 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void DisabledArbiter_AnswersTheDocumentedAllowDocument_NotEmptyOutput()
+    public async Task DisabledArbiter_AnswersTheDocumentedAllowDocument_NotEmptyOutput()
     {
         // With the Arbiter disabled the host still writes the explicit allow: empty output
         // and {} carry no decision, which Antigravity reports as a denial.
         (int exit, string stdout, string log) =
-            Run(Fixture("pre-invoke-subagent.json"), null, new ScriptedEngine(), _ => DisabledConfig());
+            await Run(Fixture("pre-invoke-subagent.json"), null, new ScriptedEngine(), _ => DisabledConfig());
 
         Assert.Equal(0, exit);
         Assert.Equal(AllowDocument, stdout);
@@ -312,11 +312,11 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_CallIdFromConversationAndStep_AndCwdFromWorkspacePaths()
+    public async Task PreInvoke_CallIdFromConversationAndStep_AndCwdFromWorkspacePaths()
     {
         ContextualEngine engine = new();
 
-        (int exit, _, _) = Run(Fixture("pre-invoke-subagent.json"), null, engine);
+        (int exit, _, _) = await Run(Fixture("pre-invoke-subagent.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(["conv-antigravity-1:3"], engine.SeenPreToolCallIds);
@@ -325,11 +325,11 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PreInvoke_NonDispatchTool_WritesTheExplicitAllowWithoutEvaluating()
+    public async Task PreInvoke_NonDispatchTool_WritesTheExplicitAllowWithoutEvaluating()
     {
         ContextualEngine engine = new();
 
-        (int exit, string stdout, _) = Run(Fixture("pre-non-dispatch.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-non-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(AllowDocument, stdout);
@@ -337,11 +337,11 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void PostInvoke_RecordsReturnEvent_AndWritesEmptyObject()
+    public async Task PostInvoke_RecordsReturnEvent_AndWritesEmptyObject()
     {
         ContextualEngine engine = new();
 
-        (int exit, string stdout, _) = Run(Fixture("post-invoke-subagent.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-invoke-subagent.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal("{}", stdout);
@@ -351,11 +351,11 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void InternalError_AllowsWithTheExplicitAllowAndLogs()
+    public async Task InternalError_AllowsWithTheExplicitAllowAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, string log) = Run(Fixture("pre-invoke-subagent.json"), null, engine);
+        (int exit, string stdout, string log) = await Run(Fixture("pre-invoke-subagent.json"), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -394,7 +394,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
         return payload.ToJsonString();
     }
 
-    private (int Exit, string Stdout, string Log) RunWithLoader(
+    private async Task<(int Exit, string Stdout, string Log)> RunWithLoader(
         string stdin,
         Func<string, KyberWeaveConfig> loader)
     {
@@ -404,7 +404,7 @@ public sealed class AntigravityHookAdapterTests : IDisposable
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(AntigravityHookAdapter.Token, null, stdin, stdout, log);
+        int exit = await command.RunAsync(AntigravityHookAdapter.Token, null, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
@@ -412,13 +412,13 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     // process directory, a payload cwd) fails the load exactly as a directory without
     // host configuration would, so a fix that loads from anywhere else cannot pass.
     [Fact]
-    public void Hook_WorkspaceSuppliesRepoRoot_LoadsTheWorkspaceConfig()
+    public async Task Hook_WorkspaceSuppliesRepoRoot_LoadsTheWorkspaceConfig()
     {
         string workspace = ArbiterTestRoots.Under("workspace");
         _ = _host.WriteRepoConfig("arbiter:\n  enabled: false\n", workspace);
 
         List<string> roots = [];
-        (int exit, string stdout, string log) = RunWithLoader(
+        (int exit, string stdout, string log) = await RunWithLoader(
             Payload("PreToolUse", "invoke_subagent", workspace),
             root =>
             {
@@ -436,14 +436,14 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Hook_WorkspaceTakesPrecedenceOverThePayloadCwd()
+    public async Task Hook_WorkspaceTakesPrecedenceOverThePayloadCwd()
     {
         string workspace = ArbiterTestRoots.Under("workspace");
         string cwdDirectory = ArbiterTestRoots.Under("cwd");
         _ = _host.WriteRepoConfig("arbiter:\n  enabled: false\n", workspace);
 
         List<string> roots = [];
-        (int exit, _, string log) = RunWithLoader(
+        (int exit, _, string log) = await RunWithLoader(
             Payload("PreToolUse", "invoke_subagent", workspace, cwd: cwdDirectory),
             root =>
             {
@@ -468,12 +468,12 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void Hook_BlankWorkspace_FallsBackToThePayloadCwd(string workspace)
+    public async Task Hook_BlankWorkspace_FallsBackToThePayloadCwd(string workspace)
     {
         string cwdDirectory = ArbiterTestRoots.Under("cwd");
 
         List<string> roots = [];
-        (int exit, _, _) = RunWithLoader(
+        (int exit, _, _) = await RunWithLoader(
             Payload("PreToolUse", "invoke_subagent", workspace, cwd: cwdDirectory),
             root =>
             {
@@ -486,10 +486,10 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Hook_BlankWorkspaceAndNoCwd_FallsBackToTheProcessDirectory()
+    public async Task Hook_BlankWorkspaceAndNoCwd_FallsBackToTheProcessDirectory()
     {
         List<string> roots = [];
-        (int exit, _, _) = RunWithLoader(
+        (int exit, _, _) = await RunWithLoader(
             Payload("PreToolUse", "invoke_subagent", "  "),
             root =>
             {
@@ -502,11 +502,11 @@ public sealed class AntigravityHookAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Hook_NonDispatchEvent_AnswersTheExplicitAllowBeforeConfigLoad()
+    public async Task Hook_NonDispatchEvent_AnswersTheExplicitAllowBeforeConfigLoad()
     {
         int loads = 0;
 
-        (int exit, string stdout, _) = RunWithLoader(
+        (int exit, string stdout, _) = await RunWithLoader(
             Payload("PreToolUse", "view_file", _host.RepoRoot),
             root => { loads++; return EnabledConfig(); });
 

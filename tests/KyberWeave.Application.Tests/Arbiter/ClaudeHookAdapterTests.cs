@@ -69,7 +69,7 @@ public sealed class ClaudeHookAdapterTests
     private static string Fixture(string name) =>
         EmbeddedFixtureText.Read(typeof(ClaudeHookAdapterTests).Assembly, $"arbiter-hooks/claude/{name}");
 
-    private static (int Exit, string Stdout) Run(
+    private static async Task<(int Exit, string Stdout)> Run(
         string stdin, string? caller, IHookDecisionEngine engine)
     {
         HookCommand command = ArbiterTestServices.Command(
@@ -78,18 +78,18 @@ public sealed class ClaudeHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("claude", caller, stdin, stdout, log);
+        int exit = await command.RunAsync("claude", caller, stdin, stdout, log);
         return (exit, stdout.ToString());
     }
 
     [Fact]
-    public void PreDispatch_Deny_WritesDenyShapeWithEnvelope()
+    public async Task PreDispatch_Deny_WritesDenyShapeWithEnvelope()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout) = Run(Fixture("pre-agent-dispatch.json"), "conductor", engine);
+        (int exit, string stdout) = await Run(Fixture("pre-agent-dispatch.json"), "conductor", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -100,21 +100,21 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
+    public async Task PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-agent-dispatch.json").Replace(
             "\"subagent_type\": \"dev-medium\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
-        (int exit, string stdout) = Run(stdin, "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(stdin, "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void PreDispatch_Allow_SpecialistTarget_StripsHeaderBlock()
+    public async Task PreDispatch_Allow_SpecialistTarget_StripsHeaderBlock()
     {
-        (int exit, string stdout) = Run(Fixture("pre-agent-dispatch.json"), "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(Fixture("pre-agent-dispatch.json"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -133,9 +133,9 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_TaskAlias_TreatedAsDispatch()
+    public async Task PreDispatch_TaskAlias_TreatedAsDispatch()
     {
-        (int exit, string stdout) = Run(Fixture("pre-task-dispatch.json"), "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(Fixture("pre-task-dispatch.json"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -146,13 +146,13 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Completed_NonAllow_WritesTopLevelBlock()
+    public async Task PostDispatch_Completed_NonAllow_WritesTopLevelBlock()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
 
-        (int exit, string stdout) = Run(Fixture("post-completed.json"), "conductor", engine);
+        (int exit, string stdout) = await Run(Fixture("post-completed.json"), "conductor", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -161,12 +161,12 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Annotation_WritesAdditionalContext()
+    public async Task PostDispatch_Annotation_WritesAdditionalContext()
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
 
-        (int exit, string stdout) = Run(Fixture("post-completed.json"), "code-reviewer", engine);
+        (int exit, string stdout) = await Run(Fixture("post-completed.json"), "code-reviewer", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -176,20 +176,20 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Completed_Allow_WritesNothing()
+    public async Task PostDispatch_Completed_Allow_WritesNothing()
     {
-        (int exit, string stdout) = Run(Fixture("post-completed.json"), "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(Fixture("post-completed.json"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void PostDispatch_AsyncLaunched_HandsTheDispatchToTheEngineAndWritesNothing()
+    public async Task PostDispatch_AsyncLaunched_HandsTheDispatchToTheEngineAndWritesNothing()
     {
         BackgroundScriptedEngine engine = new();
 
-        (int exit, string stdout) = Run(Fixture("post-async-launched.json"), "conductor", engine);
+        (int exit, string stdout) = await Run(Fixture("post-async-launched.json"), "conductor", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -219,7 +219,7 @@ public sealed class ClaudeHookAdapterTests
     [InlineData(
         """{"hook_event_name":"PreToolUse","tool_name":"SubagentHandback","session_id":"s","agent_id":"a","tool_input":{}}""",
         "carries no message")]
-    public void MalformedDispatchInput_FailsOpenAndLogsTheGuard(string stdin, string expected)
+    public async Task MalformedDispatchInput_FailsOpenAndLogsTheGuard(string stdin, string expected)
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(new ScriptedEngine()),
@@ -228,7 +228,7 @@ public sealed class ClaudeHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "conductor", stdin, stdout, log);
+        int exit = await command.RunAsync("claude", "conductor", stdin, stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Contains(expected, log.ToString(), StringComparison.Ordinal);
@@ -285,23 +285,23 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void Caller_PayloadAgentType_OutranksCallerFlag()
+    public async Task Caller_PayloadAgentType_OutranksCallerFlag()
     {
         ScriptedEngine engine = new();
 
-        Run(Fixture("pre-agent-dispatch.json"), "dev-medium", engine);
+        await Run(Fixture("pre-agent-dispatch.json"), "dev-medium", engine);
 
         Assert.Equal("conductor", engine.SeenPreCaller);
     }
 
     [Fact]
-    public void Caller_FallsBackToCallerFlagWithoutPayloadAgentType()
+    public async Task Caller_FallsBackToCallerFlagWithoutPayloadAgentType()
     {
         string stdin = Fixture("pre-agent-dispatch.json").Replace(
             "\"agent_type\": \"conductor\",", string.Empty, StringComparison.Ordinal);
         ScriptedEngine engine = new();
 
-        (int exit, _) = Run(stdin, "dev-medium", engine);
+        (int exit, _) = await Run(stdin, "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal("dev-medium", engine.SeenPreCaller);
@@ -404,7 +404,7 @@ public sealed class ClaudeHookAdapterTests
             string? deliveredPrompt,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(DecidePreDispatch(
-                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+                harness, caller, target, prompt, config, context, toolCallId, sessionId, dispatchModel));
 
         /// <inheritdoc/>
         public Task<HookOutcome> DecidePostDispatchAsync(
@@ -452,7 +452,7 @@ public sealed class ClaudeHookAdapterTests
 
     private const string HeaderedPrompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
 
-    private static (int Exit, string Stdout, string Log) RunContextual(string stdin, IHookDecisionEngine engine)
+    private static async Task<(int Exit, string Stdout, string Log)> RunContextual(string stdin, IHookDecisionEngine engine)
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(engine),
@@ -460,7 +460,7 @@ public sealed class ClaudeHookAdapterTests
             () => "decision-test-27");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("claude", "conductor", stdin, stdout, log);
+        int exit = await command.RunAsync("claude", "conductor", stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
@@ -471,11 +471,11 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ModelRewrite_UpdatedInputIsOneDocument_KeepingEveryFieldAndStrippingTheHeader()
+    public async Task ModelRewrite_UpdatedInputIsOneDocument_KeepingEveryFieldAndStrippingTheHeader()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet") };
 
-        (int exit, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (int exit, string stdout, _) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         Assert.Equal(0, exit);
         JsonElement updated = UpdatedInput(stdout);
@@ -486,11 +486,11 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ModelRewrite_WritesTheModelEvenWhenNoHeaderWasStripped()
+    public async Task ModelRewrite_WritesTheModelEvenWhenNoHeaderWasStripped()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "opus") };
 
-        (int exit, string stdout, _) = RunContextual(DispatchPayload("Implement T2."), engine);
+        (int exit, string stdout, _) = await RunContextual(DispatchPayload("Implement T2."), engine);
 
         Assert.Equal(0, exit);
         JsonElement updated = UpdatedInput(stdout);
@@ -499,21 +499,21 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ModelRewrite_AnAliasToken_IsWrittenAsItIs()
+    public async Task ModelRewrite_AnAliasToken_IsWrittenAsItIs()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "haiku") };
 
-        (_, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (_, string stdout, _) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         Assert.Equal("haiku", UpdatedInput(stdout).GetProperty("model").GetString());
     }
 
     [Fact]
-    public void ModelRewrite_AFullModelIdentifier_WritesItsFamilyAliasAndRecordsAliasDerived()
+    public async Task ModelRewrite_AFullModelIdentifier_WritesItsFamilyAliasAndRecordsAliasDerived()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "claude-sonnet-5-5") };
 
-        (_, string stdout, string log) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (_, string stdout, string log) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         Assert.Equal("sonnet", UpdatedInput(stdout).GetProperty("model").GetString());
         Assert.Contains("model.reason: alias-derived", log, StringComparison.Ordinal);
@@ -522,11 +522,11 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ModelRewrite_AnOtherToken_IsNotWritten_AndRecordsTokenNotAccepted()
+    public async Task ModelRewrite_AnOtherToken_IsNotWritten_AndRecordsTokenNotAccepted()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "gpt-4o") };
 
-        (_, string stdout, string log) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (_, string stdout, string log) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         Assert.False(UpdatedInput(stdout).TryGetProperty("model", out _));
         Assert.Contains("token-not-accepted", log, StringComparison.Ordinal);
@@ -536,11 +536,11 @@ public sealed class ClaudeHookAdapterTests
     [InlineData("claude-unknown-9")]
     [InlineData("claude")]
     [InlineData("")]
-    public void ModelRewrite_TokenWithNoAcceptedFamily_IsNotWritten(string token)
+    public async Task ModelRewrite_TokenWithNoAcceptedFamily_IsNotWritten(string token)
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: token) };
 
-        (_, string stdout, string log) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (_, string stdout, string log) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         Assert.False(UpdatedInput(stdout).TryGetProperty("model", out _));
         Assert.Contains("token-not-accepted", log, StringComparison.Ordinal);
@@ -559,17 +559,17 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ModelRewrite_WrittenModel_KeepsEveryOtherToolInputField()
+    public async Task ModelRewrite_WrittenModel_KeepsEveryOtherToolInputField()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet") };
 
-        (_, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (_, string stdout, _) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         AssertExtraFieldsSurvive(UpdatedInput(stdout));
     }
 
     [Fact]
-    public void ModelRewrite_FailedWrite_KeepsEveryOtherToolInputField()
+    public async Task ModelRewrite_FailedWrite_KeepsEveryOtherToolInputField()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet") };
         ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
@@ -577,34 +577,34 @@ public sealed class ClaudeHookAdapterTests
         using StringWriter log = new();
         HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
 
-        string stdout = adapter.Handle(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
+        string stdout = await adapter.HandleAsync(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
 
         AssertExtraFieldsSurvive(UpdatedInput(stdout));
     }
 
     [Fact]
-    public void ModelRewrite_StripOnly_KeepsEveryOtherToolInputField()
+    public async Task ModelRewrite_StripOnly_KeepsEveryOtherToolInputField()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow) };
 
-        (_, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (_, string stdout, _) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         AssertExtraFieldsSurvive(UpdatedInput(stdout));
     }
 
     [Fact]
-    public void ModelRewrite_ACallerSuppliedModelField_IsPassedAsDispatchModelAndLeftUnchanged()
+    public async Task ModelRewrite_ACallerSuppliedModelField_IsPassedAsDispatchModelAndLeftUnchanged()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow) };
 
-        (_, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt, model: "claude-opus-5-5"), engine);
+        (_, string stdout, _) = await RunContextual(DispatchPayload(HeaderedPrompt, model: "claude-opus-5-5"), engine);
 
         Assert.Equal("claude-opus-5-5", engine.SeenDispatchModel);
         Assert.Equal("claude-opus-5-5", UpdatedInput(stdout).GetProperty("model").GetString());
     }
 
     [Fact]
-    public void ModelWriteFailure_FallsBackToStripOnly_LogsModelWriteFailedAndDeliveredFalse()
+    public async Task ModelWriteFailure_FallsBackToStripOnly_LogsModelWriteFailedAndDeliveredFalse()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet") };
         ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
@@ -612,7 +612,7 @@ public sealed class ClaudeHookAdapterTests
         using StringWriter log = new();
         HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
 
-        string stdout = adapter.Handle(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
+        string stdout = await adapter.HandleAsync(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
 
         JsonElement updated = UpdatedInput(stdout);
         Assert.Equal("Implement T2.", updated.GetProperty("prompt").GetString());
@@ -629,7 +629,7 @@ public sealed class ClaudeHookAdapterTests
     [Theory]
     [InlineData("dev-medium")]
     [InlineData("code-reviewer")]
-    public void ModelWriteFailure_StripsTheHeaderForEveryTargetClass(string subagent)
+    public async Task ModelWriteFailure_StripsTheHeaderForEveryTargetClass(string subagent)
     {
         ContextualScriptedEngine engine = new() { ConfirmToken = "sonnet" };
         ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
@@ -638,7 +638,7 @@ public sealed class ClaudeHookAdapterTests
         using StringWriter log = new();
         HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
 
-        string stdout = adapter.Handle(doc.RootElement, raw, "conductor", EnabledConfig(), context);
+        string stdout = await adapter.HandleAsync(doc.RootElement, raw, "conductor", EnabledConfig(), context);
 
         Assert.False(string.IsNullOrEmpty(stdout), $"{subagent}: the dispatch must be allowed, not passed through");
         JsonElement updated = UpdatedInput(stdout);
@@ -654,11 +654,11 @@ public sealed class ClaudeHookAdapterTests
     /// mode: the real shadow path is <c>ArbiterModelDeliveryTests.ModeShadow_HookOutcomeCarriesNoToken_ButTheDecisionStillHoldsTheModelBlock</c>.
     /// </summary>
     [Fact]
-    public void ModelRewrite_ScriptedAllowWithNoToken_IsTheStripOnlyDocument()
+    public async Task ModelRewrite_ScriptedAllowWithNoToken_IsTheStripOnlyDocument()
     {
         ContextualScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Allow) };
 
-        (int exit, string stdout, _) = RunContextual(DispatchPayload(HeaderedPrompt), engine);
+        (int exit, string stdout, _) = await RunContextual(DispatchPayload(HeaderedPrompt), engine);
 
         Assert.Equal(0, exit);
         JsonElement updated = UpdatedInput(stdout);
@@ -704,19 +704,19 @@ public sealed class ClaudeHookAdapterTests
     [InlineData("Bash", "python3 x.py")]
     [InlineData("PowerShell", "grep x | sed y")]
     [InlineData("PowerShell", "python3 x.py")]
-    public void ShellGuard_ArchitectCallOutsideTheList_IsDeniedBeforeItRuns_WhenTheAgentTypeNamesIt(string tool, string command)
+    public async Task ShellGuard_ArchitectCallOutsideTheList_IsDeniedBeforeItRuns_WhenTheAgentTypeNamesIt(string tool, string command)
     {
         // The conductor is the --caller flag; the payload's agent_type must outrank it.
-        (int exit, string stdout) = Run(ShellPayload(tool, command, "architect"), "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(ShellPayload(tool, command, "architect"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         AssertShellDenied(stdout);
     }
 
     [Fact]
-    public void ShellGuard_ArchitectCallOutsideTheList_IsDeniedWhenTheRenderedCallerNamesIt()
+    public async Task ShellGuard_ArchitectCallOutsideTheList_IsDeniedWhenTheRenderedCallerNamesIt()
     {
-        (int exit, string stdout) = Run(ShellPayload("Bash", "python3 x.py", agentType: null), "architect", new ScriptedEngine());
+        (int exit, string stdout) = await Run(ShellPayload("Bash", "python3 x.py", agentType: null), "architect", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         AssertShellDenied(stdout);
@@ -725,20 +725,20 @@ public sealed class ClaudeHookAdapterTests
     [Theory]
     [InlineData("Bash")]
     [InlineData("PowerShell")]
-    public void ShellGuard_ArchitectCallOnTheList_PassesThroughSilently(string tool)
+    public async Task ShellGuard_ArchitectCallOnTheList_PassesThroughSilently(string tool)
     {
-        (int exit, string stdout) = Run(ShellPayload(tool, "git status", "architect"), "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(ShellPayload(tool, "git status", "architect"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void ReadGuard_CsharpDevPowerShellCall_DeniesAPlanningPathRead()
+    public async Task ReadGuard_CsharpDevPowerShellCall_DeniesAPlanningPathRead()
     {
         string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product })[0];
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             ShellPayload("PowerShell", $"Get-Content {planningDirectory}/plan.md", "dev-medium"),
             "conductor",
             new ScriptedEngine());
@@ -751,9 +751,9 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ReadGuard_CsharpDevPowerShellCall_AllowsAnOrdinaryCommand()
+    public async Task ReadGuard_CsharpDevPowerShellCall_AllowsAnOrdinaryCommand()
     {
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             ShellPayload("PowerShell", "Get-ChildItem src", "dev-medium"),
             "conductor",
             new ScriptedEngine());
@@ -763,12 +763,12 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ShellGuard_CsharpDevBashCall_KeepsTheWorkerPlanningPathDeny()
+    public async Task ShellGuard_CsharpDevBashCall_KeepsTheWorkerPlanningPathDeny()
     {
         // grep is on the architect's list, so an allow here would mean the shell guard reached dev-medium.
         string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product })[0];
 
-        (int exit, string stdout) = Run(
+        (int exit, string stdout) = await Run(
             ShellPayload("Bash", $"grep -rn x {planningDirectory}", "dev-medium"),
             "conductor",
             new ScriptedEngine());
@@ -783,25 +783,25 @@ public sealed class ClaudeHookAdapterTests
     }
 
     [Fact]
-    public void ShellGuard_ConductorBashCall_IsPassThrough()
+    public async Task ShellGuard_ConductorBashCall_IsPassThrough()
     {
-        (int exit, string stdout) = Run(ShellPayload("Bash", "python3 x.py", "conductor"), "conductor", new ScriptedEngine());
+        (int exit, string stdout) = await Run(ShellPayload("Bash", "python3 x.py", "conductor"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void ShellGuard_BashCallWithNoCaller_IsPassThrough()
+    public async Task ShellGuard_BashCallWithNoCaller_IsPassThrough()
     {
-        (int exit, string stdout) = Run(ShellPayload("Bash", "python3 x.py", agentType: null), null, new ScriptedEngine());
+        (int exit, string stdout) = await Run(ShellPayload("Bash", "python3 x.py", agentType: null), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void ShellGuard_ArchitectBashCallWithoutToolInput_IsDeniedAndLogged()
+    public async Task ShellGuard_ArchitectBashCallWithoutToolInput_IsDeniedAndLogged()
     {
         // A call the guard cannot read is not a call it may let through: it is denied, and the log names the rule.
         JsonNode root = JsonNode.Parse(ShellPayload("Bash", "git status", "architect"))
@@ -814,7 +814,7 @@ public sealed class ClaudeHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "conductor", root.ToJsonString(), stdout, log);
+        int exit = await command.RunAsync("claude", "conductor", root.ToJsonString(), stdout, log);
 
         Assert.Equal(0, exit);
         AssertShellDenied(stdout.ToString());
@@ -841,13 +841,13 @@ public sealed class ClaudeHookAdapterTests
 
     /// <summary>Today's order: the hand-back carries the report first, then the completed post carries only the notice.</summary>
     [Fact]
-    public void HandbackThenWrapperPost_TheSeatHoldsTheReportOnce_AndTheReturnPairsWithItsPre()
+    public async Task HandbackThenWrapperPost_TheSeatHoldsTheReportOnce_AndTheReturnPairsWithItsPre()
     {
         using DeliveryRig rig = new();
-        rig.Dispatch();
+        await rig.Dispatch();
 
-        rig.Handback(LensReport);
-        rig.CompletedPost(Wrapper);
+        await rig.Handback(LensReport);
+        await rig.CompletedPost(Wrapper);
 
         Assert.Equal(LensReport, rig.SeatText());
         Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
@@ -855,14 +855,14 @@ public sealed class ClaudeHookAdapterTests
 
     /// <summary>The completed post arrives before the hand-back: the report still reaches the seat once and pairs.</summary>
     [Fact]
-    public void WrapperPostThenHandback_TheSeatHoldsTheReportOnce_AndTheReturnPairsWithItsPre()
+    public async Task WrapperPostThenHandback_TheSeatHoldsTheReportOnce_AndTheReturnPairsWithItsPre()
     {
         using DeliveryRig rig = new();
-        rig.Dispatch();
+        await rig.Dispatch();
 
-        rig.CompletedPost(Wrapper);
+        await rig.CompletedPost(Wrapper);
         Assert.False(rig.SeatExists());
-        rig.Handback(LensReport);
+        await rig.Handback(LensReport);
 
         Assert.Equal(LensReport, rig.SeatText());
         Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
@@ -872,20 +872,20 @@ public sealed class ClaudeHookAdapterTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void WrapperPostWithNoHandback_TheStopEventsLastAssistantMessageIsSaved(bool stopFirst)
+    public async Task WrapperPostWithNoHandback_TheStopEventsLastAssistantMessageIsSaved(bool stopFirst)
     {
         using DeliveryRig rig = new();
-        rig.Dispatch();
+        await rig.Dispatch();
 
         if (stopFirst)
         {
-            rig.Stop(LensReport);
-            rig.CompletedPost(Wrapper);
+            await rig.Stop(LensReport);
+            await rig.CompletedPost(Wrapper);
         }
         else
         {
-            rig.CompletedPost(Wrapper);
-            rig.Stop(LensReport);
+            await rig.CompletedPost(Wrapper);
+            await rig.Stop(LensReport);
         }
 
         // A stop that comes first also closes the dispatch with a recovery row, as it does today; the report that
@@ -896,12 +896,12 @@ public sealed class ClaudeHookAdapterTests
 
     /// <summary>A notice with no report anywhere records nothing and says so in one line.</summary>
     [Fact]
-    public void WrapperPostWithNoReport_SavesNoSeat_AndLogsOneLine()
+    public async Task WrapperPostWithNoReport_SavesNoSeat_AndLogsOneLine()
     {
         using DeliveryRig rig = new();
-        rig.Dispatch();
+        await rig.Dispatch();
 
-        string log = rig.CompletedPost(Wrapper);
+        string log = await rig.CompletedPost(Wrapper);
 
         Assert.False(rig.SeatExists());
         Assert.DoesNotContain(rig.Posts(), p => p.PreId == rig.Pre().Id);
@@ -912,12 +912,12 @@ public sealed class ClaudeHookAdapterTests
 
     /// <summary>A completed post that carries the report itself is saved as today.</summary>
     [Fact]
-    public void CompletedPostWithARealReply_SavesItAsToday()
+    public async Task CompletedPostWithARealReply_SavesItAsToday()
     {
         using DeliveryRig rig = new();
-        rig.Dispatch();
+        await rig.Dispatch();
 
-        rig.CompletedPost(LensReport);
+        await rig.CompletedPost(LensReport);
 
         Assert.Equal(LensReport, rig.SeatText());
         Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
@@ -925,14 +925,14 @@ public sealed class ClaudeHookAdapterTests
 
     /// <summary>A followed background dispatch still records its hand-back as its return, and its notice adds nothing.</summary>
     [Fact]
-    public void FollowedBackgroundDispatch_StillRecordsItsHandbackAsToday()
+    public async Task FollowedBackgroundDispatch_StillRecordsItsHandbackAsToday()
     {
         using DeliveryRig rig = new();
-        rig.Dispatch(background: true);
-        rig.Launched();
+        await rig.Dispatch(background: true);
+        await rig.Launched();
 
-        rig.Handback(LensReport);
-        rig.CompletedPost(Wrapper);
+        await rig.Handback(LensReport);
+        await rig.CompletedPost(Wrapper);
 
         Assert.Equal(LensReport, rig.SeatText());
         Assert.Single(rig.Posts(), p => p.PreId == rig.Pre().Id);
@@ -984,7 +984,7 @@ public sealed class ClaudeHookAdapterTests
         public IReadOnlyList<ArbiterLedgerEvent> Posts() =>
             [.. _host.Ledger.ReadAll().Where(e => e.Phase == ArbiterLedgerPhases.Post)];
 
-        public void Dispatch(bool background = false) => Send(new
+        public async Task Dispatch(bool background = false) => await Send(new
         {
             hook_event_name = "PreToolUse",
             session_id = Session,
@@ -995,7 +995,7 @@ public sealed class ClaudeHookAdapterTests
             tool_use_id = ToolUseId,
         });
 
-        public void Launched() => Send(new
+        public async Task Launched() => await Send(new
         {
             hook_event_name = "PostToolUse",
             session_id = Session,
@@ -1007,7 +1007,7 @@ public sealed class ClaudeHookAdapterTests
             tool_response = new { status = "async_launched", agentId = AgentId, content = Array.Empty<string>() },
         });
 
-        public void Handback(string message) => Send(new
+        public async Task Handback(string message) => await Send(new
         {
             hook_event_name = "PreToolUse",
             session_id = Session,
@@ -1019,7 +1019,7 @@ public sealed class ClaudeHookAdapterTests
             tool_use_id = "toolu-handback-1",
         });
 
-        public string CompletedPost(string text) => Send(new
+        public async Task<string> CompletedPost(string text) => await Send(new
         {
             hook_event_name = "PostToolUse",
             session_id = Session,
@@ -1036,7 +1036,7 @@ public sealed class ClaudeHookAdapterTests
             },
         });
 
-        public void Stop(string lastAssistantMessage) => Send(new
+        public async Task Stop(string lastAssistantMessage) => await Send(new
         {
             hook_event_name = "SubagentStop",
             session_id = Session,
@@ -1046,7 +1046,7 @@ public sealed class ClaudeHookAdapterTests
             last_assistant_message = lastAssistantMessage,
         });
 
-        private string Send(object payload)
+        private async Task<string> Send(object payload)
         {
             using StringWriter stdout = new();
             using StringWriter log = new();
@@ -1056,7 +1056,7 @@ public sealed class ClaudeHookAdapterTests
                 planReaderFactory: _ => new NoPlan(),
                 homeDirectory: () => _host.RepoRoot);
             HookCommand command = _host.HookCommand(ArbiterTestServices.Registry(engine), configLoader: _ => Config);
-            int exit = command.Run("claude", null, JsonSerializer.Serialize(payload), stdout, log);
+            int exit = await command.RunAsync("claude", null, JsonSerializer.Serialize(payload), stdout, log);
             Assert.Equal(0, exit);
             _host.Clock.Advance(TimeSpan.FromSeconds(1));
             return log.ToString();

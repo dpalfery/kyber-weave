@@ -108,12 +108,13 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -125,24 +126,27 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config, context);
+            return await HandlePreAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config, context);
+            return await HandlePostAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
             $"Malformed Devin hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
-    private string HandlePre(
+    private async Task<string> HandlePreAsync(
         JsonElement payload,
         string? tool,
         string caller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -161,13 +165,14 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         // rather than failed as malformed.
         if (target is null || !hasPrompt)
         {
-            context.Log.WriteLine(
+            await context.Log.WriteLineAsync(
                 "Devin run_subagent dispatch without "
                 + (target is null ? "profile" : "prompt")
-                + "; treated as unmarked and recorded for audit.");
+                + "; treated as unmarked and recorded for audit.").ConfigureAwait(false);
         }
 
-        HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+        HookOutcome outcome = await DecidePreAsync(
+            payload, caller, target, prompt, config, context, cancellationToken).ConfigureAwait(false);
 
         // The rule's denial is the decision: a prompt that also could not be built must not hide it.
         if (outcome.Kind == HookOutcomeKind.Deny)
@@ -216,12 +221,13 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandlePost(
+    private async Task<string> HandlePostAsync(
         JsonElement payload,
         string? tool,
         string caller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -250,64 +256,71 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
             prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
-        HookOutcome outcome = DecidePost(payload, caller, target, prompt, toolOutput, config, context);
+        HookOutcome outcome = await DecidePostAsync(
+            payload, caller, target, prompt, toolOutput, config, context, cancellationToken)
+            .ConfigureAwait(false);
         switch (outcome.Kind)
         {
             case HookOutcomeKind.PassThrough:
             case HookOutcomeKind.Allow:
                 break;
             case HookOutcomeKind.AllowWithNote:
-                context.Log.WriteLine(
+                await context.Log.WriteLineAsync(
                     outcome.Reason ?? throw new InvalidOperationException(
-                        "Hook engine allowed with a note but wrote none."));
+                        "Hook engine allowed with a note but wrote none.")).ConfigureAwait(false);
                 break;
             default:
-                context.Log.WriteLine(
+                await context.Log.WriteLineAsync(
                     $"Arbiter post-dispatch decision ({outcome.Kind}) for "
-                    + $"'{target ?? "<none>"}' not delivered: Devin documents no PostToolUse output field.");
+                    + $"'{target ?? "<none>"}' not delivered: Devin documents no PostToolUse output field.")
+                    .ConfigureAwait(false);
                 break;
         }
 
         return string.Empty;
     }
 
-    private HookOutcome DecidePre(
+    private async Task<HookOutcome> DecidePreAsync(
         JsonElement payload,
         string caller,
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
             // Devin documents no call id ([F12]): null keeps pairing on
             // pair-digest at the ledger layer, with session_id for scoping.
-            return contextual.DecidePreDispatch(
+            return await contextual.DecidePreDispatchAsync(
                 Token, caller, target, prompt, config, context,
-                toolCallId: null, GetString(payload, "session_id"));
+                toolCallId: null, GetString(payload, "session_id"), cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePreDispatch(caller, target, prompt, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, target, prompt, config, cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePostAsync(
         JsonElement payload,
         string caller,
         string? target,
         string prompt,
         string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
+            return await contextual.DecidePostDispatchAsync(
                 Token, caller, target, prompt, toolOutput, config, context,
-                toolCallId: null, GetString(payload, "session_id"));
+                toolCallId: null, GetString(payload, "session_id"), cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        return await _engine.DecidePostDispatchAsync(
+            caller, target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     private static string RewrittenPromptOf(string rewrittenInputJson)

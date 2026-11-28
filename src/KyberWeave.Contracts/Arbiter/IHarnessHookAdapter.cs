@@ -92,10 +92,18 @@ public interface IHarnessHookAdapter
 
     /// <summary>Handles a classified event. Returns the exact stdout text:
     /// empty means proceed.</summary>
-    string Handle(
+    /// <param name="payload">The harness event.</param>
+    /// <param name="rawJson">The raw event text.</param>
+    /// <param name="renderedCaller">The <c>--caller</c> the hook command was given, when it was.</param>
+    /// <param name="config">The loaded host configuration.</param>
+    /// <param name="context">The hook context.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
+    /// <returns>The harness's answer text; empty means proceed.</returns>
+    Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context);
+        HookContext context,
+        CancellationToken cancellationToken = default);
 }

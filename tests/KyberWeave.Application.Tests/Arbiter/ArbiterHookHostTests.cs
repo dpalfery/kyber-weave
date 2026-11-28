@@ -86,24 +86,24 @@ public sealed class ArbiterHookHostTests
             loader ?? (_ => EnabledConfig()),
             ids ?? (() => "decision-test-1"));
 
-    private static (int Exit, string Stdout, string Log) Run(
+    private static async Task<(int Exit, string Stdout, string Log)> Run(
         HookCommand command, string? caller, string stdin)
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("claude", caller, stdin, stdout, log);
+        int exit = await command.RunAsync("claude", caller, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
     [Fact]
-    public void Hook_NonDispatchTool_PassesThroughWithoutLoadingConfig()
+    public async Task Hook_NonDispatchTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         HookCommand command = CreateCommand(
             new ScriptedEngine(),
             root => { loads++; return EnabledConfig(); });
 
-        (int exit, string stdout, _) = Run(command, "dev-medium", Fixture("pre-edit-passthrough.json"));
+        (int exit, string stdout, _) = await Run(command, "dev-medium", Fixture("pre-edit-passthrough.json"));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -111,14 +111,14 @@ public sealed class ArbiterHookHostTests
     }
 
     [Fact]
-    public void Hook_AgentWithoutSubagentType_PassesThroughWithoutLoadingConfig()
+    public async Task Hook_AgentWithoutSubagentType_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         HookCommand command = CreateCommand(
             new ScriptedEngine(),
             root => { loads++; return EnabledConfig(); });
 
-        (int exit, string stdout, _) = Run(command, "conductor", Fixture("pre-agent-no-subagent.json"));
+        (int exit, string stdout, _) = await Run(command, "conductor", Fixture("pre-agent-no-subagent.json"));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -140,14 +140,14 @@ public sealed class ArbiterHookHostTests
     }
 
     [Fact]
-    public void Hook_FailedHost_NamesTheDecisionIdFromTheIdentifierSeam()
+    public async Task Hook_FailedHost_NamesTheDecisionIdFromTheIdentifierSeam()
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(new ScriptedEngine()),
             _ => EnabledConfig(),
             ids: new FakeIdGenerator());
 
-        (int exit, string stdout, string log) = Run(command, "conductor", "{oops");
+        (int exit, string stdout, string log) = await Run(command, "conductor", "{oops");
 
         // The default decision id is the first GUID the seam yields, as 32 hex digits with no hyphens.
         Assert.Equal(0, exit);
@@ -159,11 +159,11 @@ public sealed class ArbiterHookHostTests
     [InlineData("{oops")]
     [InlineData("[1, 2]")]
     [InlineData("")]
-    public void Hook_MalformedStdin_AllowsAndLogsTheHookError(string stdin)
+    public async Task Hook_MalformedStdin_AllowsAndLogsTheHookError(string stdin)
     {
         HookCommand command = CreateCommand(new ScriptedEngine());
 
-        (int exit, string stdout, string log) = Run(command, "conductor", stdin);
+        (int exit, string stdout, string log) = await Run(command, "conductor", stdin);
 
         // Fail open: the host could not decide, so the dispatch continues and the log names the code.
         Assert.Equal(0, exit);
@@ -172,14 +172,14 @@ public sealed class ArbiterHookHostTests
     }
 
     [Fact]
-    public void Hook_MissingConfigOnClassifiedEvent_AllowsAndLogs()
+    public async Task Hook_MissingConfigOnClassifiedEvent_AllowsAndLogs()
     {
         HookCommand command = CreateCommand(
             new ScriptedEngine(),
             _ => throw new InvalidOperationException(
                 $"{HookCommand.FailClosedCode}: no .kyber-weave/kyber-weave.yml found."));
 
-        (int exit, string stdout, string log) = Run(command, "conductor", Fixture("pre-agent-dispatch.json"));
+        (int exit, string stdout, string log) = await Run(command, "conductor", Fixture("pre-agent-dispatch.json"));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -187,12 +187,12 @@ public sealed class ArbiterHookHostTests
     }
 
     [Fact]
-    public void Hook_EngineCrashOnReturnEvent_AllowsAndLogs()
+    public async Task Hook_EngineCrashOnReturnEvent_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPost = true };
         HookCommand command = CreateCommand(engine);
 
-        (int exit, string stdout, string log) = Run(command, "conductor", Fixture("post-completed.json"));
+        (int exit, string stdout, string log) = await Run(command, "conductor", Fixture("post-completed.json"));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -200,13 +200,13 @@ public sealed class ArbiterHookHostTests
     }
 
     [Fact]
-    public void Hook_DisabledArbiter_AllowsAndLogs()
+    public async Task Hook_DisabledArbiter_AllowsAndLogs()
     {
         HookCommand command = CreateCommand(
             new ScriptedEngine(), _ => DisabledConfig());
 
         (int exit, string stdout, string log) =
-            Run(command, "conductor", Fixture("pre-agent-dispatch.json"));
+            await Run(command, "conductor", Fixture("pre-agent-dispatch.json"));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -214,14 +214,14 @@ public sealed class ArbiterHookHostTests
     }
 
     [Fact]
-    public void Hook_StdoutHoldsOnlyTheDecision()
+    public async Task Hook_StdoutHoldsOnlyTheDecision()
     {
         // The fixture repo keeps planning documents under docs/, so the host config
         // declares that docs root: the read then denies and stdout carries the block.
         HookCommand command = CreateCommand(new ScriptedEngine(), _ => DocsRootConfig());
 
         (int exit, string stdout, string log) =
-            Run(command, null, Fixture("pre-read-denied.json"));
+            await Run(command, null, Fixture("pre-read-denied.json"));
 
         Assert.Equal(0, exit);
 

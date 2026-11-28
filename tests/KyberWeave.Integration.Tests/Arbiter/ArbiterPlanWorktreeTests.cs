@@ -108,18 +108,23 @@ public sealed class ArbiterPlanWorktreeTests
     /// worktree holds, was refused by PLAN-001, SCOPE-001 and OWNER-001 at once. The plan is read from the worktree.
     /// </summary>
     [Fact]
-    public void TheHookInTheMainCheckout_DecidesFromThePlanInTheRunWorktree()
+    public async Task TheHookInTheMainCheckout_DecidesFromThePlanInTheRunWorktree()
     {
         using RunStartProbe probe = RunStartProbe.Create();
         using TempDirectory home = new();
         string worktree = AddWorktree(probe, "run-wt");
         WritePlan(worktree);
         // run start recorded the run, so KW-ARB-RUN-001 sees it live.
+        string? commonDirectory = await RealGitFacts.Create()
+            .GetCommonDirectoryAsync(probe.Root).ConfigureAwait(false);
         RunStartTestServices.RunStateStore().Write(
             home.Path, "run-wt", "origin/main",
-            new RunStartPlace(RealGitFacts.Create().GetCommonDirectory(probe.Root)!, worktree, DateTimeOffset.UtcNow));
+            new RunStartPlace(
+                commonDirectory ?? throw new InvalidOperationException("The probe root has no git common directory."),
+                worktree,
+                DateTimeOffset.UtcNow));
         Directory.CreateDirectory(Path.Combine(probe.Root, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
@@ -141,7 +146,7 @@ public sealed class ArbiterPlanWorktreeTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "conductor", stdin, stdout, log);
+        int exit = await command.RunAsync("claude", "conductor", stdin, stdout, log);
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
@@ -157,16 +162,16 @@ public sealed class ArbiterPlanWorktreeTests
     /// the dispatch names holds the run's one Ready plan, and the task label names its task (ADR 0082).
     /// </summary>
     [Fact]
-    public void AHeaderlessCopilotDispatch_ResolvesItsPlanAndTaskInTheRunWorktree()
+    public async Task AHeaderlessCopilotDispatch_ResolvesItsPlanAndTaskInTheRunWorktree()
     {
         using RunStartProbe probe = RunStartProbe.Create();
         using TempDirectory home = new();
         string worktree = AddWorktree(probe, "run-wt");
         string plan = Path.Combine(worktree, PlanRelative);
         Directory.CreateDirectory(Path.GetDirectoryName(plan)!);
-        File.WriteAllText(plan, "# Plan\n\n**Status: Ready.**\n\n## Tasks\n\n### T7 — Status cards tests\nFiles: tests/StatusCardsTests.cs\n");
+        await File.WriteAllTextAsync(plan, "# Plan\n\n**Status: Ready.**\n\n## Tasks\n\n### T7 — Status cards tests\nFiles: tests/StatusCardsTests.cs\n");
         Directory.CreateDirectory(Path.Combine(probe.Root, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
 
@@ -188,7 +193,7 @@ public sealed class ArbiterPlanWorktreeTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: home.Path));
+        Assert.Equal(0, await command.RunAsync("copilot-cli", null, stdin, stdout, log, homeDirectory: home.Path));
 
         Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
         ArbiterDecisionRecord record = RealArbiterState.Decisions(Path.Combine(worktree, "artifacts", "arbiter")).ReadAll()

@@ -60,7 +60,7 @@ public sealed class ArbiterReadGuardTests
     /// work the run is doing.
     /// </summary>
     [Fact]
-    public void Guard_JudgesAWorkersAbsoluteReadInTheRunWorktree_AgainstTheRunContext()
+    public async Task Guard_JudgesAWorkersAbsoluteReadInTheRunWorktree_AgainstTheRunContext()
     {
         const string payload =
             """
@@ -92,7 +92,7 @@ public sealed class ArbiterReadGuardTests
                 Notes: []));
         IHarnessHookAdapter adapter = new ClaudeHookAdapter(new AllowEngine());
 
-        string output = adapter.Handle(ToolInput(payload), payload, "conductor", ReadGuardConfig(), context);
+        string output = await adapter.HandleAsync(ToolInput(payload), payload, "conductor", ReadGuardConfig(), context);
 
         Assert.Contains("\"permissionDecision\":\"deny\"", output, StringComparison.Ordinal);
         Assert.Contains("Req 25", output, StringComparison.Ordinal);
@@ -102,7 +102,7 @@ public sealed class ArbiterReadGuardTests
     /// The runtime's Local schema judges every non-dispatch tool by its content, and resolves the same run worktree.
     /// </summary>
     [Fact]
-    public void LocalGuard_JudgesAnAbsoluteReadInTheRunWorktree_AgainstTheRunContext()
+    public async Task LocalGuard_JudgesAnAbsoluteReadInTheRunWorktree_AgainstTheRunContext()
     {
         const string payload =
             """
@@ -131,7 +131,7 @@ public sealed class ArbiterReadGuardTests
                 Notes: []));
         IHarnessHookAdapter adapter = new CopilotHookAdapter(new AllowEngine(), CopilotHookAdapter.VsCodeToken);
 
-        string output = adapter.Handle(ToolInput(payload), payload, null, ReadGuardConfig(), context);
+        string output = await adapter.HandleAsync(ToolInput(payload), payload, null, ReadGuardConfig(), context);
 
         Assert.Contains("\"permissionDecision\":\"deny\"", output, StringComparison.Ordinal);
     }
@@ -402,7 +402,7 @@ public sealed class ArbiterReadGuardTests
     }
 
     [Fact]
-    public void Guard_AppliesOnlyToSpecialistCallers_EndToEnd()
+    public async Task Guard_AppliesOnlyToSpecialistCallers_EndToEnd()
     {
         string stdin = EmbeddedFixtureText.Read(typeof(ArbiterReadGuardTests).Assembly, "arbiter-hooks/claude/pre-read-denied.json")
             .Replace("\"agent_type\": \"dev-medium\",", string.Empty, StringComparison.Ordinal);
@@ -415,7 +415,7 @@ public sealed class ArbiterReadGuardTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "research-agent", stdin, stdout, log);
+        int exit = await command.RunAsync("claude", "research-agent", stdin, stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());

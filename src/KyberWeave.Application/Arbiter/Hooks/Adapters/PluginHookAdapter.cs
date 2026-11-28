@@ -102,12 +102,13 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -127,8 +128,8 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
 
         string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
         return envelope.Phase == PluginPhase.Before
-            ? HandleBefore(envelope, caller, target, config, context)
-            : HandleAfter(envelope, caller, target, config, context);
+            ? await HandleBeforeAsync(envelope, caller, target, config, context, cancellationToken).ConfigureAwait(false)
+            : await HandleAfterAsync(envelope, caller, target, config, context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -164,7 +165,13 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandleBefore(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleBeforeAsync(
+        PluginEnvelope envelope,
+        string caller,
+        string target,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         string? prompt = ArgString(envelope.Args, _promptArgument);
         if (prompt is null)
@@ -173,7 +180,8 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
                 $"Malformed plugin hook event: args carry no '{_promptArgument}'.");
         }
 
-        HookOutcome outcome = DecidePre(envelope, caller, target, prompt, config, context);
+        HookOutcome outcome = await DecidePreAsync(
+            envelope, caller, target, prompt, config, context, cancellationToken).ConfigureAwait(false);
 
         // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
@@ -220,7 +228,13 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandleAfter(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleAfterAsync(
+        PluginEnvelope envelope,
+        string caller,
+        string target,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         // Any non-allow outcome blocks with the envelope or note as reason: the shim
         // appends it to the tool's output. There is no annotation shape to preserve.
@@ -230,7 +244,8 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
                 ? envelope.Args.GetRawText()
                 : string.Empty;
         string prompt = ArgString(envelope.Args, _promptArgument) ?? string.Empty;
-        HookOutcome outcome = DecidePost(envelope, caller, target, prompt, toolOutput, config, context);
+        HookOutcome outcome = await DecidePostAsync(
+            envelope, caller, target, prompt, toolOutput, config, context, cancellationToken).ConfigureAwait(false);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -250,34 +265,45 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private HookOutcome DecidePre(
-        PluginEnvelope envelope, string caller, string target, string prompt, KyberWeaveConfig config, HookContext context)
-    {
-        if (_engine is IContextualHookDecisionEngine contextual)
-        {
-            return contextual.DecidePreDispatch(
-                _harnessToken, caller, target, prompt, config, context, envelope.CallId, envelope.Session);
-        }
-
-        return _engine.DecidePreDispatch(caller, target, prompt, config);
-    }
-
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePreAsync(
         PluginEnvelope envelope,
         string caller,
         string target,
         string prompt,
-        string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
-                _harnessToken, caller, target, prompt, toolOutput, config, context, envelope.CallId, envelope.Session);
+            return await contextual.DecidePreDispatchAsync(
+                _harnessToken, caller, target, prompt, config, context, envelope.CallId, envelope.Session,
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, target, prompt, config, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HookOutcome> DecidePostAsync(
+        PluginEnvelope envelope,
+        string caller,
+        string? target,
+        string prompt,
+        string toolOutput,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return await contextual.DecidePostDispatchAsync(
+                _harnessToken, caller, target, prompt, toolOutput, config, context, envelope.CallId, envelope.Session,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return await _engine.DecidePostDispatchAsync(
+            caller, target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     private bool IsDispatchTool(string? tool) =>

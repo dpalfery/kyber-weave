@@ -109,24 +109,24 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     private static string Fixture(string name) =>
         EmbeddedFixtureText.Read(typeof(AntigravityRealPayloadTests).Assembly, $"arbiter-hooks/antigravity/{name}");
 
-    private (string Stdout, string Log) Run(string stdin, IHookDecisionEngine engine, bool enabled = true)
+    private async Task<(string Stdout, string Log)> Run(string stdin, IHookDecisionEngine engine, bool enabled = true)
     {
         KyberWeaveConfig config = new() { Arbiter = new ArbiterConfig { Enabled = enabled } };
         HookCommand command = _host.HookCommand(_host.Registry(engine), _ => config, () => "real-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        Assert.Equal(0, command.Run(AntigravityHookAdapter.Token, null, stdin, stdout, log));
+        Assert.Equal(0, await command.RunAsync(AntigravityHookAdapter.Token, null, stdin, stdout, log));
         return (stdout.ToString(), log.ToString());
     }
 
-    private (string Stdout, string Log) RunReal(string stdin)
+    private async Task<(string Stdout, string Log)> RunReal(string stdin)
     {
         ArbiterHookDecisionEngine engine = _host.Engine(
             providerFactory: _ => new NoneProvider(), homeDirectory: () => _host.HomeDirectory);
         HookCommand command = _host.HookCommand(_host.Registry(engine), _host.LoadHostConfig, () => "real-2");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        Assert.Equal(0, command.Run(AntigravityHookAdapter.Token, null, stdin, stdout, log, homeDirectory: _host.HomeDirectory));
+        Assert.Equal(0, await command.RunAsync(AntigravityHookAdapter.Token, null, stdin, stdout, log, homeDirectory: _host.HomeDirectory));
         return (stdout.ToString(), log.ToString());
     }
 
@@ -149,11 +149,11 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
-    public void DefaultAgentDispatch_PassesThroughWithTheExplicitAllow_AndRecordsNothing()
+    public async Task DefaultAgentDispatch_PassesThroughWithTheExplicitAllow_AndRecordsNothing()
     {
         string stdin = WithRepo(Fixture("real-pre-default-agent.json"), _host.RepoRoot);
 
-        (string stdout, string log) = RunReal(stdin);
+        (string stdout, string log) = await RunReal(stdin);
 
         Assert.Equal(Allow, stdout);
         Assert.Empty(_host.Decisions);
@@ -161,22 +161,22 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
-    public void DefaultAgentDispatch_IsNotShownToTheEngine()
+    public async Task DefaultAgentDispatch_IsNotShownToTheEngine()
     {
         RecordingEngine engine = new();
 
-        (string stdout, _) = Run(Fixture("real-pre-default-agent.json"), engine);
+        (string stdout, _) = await Run(Fixture("real-pre-default-agent.json"), engine);
 
         Assert.Equal(Allow, stdout);
         Assert.Empty(engine.Pre);
     }
 
     [Fact]
-    public void MarkedDispatch_IsJudged_WithTheToolCallIdAsTheCallId()
+    public async Task MarkedDispatch_IsJudged_WithTheToolCallIdAsTheCallId()
     {
         RecordingEngine engine = new();
 
-        (string stdout, _) = Run(Fixture("real-pre-conductor-marked.json"), engine);
+        (string stdout, _) = await Run(Fixture("real-pre-conductor-marked.json"), engine);
 
         Assert.Equal(Allow, stdout);
         (string? target, string prompt, string? callId) = Assert.Single(engine.Pre);
@@ -186,7 +186,7 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
-    public void MarkedDispatchToAWriter_WithNoRunStarted_IsDeniedWithTheReason()
+    public async Task MarkedDispatchToAWriter_WithNoRunStarted_IsDeniedWithTheReason()
     {
         string stdin = WithRepo(
             Reshape(Fixture("real-pre-conductor-marked.json"), root =>
@@ -196,7 +196,7 @@ public sealed class AntigravityRealPayloadTests : IDisposable
             }),
             _host.RepoRoot);
 
-        (string stdout, _) = RunReal(stdin);
+        (string stdout, _) = await RunReal(stdin);
 
         JsonNode answer = JsonNode.Parse(stdout)!;
         Assert.Equal("deny", answer["decision"]!.GetValue<string>());
@@ -205,15 +205,15 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
-    public void MarkedRealDispatch_IsRecorded()
+    public async Task MarkedRealDispatch_IsRecorded()
     {
-        _ = RunReal(WithRepo(Fixture("real-pre-conductor-marked.json"), _host.RepoRoot));
+        _ = await RunReal(WithRepo(Fixture("real-pre-conductor-marked.json"), _host.RepoRoot));
 
         Assert.Contains(_host.Decisions, decision => decision.Target == "research-agent");
     }
 
     [Fact]
-    public void CamelCaseEventName_IsParsed_AndSnakeCaseStillIs()
+    public async Task CamelCaseEventName_IsParsed_AndSnakeCaseStillIs()
     {
         RecordingEngine engine = new();
         string snake = Reshape(Fixture("real-pre-conductor-marked.json"), root =>
@@ -222,8 +222,8 @@ public sealed class AntigravityRealPayloadTests : IDisposable
             root.Remove("hookEventName");
         });
 
-        (string camelOut, string camelLog) = Run(Fixture("real-pre-conductor-marked.json"), engine);
-        (string snakeOut, _) = Run(snake, engine);
+        (string camelOut, string camelLog) = await Run(Fixture("real-pre-conductor-marked.json"), engine);
+        (string snakeOut, _) = await Run(snake, engine);
 
         Assert.Equal(Allow, camelOut);
         Assert.Equal(Allow, snakeOut);
@@ -232,20 +232,20 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
-    public void ListArgs_AreStillParsed_AndOnlyMarkedElementsAreJudged()
+    public async Task ListArgs_AreStillParsed_AndOnlyMarkedElementsAreJudged()
     {
         RecordingEngine engine = new();
         string stdin = Reshape(Fixture("pre-invoke-subagent-multi.json"), root =>
             root["toolCall"]!["args"]!["Subagents"]![1]!["Prompt"] = "No marker here.");
 
-        (string stdout, _) = Run(stdin, engine);
+        (string stdout, _) = await Run(stdin, engine);
 
         Assert.Equal(Allow, stdout);
         Assert.Equal("dev-medium", Assert.Single(engine.Pre).Target);
     }
 
     [Fact]
-    public void ListOfOnlyUnmarkedElements_PassesThrough()
+    public async Task ListOfOnlyUnmarkedElements_PassesThrough()
     {
         RecordingEngine engine = new();
         string stdin = Reshape(Fixture("pre-invoke-subagent-multi.json"), root =>
@@ -254,7 +254,7 @@ public sealed class AntigravityRealPayloadTests : IDisposable
             root["toolCall"]!["args"]!["Subagents"]![1]!["Prompt"] = "Nor here.";
         });
 
-        (string stdout, _) = Run(stdin, engine);
+        (string stdout, _) = await Run(stdin, engine);
 
         Assert.Equal(Allow, stdout);
         Assert.Empty(engine.Pre);
@@ -264,50 +264,50 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     [InlineData("not json")]
     [InlineData("[]")]
     [InlineData("")]
-    public void UnparseablePre_IsAnExplicitAllow(string stdin)
+    public async Task UnparseablePre_IsAnExplicitAllow(string stdin)
     {
-        (string stdout, string log) = Run(stdin, new RecordingEngine());
+        (string stdout, string log) = await Run(stdin, new RecordingEngine());
 
         Assert.Equal(Allow, stdout);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MarkedDispatchWithoutArgs_IsAnExplicitAllowAndLogs()
+    public async Task MarkedDispatchWithoutArgs_IsAnExplicitAllowAndLogs()
     {
         string stdin = Reshape(Fixture("real-pre-conductor-marked.json"), root => root["toolCall"]!.AsObject().Remove("args"));
 
-        (string stdout, string log) = Run(stdin, new RecordingEngine());
+        (string stdout, string log) = await Run(stdin, new RecordingEngine());
 
         Assert.Equal(Allow, stdout);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void UnknownEventName_IsAnExplicitAllowAndLogs()
+    public async Task UnknownEventName_IsAnExplicitAllowAndLogs()
     {
         string stdin = Reshape(Fixture("real-pre-conductor-marked.json"), root => root["hookEventName"] = "SessionStart");
 
-        (string stdout, string log) = Run(stdin, new RecordingEngine());
+        (string stdout, string log) = await Run(stdin, new RecordingEngine());
 
         Assert.Equal(Allow, stdout);
         Assert.Contains(HookCommand.FailClosedCode, log, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DisabledArbiter_WritesTheExplicitAllow()
+    public async Task DisabledArbiter_WritesTheExplicitAllow()
     {
-        (string stdout, _) = Run(Fixture("real-pre-conductor-marked.json"), new RecordingEngine(), enabled: false);
+        (string stdout, _) = await Run(Fixture("real-pre-conductor-marked.json"), new RecordingEngine(), enabled: false);
 
         Assert.Equal(Allow, stdout);
     }
 
     [Fact]
-    public void NonDispatchTool_WritesTheExplicitAllow()
+    public async Task NonDispatchTool_WritesTheExplicitAllow()
     {
         string stdin = Reshape(Fixture("real-pre-default-agent.json"), root => root["toolCall"]!["name"] = "view_file");
 
-        (string stdout, _) = Run(stdin, new RecordingEngine());
+        (string stdout, _) = await Run(stdin, new RecordingEngine());
 
         Assert.Equal(Allow, stdout);
     }
@@ -337,11 +337,11 @@ public sealed class AntigravityRealPayloadTests : IDisposable
         });
 
     [Fact]
-    public void RealPost_ForAMarkedDispatch_IsRecordedAndWritesEmptyObject()
+    public async Task RealPost_ForAMarkedDispatch_IsRecordedAndWritesEmptyObject()
     {
         RecordingEngine engine = new();
 
-        (string stdout, _) = Run(RealPost(Fixture("real-pre-conductor-marked.json")), engine);
+        (string stdout, _) = await Run(RealPost(Fixture("real-pre-conductor-marked.json")), engine);
 
         Assert.Equal("{}", stdout);
         (string? target, string? toolOutput, string? callId) = Assert.Single(engine.Post);
@@ -351,24 +351,24 @@ public sealed class AntigravityRealPayloadTests : IDisposable
     }
 
     [Fact]
-    public void RealPost_ForTheDefaultAgent_RecordsNothingAndWritesEmptyObject()
+    public async Task RealPost_ForTheDefaultAgent_RecordsNothingAndWritesEmptyObject()
     {
         RecordingEngine engine = new();
 
-        (string stdout, _) = Run(RealPost(Fixture("real-pre-default-agent.json")), engine);
+        (string stdout, _) = await Run(RealPost(Fixture("real-pre-default-agent.json")), engine);
 
         Assert.Equal("{}", stdout);
         Assert.Empty(engine.Post);
     }
 
     [Fact]
-    public void UnreadablePost_NeverBlocks()
+    public async Task UnreadablePost_NeverBlocks()
     {
         string stdin = RealPost(
             Fixture("real-pre-conductor-marked.json"),
             root => root["toolCall"]!.AsObject().Remove("args"));
 
-        (string stdout, _) = Run(stdin, new RecordingEngine());
+        (string stdout, _) = await Run(stdin, new RecordingEngine());
 
         Assert.Equal("{}", stdout);
     }

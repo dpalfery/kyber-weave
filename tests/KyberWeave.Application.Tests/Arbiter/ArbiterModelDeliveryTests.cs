@@ -232,7 +232,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     }
 
     [Fact]
-    public void AWriteThatFails_ThroughTheClaudeAdapter_IsNotRecordedDelivered()
+    public async Task AWriteThatFails_ThroughTheClaudeAdapter_IsNotRecordedDelivered()
     {
         // The engine decides before the adapter writes. When the adapter's write fails the dispatch runs without
         // the model, so the decision must not say the model was delivered.
@@ -249,7 +249,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         string raw = AgentDispatchPayload();
         using JsonDocument doc = JsonDocument.Parse(raw);
 
-        _ = adapter.Handle(doc.RootElement, raw, "conductor", Config("enforce"), Context());
+        _ = await adapter.HandleAsync(doc.RootElement, raw, "conductor", Config("enforce"), Context());
 
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
         Assert.False(block.Delivered);

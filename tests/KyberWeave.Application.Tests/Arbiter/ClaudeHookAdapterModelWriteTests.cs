@@ -167,13 +167,13 @@ public sealed class ClaudeHookAdapterModelWriteTests
         return root.ToJsonString();
     }
 
-    private static string Handle(string token, TextWriter log, Exception? fault = null)
+    private static async Task<string> Handle(string token, TextWriter log, Exception? fault = null)
     {
         string raw = DispatchPayload();
         ClaudeHookAdapter adapter = new(new WritingEngine { Token = token }) { ModelWriteFault = fault };
         using JsonDocument doc = JsonDocument.Parse(raw);
         HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
-        return adapter.Handle(doc.RootElement, raw, "conductor", EnabledConfig(), context);
+        return await adapter.HandleAsync(doc.RootElement, raw, "conductor", EnabledConfig(), context);
     }
 
     private static JsonElement UpdatedInput(string stdout)
@@ -183,11 +183,11 @@ public sealed class ClaudeHookAdapterModelWriteTests
     }
 
     [Fact]
-    public void UnlistedWriteFailure_StillAllowsTheDispatchWithoutTheModel()
+    public async Task UnlistedWriteFailure_StillAllowsTheDispatchWithoutTheModel()
     {
         using StringWriter log = new();
 
-        string stdout = Handle("sonnet", log, new UnauthorizedAccessException("write refused"));
+        string stdout = await Handle("sonnet", log, new UnauthorizedAccessException("write refused"));
 
         JsonElement updated = UpdatedInput(stdout);
         Assert.False(updated.TryGetProperty("model", out _));
@@ -197,19 +197,19 @@ public sealed class ClaudeHookAdapterModelWriteTests
     }
 
     [Fact]
-    public void OperationCanceled_PropagatesAndIsNotTurnedIntoAWriteFailure()
+    public async Task OperationCanceled_PropagatesAndIsNotTurnedIntoAWriteFailure()
     {
         using StringWriter log = new();
 
-        Assert.Throws<OperationCanceledException>(() => Handle("sonnet", log, new OperationCanceledException()));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => Handle("sonnet", log, new OperationCanceledException()));
     }
 
     [Fact]
-    public void SuccessLogFails_TheModelIsNotWrittenAndTheDispatchIsStillAllowed()
+    public async Task SuccessLogFails_TheModelIsNotWrittenAndTheDispatchIsStillAllowed()
     {
         FailOnceLog log = new("delivered: true");
 
-        string stdout = Handle("sonnet", log);
+        string stdout = await Handle("sonnet", log);
 
         JsonElement updated = UpdatedInput(stdout);
         Assert.False(updated.TryGetProperty("model", out _));
@@ -219,21 +219,21 @@ public sealed class ClaudeHookAdapterModelWriteTests
     }
 
     [Fact]
-    public void EveryLogLineFails_TheDispatchIsStillAllowedWithoutTheModel()
+    public async Task EveryLogLineFails_TheDispatchIsStillAllowedWithoutTheModel()
     {
         using FailingLog log = new();
 
-        string stdout = Handle("sonnet", log);
+        string stdout = await Handle("sonnet", log);
 
         Assert.False(UpdatedInput(stdout).TryGetProperty("model", out _));
     }
 
     [Fact]
-    public void DerivedAliasLogLine_KeepsTheRawTokenOnOneLine()
+    public async Task DerivedAliasLogLine_KeepsTheRawTokenOnOneLine()
     {
         using StringWriter log = new();
 
-        string stdout = Handle("claude-opus-5\nmodel: x; delivered: true", log);
+        string stdout = await Handle("claude-opus-5\nmodel: x; delivered: true", log);
 
         Assert.Equal("opus", UpdatedInput(stdout).GetProperty("model").GetString());
         Assert.DoesNotContain("\nmodel: x", "\n" + log.ToString(), StringComparison.Ordinal);

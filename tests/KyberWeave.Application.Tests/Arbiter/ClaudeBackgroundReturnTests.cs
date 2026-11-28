@@ -82,19 +82,19 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         homeDirectory: () => _host.RepoRoot);
 
     /// <summary>Runs one Claude hook event as its own process would: a fresh command over a fresh engine.</summary>
-    private (string Stdout, string Log) Send(object payload)
+    private async Task<(string Stdout, string Log)> Send(object payload)
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
         HookCommand command = _host.HookCommand(
             ArbiterTestServices.Registry(Engine()),
             configLoader: _ => Config());
-        int exit = command.Run("claude", null, JsonSerializer.Serialize(payload), stdout, log);
+        int exit = await command.RunAsync("claude", null, JsonSerializer.Serialize(payload), stdout, log);
         Assert.Equal(0, exit);
         return (stdout.ToString(), log.ToString());
     }
 
-    private (string Stdout, string Log) Dispatch(string task, string toolUseId) => Send(new
+    private async Task<(string Stdout, string Log)> Dispatch(string task, string toolUseId) => await Send(new
     {
         hook_event_name = "PreToolUse",
         session_id = Session,
@@ -105,7 +105,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         tool_use_id = toolUseId,
     });
 
-    private (string Stdout, string Log) Launched(string task, string toolUseId, string agentId) => Send(new
+    private async Task<(string Stdout, string Log)> Launched(string task, string toolUseId, string agentId) => await Send(new
     {
         hook_event_name = "PostToolUse",
         session_id = Session,
@@ -117,7 +117,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         tool_response = new { status = "async_launched", agentId, content = Array.Empty<string>() },
     });
 
-    private (string Stdout, string Log) Handback(string agentId, string message) => Send(new
+    private async Task<(string Stdout, string Log)> Handback(string agentId, string message) => await Send(new
     {
         hook_event_name = "PreToolUse",
         session_id = Session,
@@ -129,7 +129,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         tool_use_id = "toolu-handback-" + agentId,
     });
 
-    private (string Stdout, string Log) Completed(string task, string toolUseId, string agentId) => Send(new
+    private async Task<(string Stdout, string Log)> Completed(string task, string toolUseId, string agentId) => await Send(new
     {
         hook_event_name = "PostToolUse",
         session_id = Session,
@@ -146,7 +146,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         },
     });
 
-    private (string Stdout, string Log) Stop(string? agentId)
+    private async Task<(string Stdout, string Log)> Stop(string? agentId)
     {
         Dictionary<string, object?> payload = new()
         {
@@ -160,18 +160,18 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
             payload["agent_id"] = agentId;
         }
 
-        return Send(payload);
+        return await Send(payload);
     }
 
     /// <summary>Moves the host clock on, so a later event is measurably later than the rows already written.</summary>
     private void Advance() => _host.Clock.Advance(TimeSpan.FromSeconds(1));
 
     /// <summary>Dispatches and launches one background agent, with the clock moving on after each event.</summary>
-    private void Start(string task, string toolUseId, string agentId)
+    private async Task Start(string task, string toolUseId, string agentId)
     {
-        Dispatch(task, toolUseId);
+        await Dispatch(task, toolUseId);
         Advance();
-        Launched(task, toolUseId, agentId);
+        await Launched(task, toolUseId, agentId);
         Advance();
     }
 
@@ -184,17 +184,17 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         [.. Events().Where(e => e.Phase == ArbiterLedgerPhases.Post)];
 
     [Fact]
-    public void HandbacksOutOfDispatchOrder_EachPairWithTheirOwnDispatch()
+    public async Task HandbacksOutOfDispatchOrder_EachPairWithTheirOwnDispatch()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Start("T5", "toolu-2", "agent-2");
-        Start("T6", "toolu-3", "agent-3");
+        await Start("T2", "toolu-1", "agent-1");
+        await Start("T5", "toolu-2", "agent-2");
+        await Start("T6", "toolu-3", "agent-3");
 
-        Handback("agent-2", Report("T5"));
+        await Handback("agent-2", Report("T5"));
         Advance();
-        Handback("agent-3", Report("T6"));
+        await Handback("agent-3", Report("T6"));
         Advance();
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
 
         IReadOnlyList<ArbiterLedgerEvent> posts = Posts();
         Assert.Equal(3, posts.Count);
@@ -209,12 +209,12 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void HandbackWithNoSavedRecord_IsRecordedUnpairedAllowedAndLogsWhatItLookedUp()
+    public async Task HandbackWithNoSavedRecord_IsRecordedUnpairedAllowedAndLogsWhatItLookedUp()
     {
-        Dispatch("T2", "toolu-1");
+        await Dispatch("T2", "toolu-1");
         Advance();
 
-        (string stdout, string log) = Handback("agent-nobody", Report("T2"));
+        (string stdout, string log) = await Handback("agent-nobody", Report("T2"));
 
         Assert.Equal(string.Empty, stdout);
         ArbiterLedgerEvent post = Assert.Single(Posts());
@@ -226,11 +226,11 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void HandbackWhoseAgentIdDiffersFromTheLaunch_IsRecordedUnpaired()
+    public async Task HandbackWhoseAgentIdDiffersFromTheLaunch_IsRecordedUnpaired()
     {
-        Start("T2", "toolu-1", "agent-1");
+        await Start("T2", "toolu-1", "agent-1");
 
-        (string stdout, string log) = Handback("agent-other", Report("T2"));
+        (string stdout, string log) = await Handback("agent-other", Report("T2"));
 
         Assert.Equal(string.Empty, stdout);
         Assert.Null(Assert.Single(Posts()).PreId);
@@ -242,12 +242,12 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void AsyncLaunchWithoutAnAgentId_IsNotTrackedAndLogsWhy()
+    public async Task AsyncLaunchWithoutAnAgentId_IsNotTrackedAndLogsWhy()
     {
-        Dispatch("T2", "toolu-1");
+        await Dispatch("T2", "toolu-1");
         Advance();
 
-        (_, string log) = Send(new
+        (_, string log) = await Send(new
         {
             hook_event_name = "PostToolUse",
             session_id = Session,
@@ -264,32 +264,32 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
             log,
             StringComparison.Ordinal);
 
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
         Assert.Null(Assert.Single(Posts()).PreId);
     }
 
     [Fact]
-    public void ForegroundCompletedTwiceForABackgroundAgent_IsRecordedOnceAndPaired()
+    public async Task ForegroundCompletedTwiceForABackgroundAgent_IsRecordedOnceAndPaired()
     {
-        Start("T2", "toolu-1", "agent-1");
+        await Start("T2", "toolu-1", "agent-1");
         ArbiterLedgerEvent pre = PreOf("toolu-1");
 
-        Completed("T2", "toolu-1", "agent-1");
+        await Completed("T2", "toolu-1", "agent-1");
         Advance();
-        Completed("T2", "toolu-1", "agent-1");
+        await Completed("T2", "toolu-1", "agent-1");
 
         ArbiterLedgerEvent post = Assert.Single(Posts());
         Assert.Equal(pre.Id, post.PreId);
     }
 
     [Fact]
-    public void StopForAFollowedAgentWhosePreIsAlreadyPaired_LogsThatNothingIsClosed()
+    public async Task StopForAFollowedAgentWhosePreIsAlreadyPaired_LogsThatNothingIsClosed()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Handback("agent-1", Report("T2"));
+        await Start("T2", "toolu-1", "agent-1");
+        await Handback("agent-1", Report("T2"));
         Advance();
 
-        (_, string log) = Stop("agent-1");
+        (_, string log) = await Stop("agent-1");
 
         Assert.Contains(
             "Arbiter: the SubagentStop of agent 'agent-1' follows a saved dispatch, " +
@@ -300,25 +300,25 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void TheSameHandbackTwice_IsRecordedOnce()
+    public async Task TheSameHandbackTwice_IsRecordedOnce()
     {
-        Start("T2", "toolu-1", "agent-1");
+        await Start("T2", "toolu-1", "agent-1");
 
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
         Advance();
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
 
         Assert.Single(Posts());
     }
 
     [Fact]
-    public void Handback_ThenForegroundPostCompleted_IsNotRecordedTwice()
+    public async Task Handback_ThenForegroundPostCompleted_IsNotRecordedTwice()
     {
-        Start("T2", "toolu-1", "agent-1");
+        await Start("T2", "toolu-1", "agent-1");
 
-        (string firstStdout, _) = Handback("agent-1", Report("T2"));
+        (string firstStdout, _) = await Handback("agent-1", Report("T2"));
         Advance();
-        (string secondStdout, _) = Completed("T2", "toolu-1", "agent-1");
+        (string secondStdout, _) = await Completed("T2", "toolu-1", "agent-1");
 
         Assert.Single(Posts());
         Assert.Equal(string.Empty, firstStdout);
@@ -326,15 +326,15 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void AsyncLaunchWhoseCallIdMatchesNoPre_SavesNothing_AndALaterHandbackIsUnpaired()
+    public async Task AsyncLaunchWhoseCallIdMatchesNoPre_SavesNothing_AndALaterHandbackIsUnpaired()
     {
-        Dispatch("T2", "toolu-1");
+        await Dispatch("T2", "toolu-1");
         Advance();
 
         // The prompt differs too: a launch that gives a call id no pre carries still pairs by prompt digest.
-        (_, string log) = Launched("T9", "toolu-unknown", "agent-1");
+        (_, string log) = await Launched("T9", "toolu-unknown", "agent-1");
         Advance();
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
 
         string pairing = log.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Single(line => line.Contains("Pairing keys compared", StringComparison.Ordinal));
@@ -344,13 +344,13 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void StopNamingAnAgentId_ClosesExactlyThatAgentsDispatch()
+    public async Task StopNamingAnAgentId_ClosesExactlyThatAgentsDispatch()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Start("T5", "toolu-2", "agent-2");
+        await Start("T2", "toolu-1", "agent-1");
+        await Start("T5", "toolu-2", "agent-2");
         ArbiterLedgerEvent second = PreOf("toolu-2");
 
-        Stop("agent-2");
+        await Stop("agent-2");
 
         ArbiterLedgerEvent recovered = Assert.Single(Posts());
         Assert.Equal(second.Id, recovered.PreId);
@@ -359,14 +359,14 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void StopForAnAgentWhoseHandbackWasRecorded_WritesNoRowAndLeavesTheSiblingOpen()
+    public async Task StopForAnAgentWhoseHandbackWasRecorded_WritesNoRowAndLeavesTheSiblingOpen()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Start("T5", "toolu-2", "agent-2");
-        Handback("agent-1", Report("T2"));
+        await Start("T2", "toolu-1", "agent-1");
+        await Start("T5", "toolu-2", "agent-2");
+        await Handback("agent-1", Report("T2"));
         Advance();
 
-        Stop("agent-1");
+        await Stop("agent-1");
 
         ArbiterLedgerEvent post = Assert.Single(Posts());
         Assert.Null(post.Recovered);
@@ -374,23 +374,23 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void StopWithNoAgentId_ClosesNoneOfSeveralOpenDispatches()
+    public async Task StopWithNoAgentId_ClosesNoneOfSeveralOpenDispatches()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Start("T5", "toolu-2", "agent-2");
-        Start("T6", "toolu-3", "agent-3");
+        await Start("T2", "toolu-1", "agent-1");
+        await Start("T5", "toolu-2", "agent-2");
+        await Start("T6", "toolu-3", "agent-3");
 
-        Stop(null);
+        await Stop(null);
 
         Assert.Empty(Posts());
     }
 
     [Fact]
-    public void HandbackWithASavedRecord_IsEvaluatedWithTheDispatchsCallerTargetAndTriggerFamily()
+    public async Task HandbackWithASavedRecord_IsEvaluatedWithTheDispatchsCallerTargetAndTriggerFamily()
     {
-        Start("T2", "toolu-1", "agent-1");
+        await Start("T2", "toolu-1", "agent-1");
 
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
 
         ArbiterLedgerEvent post = Assert.Single(Posts());
         Assert.Equal("conductor", post.Caller);
@@ -398,7 +398,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Assert.Equal("delegate.returned", post.Trigger);
     }
 
-    private (string Stdout, string Log) TaskStop(string taskId) => Send(new
+    private async Task<(string Stdout, string Log)> TaskStop(string taskId) => await Send(new
     {
         hook_event_name = "PostToolUse",
         session_id = Session,
@@ -414,12 +414,12 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     /// dispatching agent's <c>TaskStop</c> names it by its agent id, and that closes exactly its dispatch.
     /// </summary>
     [Fact]
-    public void TaskStopOfAFollowedAgent_ClosesExactlyThatAgentsDispatch()
+    public async Task TaskStopOfAFollowedAgent_ClosesExactlyThatAgentsDispatch()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Start("T5", "toolu-2", "agent-2");
+        await Start("T2", "toolu-1", "agent-1");
+        await Start("T5", "toolu-2", "agent-2");
 
-        (string stdout, _) = TaskStop("agent-2");
+        (string stdout, _) = await TaskStop("agent-2");
 
         Assert.Equal(string.Empty, stdout);
         ArbiterLedgerEvent closed = Assert.Single(Posts());
@@ -428,23 +428,23 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void TaskStopOfAnAgentThatAlreadyReturned_WritesNoRow()
+    public async Task TaskStopOfAnAgentThatAlreadyReturned_WritesNoRow()
     {
-        Start("T2", "toolu-1", "agent-1");
-        Handback("agent-1", Report("T2"));
+        await Start("T2", "toolu-1", "agent-1");
+        await Handback("agent-1", Report("T2"));
         Advance();
 
-        TaskStop("agent-1");
+        await TaskStop("agent-1");
 
         Assert.Null(Assert.Single(Posts()).Recovered);
     }
 
     [Fact]
-    public void TaskStopOfATaskTheArbiterDoesNotFollow_WritesNothing()
+    public async Task TaskStopOfATaskTheArbiterDoesNotFollow_WritesNothing()
     {
-        Start("T2", "toolu-1", "agent-1");
+        await Start("T2", "toolu-1", "agent-1");
 
-        TaskStop("shell-9");
+        await TaskStop("shell-9");
 
         Assert.Empty(Posts());
     }
@@ -455,9 +455,9 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     /// return is judged with them too and classifies as a delegate return rather than an investigation.
     /// </summary>
     [Fact]
-    public void AMainThreadBackgroundReturn_IsJudgedWithItsDispatchsHeaders()
+    public async Task AMainThreadBackgroundReturn_IsJudgedWithItsDispatchsHeaders()
     {
-        Send(new
+        await Send(new
         {
             hook_event_name = "PreToolUse",
             session_id = Session,
@@ -467,7 +467,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
             tool_use_id = "toolu-1",
         });
         Advance();
-        Send(new
+        await Send(new
         {
             hook_event_name = "PostToolUse",
             session_id = Session,
@@ -480,7 +480,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Advance();
         Assert.Equal("conductor", PreOf("toolu-1").Caller);
 
-        Handback("agent-1", Report("T2"));
+        await Handback("agent-1", Report("T2"));
 
         ArbiterLedgerEvent post = Assert.Single(Posts());
         Assert.Equal(PreOf("toolu-1").Id, post.PreId);
@@ -493,11 +493,11 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     /// back for that reason is judged from its saved prompt, and the log says why.
     /// </summary>
     [Fact]
-    public void ABackgroundReturnWhoseLedgerCannotBeRead_LogsThatItsHeadersWereNotRestored()
+    public async Task ABackgroundReturnWhoseLedgerCannotBeRead_LogsThatItsHeadersWereNotRestored()
     {
-        Dispatch("T2", "toolu-1");
+        await Dispatch("T2", "toolu-1");
         Advance();
-        Send(new
+        await Send(new
         {
             hook_event_name = "PostToolUse",
             session_id = Session,
@@ -510,7 +510,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
         Advance();
         _host.State.Log.UnreadablePaths.Add(_host.Ledger.FilePath);
 
-        (_, string log) = Handback("agent-1", "<task>done</task>");
+        (_, string log) = await Handback("agent-1", "<task>done</task>");
 
         Assert.Contains("could not be read back", log, StringComparison.Ordinal);
     }
@@ -530,7 +530,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
                 "pre-lost-to-a-torn-line"));
         await _host.State.Log.AppendLineAsync(directory, InFlightLedger.FileName, "{\"id\":\"pre-lost-to-a-torn", CancellationToken.None);
 
-        (_, string log) = Handback("agent-1", "<task>done</task>");
+        (_, string log) = await Handback("agent-1", "<task>done</task>");
 
         Assert.Contains("could not be read back", log, StringComparison.Ordinal);
         Assert.Contains("not a record", log, StringComparison.Ordinal);
@@ -587,7 +587,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
     }
 
     [Fact]
-    public void HandbackWhoseRulesAddANote_StillRendersAsAllowWithTheNoteAfterOneBlankLine()
+    public async Task HandbackWhoseRulesAddANote_StillRendersAsAllowWithTheNoteAfterOneBlankLine()
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(new NotingEngine()), _ => Config(), () => "decision-test-1");
@@ -605,7 +605,7 @@ public sealed class ClaudeBackgroundReturnTests : IDisposable
             tool_use_id = "toolu-handback-1",
         });
 
-        Assert.Equal(0, command.Run("claude", null, stdin, stdout, log));
+        Assert.Equal(0, await command.RunAsync("claude", null, stdin, stdout, log));
 
         using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
         JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");

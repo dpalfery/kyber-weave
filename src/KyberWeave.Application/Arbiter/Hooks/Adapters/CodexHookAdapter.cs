@@ -72,12 +72,13 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -89,12 +90,14 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config, context);
+            return await HandlePreAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config, context);
+            return await HandlePostAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
@@ -124,7 +127,13 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePreAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -142,7 +151,8 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         string message = GetString(toolInput, "message")
             ?? throw new InvalidOperationException(
                 "Malformed Codex hook event: spawn_agent input carries no message.");
-        HookOutcome outcome = DecidePre(payload, caller, target, message, config, context);
+        HookOutcome outcome = await DecidePreAsync(
+            payload, caller, target, message, config, context, cancellationToken).ConfigureAwait(false);
 
         // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(message, context, target);
@@ -186,7 +196,13 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePostAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -212,7 +228,9 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
             message = GetString(toolInput, "message") ?? string.Empty;
         }
 
-        HookOutcome outcome = DecidePost(payload, caller, target, message, response.GetRawText(), config, context);
+        HookOutcome outcome = await DecidePostAsync(
+            payload, caller, target, message, response.GetRawText(), config, context, cancellationToken)
+            .ConfigureAwait(false);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -234,41 +252,47 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private HookOutcome DecidePre(
+    private async Task<HookOutcome> DecidePreAsync(
         JsonElement payload,
         string caller,
         string? target,
         string message,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePreDispatch(
+            return await contextual.DecidePreDispatchAsync(
                 Token, caller, target, message, config, context,
-                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"),
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePreDispatch(caller, target, message, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, target, message, config, cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePostAsync(
         JsonElement payload,
         string caller,
         string? target,
         string message,
         string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
+            return await contextual.DecidePostDispatchAsync(
                 Token, caller, target, message, toolOutput, config, context,
-                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"),
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        return await _engine.DecidePostDispatchAsync(
+            caller, target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     private static JsonElement RequireToolInput(JsonElement payload)
