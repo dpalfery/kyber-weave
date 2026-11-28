@@ -20,14 +20,14 @@ internal static class DocsTaskPromptFixture
 {
     /// <summary>A ready plan with its task file written, on an in-memory checkout.</summary>
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "The caller owns the fixture it is returned.")]
-    internal static DocFixture Ready(string plan = "")
+    internal static async Task<DocFixture> ReadyAsync(string plan = "")
     {
         DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(plan.Length == 0 ? PlanNaming() : plan);
         Standards(fixture);
         _ = fixture.EnsureDirectory(".git");
         fixture.Write(".kyber-weave/kyber-weave.yml", ConfigYaml);
         using TestConsole console = new() { EmitAnsiSequences = false };
-        _ = DocsTestCommands.Tasks(Services(fixture), console).Execute(
+        _ = await DocsTestCommands.Tasks(Services(fixture), console).ExecuteAsync(
             null!,
             new DocsTasksSettings
             {
@@ -117,7 +117,7 @@ internal static class DocsTaskPromptFixture
     }
 
     /// <summary>What <c>docs packet</c> prints for <paramref name="task"/>.</summary>
-    internal static string Packet(DocFixture fixture, string task)
+    internal static async Task<string> PacketAsync(DocFixture fixture, string task)
     {
         DocsPacketSettings settings = new()
         {
@@ -126,7 +126,7 @@ internal static class DocsTaskPromptFixture
             ListWorktrees = _ => [fixture.Root]
         };
         using TestConsole console = new() { EmitAnsiSequences = false };
-        _ = DocsTestCommands.Packet(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        _ = await DocsTestCommands.Packet(Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
         return console.Output;
     }
 }

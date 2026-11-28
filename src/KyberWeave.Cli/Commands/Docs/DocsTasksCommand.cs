@@ -25,7 +25,7 @@ public sealed class DocsTasksCommand(
     IRepositoryFileStore files,
     IKyberWeaveConfigRepository configs,
     IAnsiConsole console,
-    PlanArguments plans) : Command<DocsTasksSettings>
+    PlanArguments plans) : AsyncCommand<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
@@ -35,10 +35,12 @@ public sealed class DocsTasksCommand(
     /// Arbiter's configured provider when a key is available for it; tests replace it through
     /// <see cref="PacketProviderOverride"/>.
     /// </summary>
-    public static Func<KyberWeaveConfig, IArbiterProvider?>? PacketProviderOverride { get; set; }
+    public static Func<KyberWeaveConfig, CancellationToken, Task<IArbiterProvider?>>? PacketProviderOverride { get; set; }
 
-    private IArbiterProvider? PacketProvider(KyberWeaveConfig config) =>
-        (PacketProviderOverride ?? DefaultPacketProvider)(config);
+    private Task<IArbiterProvider?> PacketProviderAsync(
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken) =>
+        (PacketProviderOverride ?? DefaultPacketProviderAsync)(config, cancellationToken);
 
     /// <summary>
     /// Reads the plan named by the positional path and derives its task file. With <c>--write</c> it writes the
@@ -48,7 +50,10 @@ public sealed class DocsTasksCommand(
     /// something the file needs (the finding names the task and the label to add), when <c>--check</c> finds a
     /// difference, or on a usage or I/O error.
     /// </summary>
-    public override int Execute(CommandContext context, DocsTasksSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsTasksSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
@@ -86,9 +91,11 @@ public sealed class DocsTasksCommand(
 
         // Only a write may ask the decision model to pick each task's agent; check and preview keep the picks on disk.
         using IPlanTaskAgentPicker? picker = mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert
-            ? pickers.ForConfig(effective)
+            ? await pickers.ForConfigAsync(effective, cancellationToken).ConfigureAwait(false)
             : null;
-        PlanTaskFileOutcome outcome = tasks.Run(root, effective, relative, mode, picker);
+        PlanTaskFileOutcome outcome = await tasks
+            .RunAsync(root, effective, relative, mode, picker, cancellationToken)
+            .ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
 
         if (outcome.ExecutionDigest is not null)
@@ -101,14 +108,16 @@ public sealed class DocsTasksCommand(
 
         if (mode == PlanTaskFileMode.Check && outcome.File is not null && !report.HasErrors)
         {
-            CheckPacketsAsync(effective, outcome.File, relative, report, cancellationToken).GetAwaiter().GetResult();
+            await CheckPacketsAsync(effective, outcome.File, relative, report, cancellationToken).ConfigureAwait(false);
         }
 
         if (settings.List && outcome.File is not null && !report.HasErrors)
         {
             foreach (PlanTaskFileEntry task in outcome.File.Tasks ?? [])
             {
-                console.Profile.Out.Writer.WriteLine(PlanTaskPacket.ListLine(task));
+                await console.Profile.Out.Writer
+                    .WriteLineAsync(PlanTaskPacket.ListLine(task).AsMemory(), cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             return 0;
@@ -179,7 +188,9 @@ public sealed class DocsTasksCommand(
         }
     }
 
-    private IArbiterProvider? DefaultPacketProvider(KyberWeaveConfig config)
+    private async Task<IArbiterProvider?> DefaultPacketProviderAsync(
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken)
     {
         if (config.Arbiter.Provider.Kind == ArbiterProviderKind.None)
         {
@@ -188,7 +199,7 @@ public sealed class DocsTasksCommand(
 
         string endpoint = config.Arbiter.Provider.Endpoint;
         bool loopback = Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && uri.IsLoopback;
-        if (!loopback && arbiterKeys.TryResolveKey(config, endpoint) is null)
+        if (!loopback && await arbiterKeys.TryResolveKeyAsync(config, endpoint, cancellationToken).ConfigureAwait(false) is null)
         {
             return null;
         }
@@ -199,7 +210,7 @@ public sealed class DocsTasksCommand(
     private async Task CheckPacketsAsync(
         KyberWeaveConfig config, PlanTaskFile file, string plan, DiagnosticReport report, CancellationToken cancellationToken)
     {
-        IArbiterProvider? provider = PacketProvider(config);
+        IArbiterProvider? provider = await PacketProviderAsync(config, cancellationToken).ConfigureAwait(false);
         if (provider is null)
         {
             report.Add(new Diagnostic(

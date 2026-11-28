@@ -44,7 +44,7 @@ public sealed class DocsInitProvisionTests
     /// command can be proven without a child process or a real index.
     /// </summary>
     [Fact]
-    public void DocsInit_WithProvision_UsesTheInjectedDoctor()
+    public async Task DocsInit_WithProvision_UsesTheInjectedDoctor()
     {
         FakeRepositoryDoctor doctor = new();
         DocsInitCommand command = DocsTestCommands.Init(doctor, _host.Console, Services);
@@ -56,7 +56,7 @@ public sealed class DocsInitProvisionTests
             Provision = true,
         };
 
-        int exit = command.Execute(null!, settings, CancellationToken.None);
+        int exit = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.True(exit == 0, $"docs init --provision exited {exit}. Output:{Environment.NewLine}{_host.Output}");
         DoctorRun run = Assert.Single(doctor.Runs);
@@ -69,7 +69,7 @@ public sealed class DocsInitProvisionTests
     /// them is visible here rather than only in a real run.
     /// </summary>
     [Fact]
-    public void DocsInit_WithProvision_PassesTheProvisionArgumentsToTheDoctor()
+    public async Task DocsInit_WithProvision_PassesTheProvisionArgumentsToTheDoctor()
     {
         ScriptedProcessExecutor executor = new(_ => DoctorHarness.Ok());
         FakeRepositoryDoctor doctor = new();
@@ -82,7 +82,7 @@ public sealed class DocsInitProvisionTests
             Provision = true,
         };
 
-        _ = command.Execute(null!, settings, CancellationToken.None);
+        _ = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
         DoctorRun run = Assert.Single(doctor.Runs);
         Assert.Equal(TimeSpan.FromMinutes(10), run.Options.IndexTimeout);
@@ -96,7 +96,7 @@ public sealed class DocsInitProvisionTests
 
     /// <summary>The command returns the doctor's exit code, so a failed provision is not reported as success.</summary>
     [Fact]
-    public void DocsInit_WithProvision_ReturnsTheDoctorsExitCode()
+    public async Task DocsInit_WithProvision_ReturnsTheDoctorsExitCode()
     {
         FakeRepositoryDoctor doctor = new()
         {
@@ -116,7 +116,7 @@ public sealed class DocsInitProvisionTests
             Provision = true,
         };
 
-        int exit = command.Execute(null!, settings, CancellationToken.None);
+        int exit = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(3, exit);
         Assert.Contains("codegraph.binary", console.Output, StringComparison.Ordinal);

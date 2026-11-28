@@ -59,7 +59,7 @@ internal static class DocsTestCommands
         IRepositoryDoctor doctor,
         IAnsiConsole? console = null,
         IServiceProvider? services = null,
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         string? mcpExecutable = null)
     {
         IServiceProvider provider = services ?? Services();
@@ -72,7 +72,7 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IFileSystem>(),
             provider.GetRequiredService<IPathResolver>(),
             provider.GetRequiredService<IProcessEnvironment>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>())
+            provider.GetRequiredService<IProcessRunner>())
         {
             Executor = executor,
             McpExecutable = mcpExecutable,

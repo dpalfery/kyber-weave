@@ -13,13 +13,22 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Injectable command boundary over repository analysis and its review artifacts.</summary>
 public interface IDocsAnalysisCommandService
 {
-    DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings);
-    ReviewExportResult ExportReview(DocsReviewExportSettings settings);
-    ReviewImportResult ImportReview(DocsReviewImportSettings settings, string json);
-    GlossaryUpdateResult UpdateGlossary(DocsGlossarySettings settings);
+    Task<DocumentationAnalysisResult> AnalyzeAsync(
+        DocsIntegrityCheckSettings settings,
+        CancellationToken cancellationToken = default);
+    Task<ReviewExportResult> ExportReviewAsync(
+        DocsReviewExportSettings settings,
+        CancellationToken cancellationToken = default);
+    Task<ReviewImportResult> ImportReviewAsync(
+        DocsReviewImportSettings settings,
+        string json,
+        CancellationToken cancellationToken = default);
+    Task<GlossaryUpdateResult> UpdateGlossaryAsync(
+        DocsGlossarySettings settings,
+        CancellationToken cancellationToken = default);
 }
 
-public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettings>
+public sealed class DocsIntegrityCheckCommand : AsyncCommand<DocsIntegrityCheckSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
     private readonly IAnsiConsole _console;
@@ -30,13 +39,16 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
         _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
-    public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsIntegrityCheckSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         try
         {
-            DocumentationAnalysisResult result = _service.Analyze(settings);
+            DocumentationAnalysisResult result = await _service.AnalyzeAsync(settings, cancellationToken).ConfigureAwait(false);
             CommandHelpers.Finish(_console, result.Diagnostics, settings, "docs integrity-check", "Claim");
             if (HasOperationalErrors(result.Diagnostics)) return 1;
             return FindingExitCode(result.Diagnostics, settings.FailOn);
@@ -48,8 +60,6 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
             return 1;
         }
     }
-
-    public int Execute(CommandContext context, DocsIntegrityCheckSettings settings) => Execute(context, settings, CancellationToken.None);
 
 #pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static int FindingExitCode(DiagnosticReport report, string failOn) =>
@@ -70,7 +80,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
                 DocumentationAnalyzer.EmbeddingUnavailableRuleCode));
 }
 
-public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
+public sealed class DocsReviewExportCommand : AsyncCommand<DocsReviewExportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
     private readonly IWritableFileSystem _files;
@@ -83,14 +93,17 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
         _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
-    public override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsReviewExportSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.OutputPath);
-            ReviewExportResult result = _service.ExportReview(settings);
+            ReviewExportResult result = await _service.ExportReviewAsync(settings, cancellationToken).ConfigureAwait(false);
             _files.WriteAllTextAtomic(settings.OutputPath, result.Json);
             DiagnosticReport report = result.Diagnostics;
             report.AddMetric("exportedReviewCharacters", result.ExportedExcerptCharacters);
@@ -111,11 +124,9 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
             return 1;
         }
     }
-
-    public int Execute(CommandContext context, DocsReviewExportSettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
-public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
+public sealed class DocsReviewImportCommand : AsyncCommand<DocsReviewImportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
     private readonly IFileSystem _files;
@@ -128,14 +139,19 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
         _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
-    public override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsReviewImportSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.InputPath);
-            ReviewImportResult result = _service.ImportReview(settings, _files.ReadAllText(settings.InputPath));
+            ReviewImportResult result = await _service
+                .ImportReviewAsync(settings, _files.ReadAllText(settings.InputPath), cancellationToken)
+                .ConfigureAwait(false);
             CommandHelpers.Finish(_console, result.Diagnostics, settings, "docs review import", "Candidate");
             return result.Success ? 0 : 1;
         }
@@ -149,11 +165,9 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
             return 1;
         }
     }
-
-    public int Execute(CommandContext context, DocsReviewImportSettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
-public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
+public sealed class DocsGlossaryCommand : AsyncCommand<DocsGlossarySettings>
 {
     private readonly IDocsAnalysisCommandService _service;
     private readonly IAnsiConsole _console;
@@ -164,11 +178,14 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
         _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
-    public override int Execute(CommandContext context, DocsGlossarySettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsGlossarySettings settings,
+        CancellationToken cancellationToken)
     {
         try
         {
-            GlossaryUpdateResult result = _service.UpdateGlossary(settings);
+            GlossaryUpdateResult result = await _service.UpdateGlossaryAsync(settings, cancellationToken).ConfigureAwait(false);
             result.Diagnostics.AddMetric("glossaryPath", result.RelativePath);
             result.Diagnostics.AddMetric("glossaryChanged", result.Changed);
             result.Diagnostics.AddMetric("glossaryWritten", result.Written);
@@ -187,8 +204,6 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
             return 1;
         }
     }
-
-    public int Execute(CommandContext context, DocsGlossarySettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
 internal static class DocsAnalysisCommandErrors

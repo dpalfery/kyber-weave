@@ -110,28 +110,28 @@ public sealed class ReportConsoleSeamTests
     }
 
     [Fact]
-    public void ReviewExport_WritesTheBundleThroughTheFileSystemSeam()
+    public async Task ReviewExport_WritesTheBundleThroughTheFileSystemSeam()
     {
         InMemoryFileSystem files = new();
         string output = Rooted("out", "candidates.json");
         TestConsole console = new();
 
-        int exitCode = new DocsReviewExportCommand(new ExportService(ExportResult("{\"k\":1}"), null), files, console)
-            .Execute(null!, new DocsReviewExportSettings { Path = Rooted(), OutputPath = output, Format = "json" }, CancellationToken.None);
+        int exitCode = await new DocsReviewExportCommand(new ExportService(ExportResult("{\"k\":1}"), null), files, console)
+            .ExecuteAsync(null!, new DocsReviewExportSettings { Path = Rooted(), OutputPath = output, Format = "json" }, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Equal("{\"k\":1}", files.ReadAllText(output));
     }
 
     [Fact]
-    public void ReviewExport_AFailingExport_WritesNoFileAndReportsTheFindingOnTheConsole()
+    public async Task ReviewExport_AFailingExport_WritesNoFileAndReportsTheFindingOnTheConsole()
     {
         InMemoryFileSystem files = new();
         string output = Rooted("out", "candidates.json");
         TestConsole console = new();
 
-        int exitCode = new DocsReviewExportCommand(new ExportService(ExportResult("{}"), new IOException("export failed")), files, console)
-            .Execute(null!, new DocsReviewExportSettings { Path = Rooted(), OutputPath = output, Format = "json" }, CancellationToken.None);
+        int exitCode = await new DocsReviewExportCommand(new ExportService(ExportResult("{}"), new IOException("export failed")), files, console)
+            .ExecuteAsync(null!, new DocsReviewExportSettings { Path = Rooted(), OutputPath = output, Format = "json" }, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.False(files.FileExists(output));
@@ -186,12 +186,22 @@ public sealed class ReportConsoleSeamTests
 
     private sealed class ExportService(ReviewExportResult result, Exception? failure) : IDocsAnalysisCommandService
     {
-        public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings) => throw new NotSupportedException();
+        public Task<DocumentationAnalysisResult> AnalyzeAsync(
+            DocsIntegrityCheckSettings settings,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public ReviewExportResult ExportReview(DocsReviewExportSettings settings) => failure is null ? result : throw failure;
+        public Task<ReviewExportResult> ExportReviewAsync(
+            DocsReviewExportSettings settings,
+            CancellationToken cancellationToken = default) =>
+            failure is null ? Task.FromResult(result) : throw failure;
 
-        public ReviewImportResult ImportReview(DocsReviewImportSettings settings, string json) => throw new NotSupportedException();
+        public Task<ReviewImportResult> ImportReviewAsync(
+            DocsReviewImportSettings settings,
+            string json,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public GlossaryUpdateResult UpdateGlossary(DocsGlossarySettings settings) => throw new NotSupportedException();
+        public Task<GlossaryUpdateResult> UpdateGlossaryAsync(
+            DocsGlossarySettings settings,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

@@ -25,13 +25,13 @@ public sealed class DocsPacketCommandTests
             configure?.Invoke(services);
         });
 
-    private static DocFixture Ready() => Written(PlanTaskFileProbe.CorpusInMemory());
+    private static Task<DocFixture> ReadyAsync() => WrittenAsync(PlanTaskFileProbe.CorpusInMemory());
 
-    private static DocFixture Written(DocFixture fixture)
+    private static async Task<DocFixture> WrittenAsync(DocFixture fixture)
     {
         _ = fixture.EnsureDirectory(".git");
         TestConsole console = new() { EmitAnsiSequences = false };
-        _ = DocsTestCommands.Tasks(Services(fixture), console).Execute(
+        _ = await DocsTestCommands.Tasks(Services(fixture), console).ExecuteAsync(
             null!,
             new DocsTasksSettings { Path = fixture.FullPath(PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);
@@ -39,10 +39,10 @@ public sealed class DocsPacketCommandTests
     }
 
     /// <summary>A checkout beside <paramref name="sibling"/> on the same in-memory file system.</summary>
-    private static DocFixture ReadyBeside(DocFixture sibling, string folder) =>
-        Written(PlanTaskFileProbe.CorpusIn(DocFixture.CreateInMemoryBeside(sibling, folder)));
+    private static Task<DocFixture> ReadyBesideAsync(DocFixture sibling, string folder) =>
+        WrittenAsync(PlanTaskFileProbe.CorpusIn(DocFixture.CreateInMemoryBeside(sibling, folder)));
 
-    private static (int Exit, string Output) Packet(
+    private static async Task<(int Exit, string Output)> PacketAsync(
         DocFixture fixture, string task, string? plan = null, string? prior = null, IServiceProvider? services = null, params string[] worktrees)
     {
         DocsPacketSettings settings = new()
@@ -54,19 +54,19 @@ public sealed class DocsPacketCommandTests
             ListWorktrees = _ => [fixture.Root, .. worktrees],
         };
         TestConsole console = new() { EmitAnsiSequences = false };
-        int exit = DocsTestCommands.Packet(services ?? Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        int exit = await DocsTestCommands.Packet(services ?? Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
         return (exit, console.Output);
     }
 
     /// <summary>The CodeGraph ports are the injected factory's, so a checkout outside this one is read the same way.</summary>
     [Fact]
-    public void TheCodeGraphPortsComeFromTheInjectedFactory()
+    public async Task TheCodeGraphPortsComeFromTheInjectedFactory()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         FakeCodeGraphPortsFactory codeGraph = new(FakeCodeGraphResolver.WithNodes());
         IServiceProvider services = Services(fixture, collection => collection.AddSingleton<ICodeGraphPortsFactory>(codeGraph));
 
-        (int exit, string output) = Packet(fixture, "T1", services: services);
+        (int exit, string output) = await PacketAsync(fixture, "T1", services: services);
 
         Assert.True(exit == 0, output);
         Assert.Contains(codeGraph.Roots, root => Path.GetFullPath(root) == Path.GetFullPath(fixture.Root));
@@ -78,11 +78,11 @@ public sealed class DocsPacketCommandTests
     [InlineData("task 1")]
     [InlineData("Task-1")]
     [InlineData("1")]
-    public void ThePacketIsPrintedForAnyNaturalSpellingOfTheTaskIdWithNoPlanArgument(string typed)
+    public async Task ThePacketIsPrintedForAnyNaturalSpellingOfTheTaskIdWithNoPlanArgument(string typed)
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
 
-        (int exit, string output) = Packet(fixture, typed);
+        (int exit, string output) = await PacketAsync(fixture, typed);
 
         Assert.True(exit == 0, output);
         Assert.StartsWith("<task>\nTask T1", output, StringComparison.Ordinal);
@@ -95,11 +95,11 @@ public sealed class DocsPacketCommandTests
 
     /// <summary>The packet carries the task's resolved test command, so the worker neither fills placeholders nor guesses.</summary>
     [Fact]
-    public void ThePacketPrintsTheTasksResolvedTestCommand()
+    public async Task ThePacketPrintsTheTasksResolvedTestCommand()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
 
-        (int exit, string output) = Packet(fixture, "T1");
+        (int exit, string output) = await PacketAsync(fixture, "T1");
 
         Assert.True(exit == 0, output);
         Assert.Contains(PacketTestCommandRenderer.Heading, output, StringComparison.Ordinal);
@@ -107,13 +107,13 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void PriorResultsFromAFileInTheScratchAreaFillTheirSection()
+    public async Task PriorResultsFromAFileInTheScratchAreaFillTheirSection()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         string results = fixture.FullPath(ScratchLayout.Root + "/results.txt");
         _ = fixture.Write(ScratchLayout.Root + "/results.txt", "T1 reported: built, 4 tests green.");
 
-        (int exit, string output) = Packet(fixture, "T2", prior: results);
+        (int exit, string output) = await PacketAsync(fixture, "T2", prior: results);
 
         Assert.True(exit == 0, output);
         Assert.Contains("T1 reported: built, 4 tests green.", output, StringComparison.Ordinal);
@@ -125,13 +125,13 @@ public sealed class DocsPacketCommandTests
     /// reported as a stale task file after the prompt service refuses it.
     /// </summary>
     [Fact]
-    public void APriorResultsFileOutsideTheScratchAreaIsRefusedUnderItsOwnCode()
+    public async Task APriorResultsFileOutsideTheScratchAreaIsRefusedUnderItsOwnCode()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         string results = fixture.FullPath("results.txt");
         _ = fixture.Write("results.txt", "a file outside the scratch area");
 
-        (int exit, string output) = Packet(fixture, "T2", prior: results);
+        (int exit, string output) = await PacketAsync(fixture, "T2", prior: results);
 
         Assert.Equal(1, exit);
         Assert.Contains(DocsPacketCommand.PriorResultsUnreadable, output, StringComparison.Ordinal);
@@ -140,14 +140,14 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void AStaleTaskFileIsRefusedWithTheCommandThatFixesIt()
+    public async Task AStaleTaskFileIsRefusedWithTheCommandThatFixesIt()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         fixture.Write(
             PlanTaskFileProbe.PlanPath,
             PlanTaskFileProbe.PlanMarkdown().Replace("The task file validator", "The renamed validator", StringComparison.Ordinal));
 
-        (int exit, string output) = Packet(fixture, "T1");
+        (int exit, string output) = await PacketAsync(fixture, "T1");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-004", output, StringComparison.Ordinal);
@@ -156,11 +156,11 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void AnUnknownTaskListsTheTasksThePlanHas()
+    public async Task AnUnknownTaskListsTheTasksThePlanHas()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
 
-        (int exit, string output) = Packet(fixture, "T9");
+        (int exit, string output) = await PacketAsync(fixture, "T9");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-003", output, StringComparison.Ordinal);
@@ -168,41 +168,41 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void SeveralActivePlansAreListedAndNoneIsGuessed()
+    public async Task SeveralActivePlansAreListedAndNoneIsGuessed()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         _ = fixture.Write(
             Path.GetDirectoryName(PlanTaskFileProbe.PlanPath)!.Replace('\\', '/') + "/2026-11-08-other-plan.md",
             "# Other\n\n**Status: In progress.**\n");
 
-        (int exit, string output) = Packet(fixture, "T1");
+        (int exit, string output) = await PacketAsync(fixture, "T1");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
         Assert.Contains("2026-11-08-other-plan.md", output, StringComparison.Ordinal);
         Assert.Contains(PlanTaskFileProbe.PlanPath, output, StringComparison.Ordinal);
 
-        (int named, string text) = Packet(fixture, "T1", plan: PlanTaskFileProbe.PlanPath);
+        (int named, string text) = await PacketAsync(fixture, "T1", plan: PlanTaskFileProbe.PlanPath);
         Assert.True(named == 0, text);
     }
 
     [Fact]
-    public void NoActivePlanSaysSoAndTellsTheWorkerNotToHuntForOne()
+    public async Task NoActivePlanSaysSoAndTellsTheWorkerNotToHuntForOne()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         _ = fixture.Write(
             PlanTaskFileProbe.PlanPath,
             fixture.ReadText(PlanTaskFileProbe.PlanPath).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
 
-        (int exit, string output) = Packet(fixture, "T1");
+        (int exit, string output) = await PacketAsync(fixture, "T1");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
     }
 
-    private static DocFixture CanonicalWithoutPlan()
+    private static async Task<DocFixture> CanonicalWithoutPlanAsync()
     {
-        DocFixture fixture = Ready();
+        DocFixture fixture = await ReadyAsync();
         _ = fixture.Write(
             PlanTaskFileProbe.PlanPath,
             fixture.ReadText(PlanTaskFileProbe.PlanPath).Replace("**Status: Ready.**", "**Status: Draft.**", StringComparison.Ordinal));
@@ -210,25 +210,25 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void ARunFromTheCanonicalCheckoutPrintsThePacketOfTheOneWorktreeThatHasTheTask()
+    public async Task ARunFromTheCanonicalCheckoutPrintsThePacketOfTheOneWorktreeThatHasTheTask()
     {
-        using DocFixture canonical = CanonicalWithoutPlan();
-        using DocFixture worktree = ReadyBeside(canonical, "worktree");
+        using DocFixture canonical = await CanonicalWithoutPlanAsync();
+        using DocFixture worktree = await ReadyBesideAsync(canonical, "worktree");
 
-        (int exit, string output) = Packet(canonical, "T1", worktrees: worktree.Root);
+        (int exit, string output) = await PacketAsync(canonical, "T1", worktrees: worktree.Root);
 
         Assert.True(exit == 0, output);
         Assert.Contains("Worktree: " + worktree.Root, output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SeveralWorktreesWithTheTaskAreListedWithTheCommandToRunFromEach()
+    public async Task SeveralWorktreesWithTheTaskAreListedWithTheCommandToRunFromEach()
     {
-        using DocFixture canonical = CanonicalWithoutPlan();
-        using DocFixture first = ReadyBeside(canonical, "first");
-        using DocFixture second = ReadyBeside(canonical, "second");
+        using DocFixture canonical = await CanonicalWithoutPlanAsync();
+        using DocFixture first = await ReadyBesideAsync(canonical, "first");
+        using DocFixture second = await ReadyBesideAsync(canonical, "second");
 
-        (int exit, string output) = Packet(canonical, "T1", worktrees: [first.Root, second.Root]);
+        (int exit, string output) = await PacketAsync(canonical, "T1", worktrees: [first.Root, second.Root]);
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
@@ -238,12 +238,12 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void AWorktreeWithoutTheTaskIsNotAMatchAndTheFindingNamesTheDirectorySearched()
+    public async Task AWorktreeWithoutTheTaskIsNotAMatchAndTheFindingNamesTheDirectorySearched()
     {
-        using DocFixture canonical = CanonicalWithoutPlan();
-        using DocFixture worktree = ReadyBeside(canonical, "worktree");
+        using DocFixture canonical = await CanonicalWithoutPlanAsync();
+        using DocFixture worktree = await ReadyBesideAsync(canonical, "worktree");
 
-        (int exit, string output) = Packet(canonical, "T9", worktrees: worktree.Root);
+        (int exit, string output) = await PacketAsync(canonical, "T9", worktrees: worktree.Root);
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-TASKS-CLI-002", output, StringComparison.Ordinal);
@@ -251,13 +251,13 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void ListPrintsOneLinePerTaskAndNothingElse()
+    public async Task ListPrintsOneLinePerTaskAndNothingElse()
     {
-        using DocFixture fixture = Ready();
+        using DocFixture fixture = await ReadyAsync();
         DocsTasksSettings settings = new() { Path = fixture.FullPath(PlanTaskFileProbe.PlanPath), List = true };
         TestConsole console = new() { EmitAnsiSequences = false };
 
-        int exit = DocsTestCommands.Tasks(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        int exit = await DocsTestCommands.Tasks(Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.True(exit == 0, console.Output);
         string[] lines = console.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

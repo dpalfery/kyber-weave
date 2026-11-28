@@ -8,6 +8,7 @@ using KyberWeave.Cli.Rendering;
 using KyberWeave.Core;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
@@ -41,7 +42,7 @@ public sealed class DocsPacketCommand(
     IConsole standardError,
     PlanArguments plans,
     ArbiterRepoRoot roots,
-    IKwSkillCatalogFactory skills) : Command<DocsPacketSettings>
+    IKwSkillCatalogFactory skills) : AsyncCommand<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -63,7 +64,10 @@ public sealed class DocsPacketCommand(
     /// plan that has the task, so a worker whose shell is not in its worktree still gets its packet. The task file is checked against the plan first, so a stale file is refused with the fix.
     /// Exits 0 after printing; exits 1 with the reason and the next command otherwise.
     /// </summary>
-    public override int Execute(CommandContext context, DocsPacketSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsPacketSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
@@ -77,7 +81,10 @@ public sealed class DocsPacketCommand(
         string? plan = ChoosePlan(root, config, settings, current, report);
         if (plan is null && settings.Plan is null && tasks.ActivePlans(root, config).Count == 0)
         {
-            plan = FindInOtherWorktrees(ref root, config, settings, current, report);
+            WorktreePlanMatch match = await FindInOtherWorktreesAsync(
+                root, config, settings, current, report, cancellationToken).ConfigureAwait(false);
+            root = match.Root;
+            plan = match.Plan;
         }
 
         if (plan is null)
@@ -85,7 +92,8 @@ public sealed class DocsPacketCommand(
             return Fail(report);
         }
 
-        PlanTaskFileEntry? entry = CheckTaskFile(root, config, plan, settings, report);
+        PlanTaskFileEntry? entry = await CheckTaskFileAsync(
+            root, config, plan, settings, report, cancellationToken).ConfigureAwait(false);
         if (entry is null)
         {
             return Fail(report);
@@ -96,7 +104,7 @@ public sealed class DocsPacketCommand(
             return Fail(report);
         }
 
-        if (!PrintPacket(root, config, plan, entry, settings, report))
+        if (!await PrintPacketAsync(root, config, plan, entry, settings, report, cancellationToken).ConfigureAwait(false))
         {
             return Fail(report);
         }
@@ -105,9 +113,17 @@ public sealed class DocsPacketCommand(
     }
 
     /// <summary>Runs the task-file check for the chosen plan and locates the named task; a stale or missing file is reported and null returned.</summary>
-    private PlanTaskFileEntry? CheckTaskFile(string root, KyberWeaveConfig config, string plan, DocsPacketSettings settings, DiagnosticReport report)
+    private async Task<PlanTaskFileEntry?> CheckTaskFileAsync(
+        string root,
+        KyberWeaveConfig config,
+        string plan,
+        DocsPacketSettings settings,
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
     {
-        PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
+        PlanTaskFileOutcome outcome = await tasks
+            .RunAsync(root, config, plan, PlanTaskFileMode.Check, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         if (outcome.File is null || outcome.Report.HasErrors)
         {
             report.AddRange(outcome.Report.Items);
@@ -177,11 +193,17 @@ public sealed class DocsPacketCommand(
     }
 
     /// <summary>Builds the task's prompt at print time; it is never written into the task file, so the digest is unaffected.</summary>
-    private TaskPromptResult BuildTaskPrompt(string root, KyberWeaveConfig config, string plan, DocsPacketSettings settings)
+    private async Task<TaskPromptResult> BuildTaskPromptAsync(
+        string root,
+        KyberWeaveConfig config,
+        string plan,
+        DocsPacketSettings settings,
+        CancellationToken cancellationToken)
     {
+        CodeGraphPorts ports = await codeGraph.ForRepositoryAsync(root, cancellationToken).ConfigureAwait(false);
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
-            codeGraph.ForRepository(root).Resolver);
+            ports.Resolver);
         TaskPromptService prompts = new(
             tasks,
             hostFacts,
@@ -189,15 +211,24 @@ public sealed class DocsPacketCommand(
             index.StandardsFor,
             environment,
             skills.ForRepository(root, config));
-        return prompts.Build(
+        return await prompts.BuildAsync(
             new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
-            config);
+            config,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Builds the task's prompt at print time and prints it with its test command; a refusal to build is reported and false returned.</summary>
-    private bool PrintPacket(string root, KyberWeaveConfig config, string plan, PlanTaskFileEntry entry, DocsPacketSettings settings, DiagnosticReport report)
+    private async Task<bool> PrintPacketAsync(
+        string root,
+        KyberWeaveConfig config,
+        string plan,
+        PlanTaskFileEntry entry,
+        DocsPacketSettings settings,
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
     {
-        TaskPromptResult prompt = BuildTaskPrompt(root, config, plan, settings);
+        TaskPromptResult prompt = await BuildTaskPromptAsync(
+            root, config, plan, settings, cancellationToken).ConfigureAwait(false);
 
         if (!prompt.Built)
         {
@@ -215,7 +246,9 @@ public sealed class DocsPacketCommand(
         if (prompt.Substitution is not null)
         {
             // A warning to the conductor, not part of the prompt: the hook inserts stdout unchanged.
-            standardError.Error.WriteLine(prompt.Substitution);
+            await standardError.Error
+                .WriteLineAsync(prompt.Substitution.AsMemory(), cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
@@ -275,11 +308,20 @@ public sealed class DocsPacketCommand(
         return null;
     }
 
-    private string? FindInOtherWorktrees(ref string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
+    private async Task<WorktreePlanMatch> FindInOtherWorktreesAsync(
+        string root,
+        KyberWeaveConfig config,
+        DocsPacketSettings settings,
+        string current,
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
     {
         string here = paths.GetFullPath(root, current);
+        IReadOnlyList<string> worktrees = settings.ListWorktrees is { } listWorktrees
+            ? listWorktrees(root)
+            : await git.ListWorktreesAsync(root, cancellationToken: cancellationToken).ConfigureAwait(false);
         List<(string Worktree, string Plan)> matches = [];
-        foreach (string worktree in (settings.ListWorktrees ?? (dir => git.ListWorktrees(dir)))(root))
+        foreach (string worktree in worktrees)
         {
             string other = paths.GetFullPath(worktree, current);
             if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
@@ -289,7 +331,9 @@ public sealed class DocsPacketCommand(
 
             foreach (string candidate in tasks.ActivePlans(other, config))
             {
-                PlanTaskFileOutcome outcome = tasks.Run(other, config, candidate, PlanTaskFileMode.Check);
+                PlanTaskFileOutcome outcome = await tasks
+                    .RunAsync(other, config, candidate, PlanTaskFileMode.Check, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
                 if (outcome.File is not null && PlanTaskPacket.FindTask(outcome.File, settings.Task) is not null)
                 {
                     matches.Add((other, candidate));
@@ -299,8 +343,7 @@ public sealed class DocsPacketCommand(
 
         if (matches.Count == 1)
         {
-            root = matches[0].Worktree;
-            return matches[0].Plan;
+            return new WorktreePlanMatch(matches[0].Worktree, matches[0].Plan);
         }
 
         string searched = $"No plan is {PlanStatus.ActiveWords} under the planning folders of {here} (the directory searched was {current}).";
@@ -312,7 +355,7 @@ public sealed class DocsPacketCommand(
                 $"{searched} No other git worktree of this repository has an active plan with task '{settings.Task}' either, so there is no packet to print.",
                 "docs packet",
                 Hint: "Report this to the conductor; do not look for the plan yourself."));
-            return null;
+            return new WorktreePlanMatch(root, null);
         }
 
         string forms = string.Join("; ", matches.Select(match => $"cd {match.Worktree} && kyber-weave docs packet {settings.Task}"));
@@ -322,8 +365,10 @@ public sealed class DocsPacketCommand(
             $"{searched} {matches.Count} other worktrees have an active plan with task '{settings.Task}': {string.Join(", ", matches.Select(match => match.Worktree))}.",
             "docs packet",
             Hint: $"Run the command from the worktree named in the dispatch: {forms}."));
-        return null;
+        return new WorktreePlanMatch(root, null);
     }
+
+    private sealed record WorktreePlanMatch(string Root, string? Plan);
 
     private int Fail(DiagnosticReport report)
     {

@@ -20,7 +20,7 @@ public sealed class DocsFinalizeCommand(
     IKyberWeaveConfigRepository configs,
     TimeProvider time,
     IAnsiConsole console,
-    PlanArguments plans) : Command<DocsFinalizeSettings>
+    PlanArguments plans) : AsyncCommand<DocsFinalizeSettings>
 {
     /// <summary>A <c>--date</c> or <c>--approval-mode</c> value is not usable.</summary>
     public const string InvalidOption = "KW-DOC-FINALIZE-007";
@@ -32,7 +32,10 @@ public sealed class DocsFinalizeCommand(
     /// Reads the plan named by the positional path. Exits 0 when it was finalized or was already Ready with a current
     /// task file; exits 1 naming what is wrong otherwise, having changed nothing.
     /// </summary>
-    public override int Execute(CommandContext context, DocsFinalizeSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsFinalizeSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -67,7 +70,8 @@ public sealed class DocsFinalizeCommand(
         }
 
         plans.Announce(report, settings, relative);
-        PlanFinalizeOutcome outcome = finalize.Run(root, effective, relative, mode, settings.Approval, date);
+        PlanFinalizeOutcome outcome = await finalize.RunAsync(
+            root, effective, relative, mode, settings.Approval, date, cancellationToken).ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("finalized", outcome.Finalized);
         report.AddMetric("task-file", outcome.TaskFilePath);

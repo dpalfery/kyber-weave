@@ -13,7 +13,7 @@ public sealed class DocsTaskPromptToolTests
     [Fact]
     public async Task TheToolNamesTheAgentDifficultyTechnologyAndCutListAndHoldsNoPromptText()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
         string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync("claude-code", taskId: "T1");
 
@@ -36,7 +36,7 @@ public sealed class DocsTaskPromptToolTests
     [Fact]
     public async Task AnUnverifiedMcpClientGetsThePromptFileAndIsNamedInTheReply()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
         string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync("warp", taskId: "T1");
 
@@ -49,7 +49,7 @@ public sealed class DocsTaskPromptToolTests
     [Fact]
     public async Task AMissingMcpClientNameAlsoGetsThePromptFile()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
         string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync(clientName: null, taskId: "T1");
 
@@ -60,7 +60,7 @@ public sealed class DocsTaskPromptToolTests
     [Fact]
     public async Task TheToolTakesATechnologyForADispatchThatBelongsToNoTask()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
         string reply = await DocsTaskPromptFixture.Tools(fixture)
             .BuildTaskPromptForClientAsync("claude-code", taskId: null, technology: "csharp");
@@ -73,7 +73,7 @@ public sealed class DocsTaskPromptToolTests
     [Fact]
     public async Task AStaleTaskFileYieldsNoPromptAndTheRepairCommand()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
         fixture.Write(
             PlanTaskFileProbe.PlanPath,
             PlanTaskFileProbe.PlanMarkdown()

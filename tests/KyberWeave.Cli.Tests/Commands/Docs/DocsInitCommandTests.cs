@@ -21,7 +21,7 @@ public sealed class DocsInitCommandTests
     /// and that passing the option triggers scaffolding of all 11 Kyber Squad rich standards.
     /// </summary>
     [Fact]
-    public void ExecuteWithKyberStandardsOptionPassesKyberStandardsFlagToScaffolder()
+    public async Task ExecuteWithKyberStandardsOptionPassesKyberStandardsFlagToScaffolder()
     {
         // 1. DocsInitSettings has KyberStandards property with [CommandOption("--kyber-standards")]
         PropertyInfo? property = typeof(DocsInitSettings).GetProperty(nameof(DocsInitSettings.KyberStandards));
@@ -41,7 +41,7 @@ public sealed class DocsInitCommandTests
         // 2. CommandApp binds --kyber-standards from command line arguments
         CommandApp app = CommandAppFixture.DocsInit(_host.Register, _host.Console);
 
-        int exitCode = app.Run(["docs", "init", _host.Repo, "--kyber-standards", "--no-skill"]);
+        int exitCode = await app.RunAsync(["docs", "init", _host.Repo, "--kyber-standards", "--no-skill"]);
         Assert.Equal(0, exitCode);
 
         // 3. Verifies that every shipped standard was created
@@ -64,7 +64,10 @@ public sealed class DocsInitCommandTests
             NoSkill = true
         };
 
-        (int tryExitCode, ScaffoldResult? result, string? error) = DocsInitCommand.TryScaffold(_host.Services().GetRequiredService<IDocsScaffoldingService>(), initSettings);
+        (int tryExitCode, ScaffoldResult? result, string? error) = await DocsInitCommand.TryScaffoldAsync(
+            _host.Services().GetRequiredService<IDocsScaffoldingService>(),
+            initSettings,
+            CancellationToken.None);
         Assert.Equal(0, tryExitCode);
         Assert.Null(error);
         Assert.NotNull(result);

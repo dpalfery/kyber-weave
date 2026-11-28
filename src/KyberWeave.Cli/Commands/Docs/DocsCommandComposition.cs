@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Candidates;
@@ -102,27 +103,34 @@ internal static class DocsCommandComposition
         return true;
     }
 
-    public static ICodeGraphResolver CreateResolver(DocsSettings settings, ICodeGraphPortsFactory codeGraph) =>
-        codeGraph.ForRepository(settings.Path).Resolver;
+    public static async Task<ICodeGraphResolver> CreateResolverAsync(
+        DocsSettings settings,
+        ICodeGraphPortsFactory codeGraph,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(codeGraph);
+        CodeGraphPorts ports = await codeGraph.ForRepositoryAsync(settings.Path, cancellationToken).ConfigureAwait(false);
+        return ports.Resolver;
+    }
 
-    public static bool TryCreateAnalysisRuntime(
+    public static async Task<DocsAnalysisRuntime?> TryCreateAnalysisRuntimeAsync(
         IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         DocsAnalysisCompositionFactories factories,
-        out DocsAnalysisRuntime? runtime)
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(factories);
 
-        runtime = null;
         if (!TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
-            return false;
+            return null;
         }
 
-        ICodeGraphResolver resolver = factories.CreateResolver(settings.Path);
+        ICodeGraphResolver resolver = await factories.CreateResolverAsync(settings.Path, cancellationToken).ConfigureAwait(false);
         if (!resolver.IsAvailable)
         {
             report.Add(new Diagnostic(
@@ -135,21 +143,21 @@ internal static class DocsCommandComposition
         }
 
         DocsAnalysisEmbeddingMode mode = config.DocsAnalysis.Embeddings.Mode;
-        bool cacheSafe = factories.IsCacheSafe(settings.Path);
+        bool cacheSafe = await factories.IsCacheSafeAsync(settings.Path, cancellationToken).ConfigureAwait(false);
         if (!cacheSafe && mode != DocsAnalysisEmbeddingMode.Off)
         {
             AddEmbeddingAvailability(
                 report,
                 mode,
                 "Analysis cache persistence is unsafe; no document text was sent to the embedding endpoint.");
-            if (mode == DocsAnalysisEmbeddingMode.Required) return false;
+            if (mode == DocsAnalysisEmbeddingMode.Required) return null;
         }
 
         IAnalysisPersistence? persistence = null;
         IEmbeddingGenerator? embeddingGenerator = null;
         if (cacheSafe)
         {
-            persistence = factories.CreatePersistence(settings.Path);
+            persistence = await factories.CreatePersistenceAsync(settings.Path, cancellationToken).ConfigureAwait(false);
             if (!persistence.IsAvailable)
             {
                 DisposeIfOwned(persistence);
@@ -160,7 +168,7 @@ internal static class DocsCommandComposition
                         report,
                         mode,
                         "The local analysis cache is unavailable; embeddings were not constructed or called.");
-                    if (mode == DocsAnalysisEmbeddingMode.Required) return false;
+                    if (mode == DocsAnalysisEmbeddingMode.Required) return null;
                 }
             }
         }
@@ -168,14 +176,13 @@ internal static class DocsCommandComposition
         if (mode != DocsAnalysisEmbeddingMode.Off && persistence is not null)
             embeddingGenerator = factories.CreateEmbeddingGenerator();
 
-        runtime = new DocsAnalysisRuntime(
+        return new DocsAnalysisRuntime(
             settings.Path,
             config,
             ontology,
             resolver,
             persistence,
             embeddingGenerator);
-        return true;
     }
 
     private static void AddEmbeddingAvailability(
@@ -202,11 +209,12 @@ internal sealed class DocsAnalysisCompositionFactories(
     IAnalysisPersistenceFactory persistence,
     IEmbeddingGeneratorFactory embeddings)
 {
-    public Func<string, bool> IsCacheSafe { get; init; } = persistence.IsCacheSafe;
-    public Func<string, IAnalysisPersistence> CreatePersistence { get; init; } = persistence.Open;
+    public Func<string, CancellationToken, Task<bool>> IsCacheSafeAsync { get; init; } = persistence.IsCacheSafeAsync;
+    public Func<string, CancellationToken, Task<IAnalysisPersistence>> CreatePersistenceAsync { get; init; } = persistence.OpenAsync;
     public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } = embeddings.Create;
-    public Func<string, ICodeGraphResolver> CreateResolver { get; init; } =
-        repositoryRoot => codeGraph.ForRepository(repositoryRoot).Resolver;
+    public Func<string, CancellationToken, Task<ICodeGraphResolver>> CreateResolverAsync { get; init; } =
+        async (repositoryRoot, cancellationToken) =>
+            (await codeGraph.ForRepositoryAsync(repositoryRoot, cancellationToken).ConfigureAwait(false)).Resolver;
 }
 
 internal sealed class DocsAnalysisRuntime(

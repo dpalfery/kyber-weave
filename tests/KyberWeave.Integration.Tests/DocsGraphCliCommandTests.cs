@@ -12,7 +12,7 @@ public sealed class DocsGraphCliCommandTests : IDisposable
     private readonly TempDirectory _output = new();
 
     [Fact]
-    public void ExecuteManagedGlossaryExportsApprovedKnowledgeOnlyAndPreservesDocuments()
+    public async Task ExecuteManagedGlossaryExportsApprovedKnowledgeOnlyAndPreservesDocuments()
     {
         WriteRepository();
         using CodeGraphFixtureDb codeGraph = new CodeGraphFixtureDb();
@@ -21,16 +21,17 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => DocsTestCommands.ExportGraph().Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => DocsTestCommands.ExportGraph().ExecuteAsync(
             null!,
-            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path }));
+            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path },
+            CancellationToken.None));
         int exitCode = execution.Result;
         Assert.Equal(0, exitCode);
 
         JsonElement[] nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
         JsonElement[] edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
-        string allOutput = File.ReadAllText(Path.Combine(_output.Path, "nodes.jsonl"))
-            + File.ReadAllText(Path.Combine(_output.Path, "edges.jsonl"));
+        string allOutput = await File.ReadAllTextAsync(Path.Combine(_output.Path, "nodes.jsonl"), CancellationToken.None)
+            + await File.ReadAllTextAsync(Path.Combine(_output.Path, "edges.jsonl"), CancellationToken.None);
         Assert.Contains(nodes, node => IsNode(node, "doc:reference/gameplay", "Document"));
         Assert.Contains(nodes, node => IsNode(node, "term:loop", "Term"));
         Assert.Contains(nodes, node => IsNode(node, "sense:loop-gameplay", "Sense"));
@@ -47,7 +48,7 @@ public sealed class DocsGraphCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void ExecuteInvalidGlossaryReturnsOperationalFailureInsteadOfThrowing()
+    public async Task ExecuteInvalidGlossaryReturnsOperationalFailureInsteadOfThrowing()
     {
         WriteRepository();
         Write("docs/glossary.md", """
@@ -74,9 +75,10 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => DocsTestCommands.ExportGraph().Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => DocsTestCommands.ExportGraph().ExecuteAsync(
             null!,
-            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
+            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("KW-DOC-GLOSSARY-001", execution.Output, StringComparison.Ordinal);

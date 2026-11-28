@@ -31,15 +31,19 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         _configs = configs ?? throw new ArgumentNullException(nameof(configs));
     }
 
-    public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings)
+    public async Task<DocumentationAnalysisResult> AnalyzeAsync(
+        DocsIntegrityCheckSettings settings,
+        CancellationToken cancellationToken = default)
     {
-        using AnalysisExecution execution = RunAnalysis(settings);
+        using AnalysisExecution execution = await RunAnalysisAsync(settings, cancellationToken).ConfigureAwait(false);
         return execution.Result;
     }
 
-    public ReviewExportResult ExportReview(DocsReviewExportSettings settings)
+    public async Task<ReviewExportResult> ExportReviewAsync(
+        DocsReviewExportSettings settings,
+        CancellationToken cancellationToken = default)
     {
-        using AnalysisExecution execution = RunAnalysis(settings);
+        using AnalysisExecution execution = await RunAnalysisAsync(settings, cancellationToken).ConfigureAwait(false);
         ThrowIfOperational(execution.Result.Diagnostics);
         IAnalysisPersistence persistence = execution.Runtime.Persistence ?? UnavailableAnalysisPersistence.Instance;
         ReviewExportResult exported = new DocumentationReviewExchange(
@@ -50,10 +54,13 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         return exported;
     }
 
-    public ReviewImportResult ImportReview(DocsReviewImportSettings settings, string json)
+    public async Task<ReviewImportResult> ImportReviewAsync(
+        DocsReviewImportSettings settings,
+        string json,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(json);
-        using AnalysisExecution execution = RunAnalysis(settings);
+        using AnalysisExecution execution = await RunAnalysisAsync(settings, cancellationToken).ConfigureAwait(false);
         ThrowIfOperational(execution.Result.Diagnostics);
         IAnalysisPersistence persistence = execution.Runtime.Persistence ?? UnavailableAnalysisPersistence.Instance;
         ReviewImportResult imported = new DocumentationReviewExchange(
@@ -64,9 +71,11 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         return imported;
     }
 
-    public GlossaryUpdateResult UpdateGlossary(DocsGlossarySettings settings)
+    public async Task<GlossaryUpdateResult> UpdateGlossaryAsync(
+        DocsGlossarySettings settings,
+        CancellationToken cancellationToken = default)
     {
-        using AnalysisExecution execution = RunAnalysis(settings);
+        using AnalysisExecution execution = await RunAnalysisAsync(settings, cancellationToken).ConfigureAwait(false);
         ThrowIfOperational(execution.Result.Diagnostics);
         IReadOnlyList<GlossaryProposal> proposals = Proposals(execution.Result.Candidates);
         IManagedGlossary service = _glossaries.Open(execution.Runtime.RepositoryRoot, execution.Runtime.Config);
@@ -79,43 +88,44 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "Ownership transfers to AnalysisExecution on success and the catch path disposes on failure.")]
-    private AnalysisExecution RunAnalysis(DocsSettings settings)
+    private async Task<AnalysisExecution> RunAnalysisAsync(
+        DocsSettings settings,
+        CancellationToken cancellationToken)
     {
         DiagnosticReport compositionDiagnostics = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateAnalysisRuntime(
-                _configs,
-                settings,
-                compositionDiagnostics,
-                _factories,
-                out DocsAnalysisRuntime? runtime))
+        DocsAnalysisRuntime? runtime = await DocsCommandComposition.TryCreateAnalysisRuntimeAsync(
+            _configs,
+            settings,
+            compositionDiagnostics,
+            _factories,
+            cancellationToken).ConfigureAwait(false);
+        if (runtime is null)
         {
             throw new InvalidOperationException(string.Join(
                 " ",
                 compositionDiagnostics.Items.Select(item => $"{item.Code}: {item.Message}")));
         }
 
-        DocsAnalysisRuntime created = runtime ?? throw new InvalidOperationException(
-            "Analysis composition succeeded without creating a runtime.");
-
         try
         {
-            DocumentSet documents = _documents.Create(created.RepositoryRoot, created.Ontology).Load();
+            DocumentSet documents = _documents.Create(runtime.RepositoryRoot, runtime.Ontology).Load();
             DocGraphProjection graph = DocGraphProjectionBuilder.Build(
                 documents,
-                created.Resolver,
-                created.Config.DocsAnalysis.Search.MaxCodeNeighbors);
-            ManagedGlossaryLoadResult glossary = _glossaries.Open(created.RepositoryRoot, created.Config).Load();
-            DocumentationAnalysisResult analyzed = created.CreateAnalyzer().Analyze(
+                runtime.Resolver,
+                runtime.Config.DocsAnalysis.Search.MaxCodeNeighbors);
+            ManagedGlossaryLoadResult glossary = _glossaries.Open(runtime.RepositoryRoot, runtime.Config).Load();
+            DocumentationAnalysisResult analyzed = await runtime.CreateAnalyzer().AnalyzeAsync(
                 documents,
                 graph,
-                created.Config.DocsAnalysis,
-                glossary.AnalysisGlossary);
+                runtime.Config.DocsAnalysis,
+                glossary.AnalysisGlossary,
+                cancellationToken).ConfigureAwait(false);
             analyzed.Diagnostics.AddRange(compositionDiagnostics.Items);
-            return new AnalysisExecution(created, analyzed);
+            return new AnalysisExecution(runtime, analyzed);
         }
         catch
         {
-            created.Dispose();
+            runtime.Dispose();
             throw;
         }
     }

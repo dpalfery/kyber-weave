@@ -26,7 +26,7 @@ public sealed class DocsInitProvisionEndToEndTests : IDisposable
     /// can run hermetically.
     /// </remarks>
     [Fact]
-    public void DocsInit_WithProvision_UsesRepositoryDoctor_TargetRoot()
+    public async Task DocsInit_WithProvision_UsesRepositoryDoctor_TargetRoot()
     {
         using TempDirectory stubs = new();
         string repo = _repo.Path;
@@ -40,8 +40,8 @@ public sealed class DocsInitProvisionEndToEndTests : IDisposable
             Provision = true,
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, settings, CancellationToken.None));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() =>
+            command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.True(
             execution.Result == 0,

@@ -27,7 +27,11 @@ public sealed class DocsTasksCommandTests
         return fixture;
     }
 
-    private static (int Exit, string Output) Run(DocFixture fixture, string artifact, bool write = false, bool check = false)
+    private static Task<(int Exit, string Output)> RunAsync(
+        DocFixture fixture,
+        string artifact,
+        bool write = false,
+        bool check = false)
     {
         DocsTasksSettings settings = new()
         {
@@ -37,13 +41,13 @@ public sealed class DocsTasksCommandTests
             Check = check
         };
 
-        return Execute(fixture, settings);
+        return ExecuteAsync(fixture, settings);
     }
 
-    private static (int Exit, string Output) Execute(DocFixture fixture, DocsTasksSettings settings)
+    private static async Task<(int Exit, string Output)> ExecuteAsync(DocFixture fixture, DocsTasksSettings settings)
     {
         TestConsole console = new() { EmitAnsiSequences = false };
-        int exit = DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        int exit = await DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
         return (exit, console.Output);
     }
 
@@ -55,7 +59,7 @@ public sealed class DocsTasksCommandTests
     [InlineData("2026-11-07-ready-tasks", "6-Docs/plans")]
     [InlineData("2026-11-07-ready-tasks.md", "6-Docs/plans")]
     [InlineData("6-Docs/plans/2026-11-07-ready-tasks.md", "6-Docs/plans")]
-    public void ThePlanCanBeNamedInAnyNaturalSpelling(string typed, string workingDirectory)
+    public async Task ThePlanCanBeNamedInAnyNaturalSpelling(string typed, string workingDirectory)
     {
         using DocFixture fixture = Plan();
         DocsTasksSettings settings = new()
@@ -66,7 +70,7 @@ public sealed class DocsTasksCommandTests
             WorkingDirectory = fixture.FullPath(workingDirectory)
         };
 
-        (int exit, string output) = Execute(fixture, settings);
+        (int exit, string output) = await ExecuteAsync(fixture, settings);
 
         Assert.True(exit == 0, output);
         using JsonDocument report = JsonDocument.Parse(output);
@@ -75,11 +79,11 @@ public sealed class DocsTasksCommandTests
 
     /// <summary>The generated file is what the validator reads: no task-file finding at all.</summary>
     [Fact]
-    public void AGeneratedFilePassesEveryTaskFileRule()
+    public async Task AGeneratedFilePassesEveryTaskFileRule()
     {
         using DocFixture fixture = Plan();
 
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
         ReportedFindings validated = new(fixture);
 
         Assert.True(exit == 0, output);
@@ -97,10 +101,10 @@ public sealed class DocsTasksCommandTests
 
     /// <summary>A second write changes nothing: the file is rewritten whole, never appended or reordered.</summary>
     [Fact]
-    public void WritingTwiceLeavesTheFileUntouched()
+    public async Task WritingTwiceLeavesTheFileUntouched()
     {
         using DocFixture fixture = Plan();
-        Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        _ = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
         string path = fixture.FullPath(PlanTaskFileProbe.TaskFilePath);
         string first = fixture.ReadText(PlanTaskFileProbe.TaskFilePath);
         // Any write to the task file from here on fails the run, so an unchanged file proves it was not rewritten.
@@ -108,7 +112,7 @@ public sealed class DocsTasksCommandTests
             operation => operation.Path == path && operation.Name.StartsWith("Write", StringComparison.Ordinal),
             new IOException("the task file was rewritten"));
 
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
 
         Assert.True(exit == 0, output);
         Assert.Equal(first, fixture.ReadText(PlanTaskFileProbe.TaskFilePath));
@@ -119,16 +123,16 @@ public sealed class DocsTasksCommandTests
     /// command that fixes it. The control is the first half: a check that failed everything would pass the second.
     /// </summary>
     [Fact]
-    public void CheckDetectsAStaleDigestAndNamesTheCommand()
+    public async Task CheckDetectsAStaleDigestAndNamesTheCommand()
     {
         using DocFixture fixture = Plan();
-        Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
-        Assert.Equal(0, Run(fixture, PlanTaskFileProbe.PlanPath, check: true).Exit);
+        _ = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        Assert.Equal(0, (await RunAsync(fixture, PlanTaskFileProbe.PlanPath, check: true)).Exit);
 
         fixture.Write(
             PlanTaskFileProbe.PlanPath,
             PlanTaskFileProbe.PlanMarkdown().Replace("The task file validator", "The renamed validator", StringComparison.Ordinal));
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, check: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, check: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(StaleDigest, output, StringComparison.Ordinal);
@@ -138,14 +142,14 @@ public sealed class DocsTasksCommandTests
 
     /// <summary>A hand-edited prompt is a difference: the file is the plan's output, not an authored document.</summary>
     [Fact]
-    public void CheckDetectsAHandEditedPrompt()
+    public async Task CheckDetectsAHandEditedPrompt()
     {
         using DocFixture fixture = Plan();
-        Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        _ = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
         string edited = TaskFileOf(fixture, PlanTaskFileProbe.TaskFilePath).Replace("Task T1", "Task T1 (edited)", StringComparison.Ordinal);
         fixture.Write(PlanTaskFileProbe.TaskFilePath, edited);
 
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, check: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, check: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(DiffersFromPlan, output, StringComparison.Ordinal);
@@ -153,11 +157,11 @@ public sealed class DocsTasksCommandTests
 
     /// <summary>A missing file is reported under the missing-file rule with the command, not silently passed.</summary>
     [Fact]
-    public void CheckReportsAMissingFile()
+    public async Task CheckReportsAMissingFile()
     {
         using DocFixture fixture = Plan();
 
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, check: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, check: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(MissingTaskFile, output, StringComparison.Ordinal);
@@ -169,7 +173,7 @@ public sealed class DocsTasksCommandTests
     /// and the finding names the task and the command to run again.
     /// </summary>
     [Fact]
-    public void APlanGapNamesTheTaskAndWritesNothing()
+    public async Task APlanGapNamesTheTaskAndWritesNothing()
     {
         string bare = PlanTaskFileProbe.PlanMarkdown()
             .Replace("`dotnet test --filter FullyQualifiedName~PlanTaskFileValidatorTests`", "none", StringComparison.Ordinal)
@@ -178,7 +182,7 @@ public sealed class DocsTasksCommandTests
             .Replace("| The file is checked against its plan. |", "| |", StringComparison.Ordinal);
         using DocFixture fixture = Plan(bare);
 
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(IncompletePrompt, output, StringComparison.Ordinal);
@@ -196,7 +200,7 @@ public sealed class DocsTasksCommandTests
     [InlineData("- **Done when:** the class reports a non-zero total.")]
     [InlineData("- **Acceptance:** the class reports a non-zero total.")]
     [InlineData("- Definition of done: the class reports a non-zero total.")]
-    public void AcceptanceLabelVariantsInThePlanAreAccepted(string line)
+    public async Task AcceptanceLabelVariantsInThePlanAreAccepted(string line)
     {
         string plan = PlanTaskFileProbe.PlanMarkdown()
             .Replace("| Passes. |", "| |", StringComparison.Ordinal)
@@ -206,7 +210,7 @@ public sealed class DocsTasksCommandTests
             .Replace("- **Required skills:** `test-dev`", "- **Required skills:** `test-dev`\n" + line, StringComparison.Ordinal);
         using DocFixture fixture = Plan(plan);
 
-        (int exit, _) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        (int exit, _) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true);
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("KW-DOC-TASKS", new ReportedFindings(fixture).Output, StringComparison.Ordinal);
@@ -214,12 +218,12 @@ public sealed class DocsTasksCommandTests
 
     /// <summary>The same command writes a specification's <c>tasks.json</c> from its <c>tasks.md</c>.</summary>
     [Fact]
-    public void ASpecificationTaskFileIsGeneratedAndValidates()
+    public async Task ASpecificationTaskFileIsGeneratedAndValidates()
     {
         using DocFixture fixture = SpecTaskFileProbe.CorpusInMemory();
         _ = fixture.EnsureDirectory(".git");
 
-        (int exit, _) = Run(fixture, SpecTaskFileProbe.TasksPath, write: true);
+        (int exit, _) = await RunAsync(fixture, SpecTaskFileProbe.TasksPath, write: true);
 
         Assert.Equal(0, exit);
         Assert.True(fixture.Exists(SpecTaskFileProbe.TaskFilePath));
@@ -248,11 +252,11 @@ public sealed class DocsTasksCommandTests
 
     /// <summary>Asking to write and to check at once is a usage error, not a guess.</summary>
     [Fact]
-    public void WriteAndCheckTogetherAreRefused()
+    public async Task WriteAndCheckTogetherAreRefused()
     {
         using DocFixture fixture = Plan();
 
-        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true, check: true);
+        (int exit, string output) = await RunAsync(fixture, PlanTaskFileProbe.PlanPath, write: true, check: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(DocsTasksCommand.ConflictingModes, output, StringComparison.Ordinal);
