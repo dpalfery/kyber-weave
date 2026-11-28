@@ -941,6 +941,42 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private static string SessionKeyListFilter(IReadOnlyCollection<string> keys, Dictionary<string, object?> parameters) =>
         string.Join(", ", keys.Select(key => Bind(parameters, key)));
 
+    /// <summary>
+    /// The most session keys one statement binds. A statement may use its key list twice, so this keeps it
+    /// under SQLite's oldest variable limit of 999 however many sessions the store holds.
+    /// </summary>
+    private const int MaxKeysPerStatement = 400;
+
+    /// <summary>
+    /// Runs a per-session read over <paramref name="sessionKeys"/> in chunks of at most
+    /// <see cref="MaxKeysPerStatement"/> and merges the per-session results. Each session's rows come from
+    /// one chunk, so merging never splits a session.
+    /// </summary>
+    /// <typeparam name="TValue">What the read returns per session.</typeparam>
+    /// <param name="sessionKeys">Session keys to read.</param>
+    /// <param name="read">The read for one chunk of keys.</param>
+    /// <returns>The merged results, by session key.</returns>
+    private static Dictionary<string, TValue> MergeKeyChunks<TValue>(
+        IReadOnlyList<string> sessionKeys,
+        Func<IReadOnlyList<string>, Dictionary<string, TValue>> read)
+    {
+        if (sessionKeys.Count <= MaxKeysPerStatement)
+        {
+            return read(sessionKeys);
+        }
+
+        Dictionary<string, TValue> merged = new(StringComparer.Ordinal);
+        foreach (string[] chunk in sessionKeys.Distinct(StringComparer.Ordinal).Chunk(MaxKeysPerStatement))
+        {
+            foreach (KeyValuePair<string, TValue> entry in read(chunk))
+            {
+                merged[entry.Key] = entry.Value;
+            }
+        }
+
+        return merged;
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<StoredSessionTurn> GetSessionTurns(string sessionId)
     {
@@ -2759,7 +2795,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return grouped.TryGetValue(sessionKey, out List<Problem>? problems) ? problems : [];
     }
 
-    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys)
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionTurnsBySessionChunk);
+
+    private Dictionary<string, IReadOnlyList<StoredSessionTurn>> QuerySessionTurnsBySessionChunk(IReadOnlyList<string> sessionKeys)
     {
         Dictionary<string, IReadOnlyList<StoredSessionTurn>> turnsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -2792,7 +2831,10 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         return turnsBySession;
     }
 
-    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys)
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySession(IReadOnlyList<string> sessionKeys) =>
+        MergeKeyChunks(sessionKeys, QuerySessionIngestProblemsBySessionChunk);
+
+    private Dictionary<string, List<Problem>> QuerySessionIngestProblemsBySessionChunk(IReadOnlyList<string> sessionKeys)
     {
         Dictionary<string, List<Problem>> problemsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0)
@@ -2920,7 +2962,15 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
     private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySession(
         IReadOnlyList<string> sessionKeys,
         bool includeToolMetadata = false,
-        string? scopedSpanId = null)
+        string? scopedSpanId = null) =>
+        scopedSpanId is not null
+            ? QueryContentFreeRecordsBySessionChunk(sessionKeys, includeToolMetadata, scopedSpanId)
+            : MergeKeyChunks(sessionKeys, chunk => QueryContentFreeRecordsBySessionChunk(chunk, includeToolMetadata, scopedSpanId: null));
+
+    private Dictionary<string, List<CollectedRecord>> QueryContentFreeRecordsBySessionChunk(
+        IReadOnlyList<string> sessionKeys,
+        bool includeToolMetadata,
+        string? scopedSpanId)
     {
         Dictionary<string, List<CollectedRecord>> recordsBySession = new(StringComparer.Ordinal);
         if (sessionKeys.Count == 0 && scopedSpanId is null)
