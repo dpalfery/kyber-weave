@@ -9,15 +9,24 @@ namespace KyberWeave.Integration.Tests;
 ///     <c>run start --brief</c>: the conductor's brief appended to the run's own facts, with the report and exit
 ///     codes unchanged and a brief that cannot be built never failing a run whose branch is already in place.
 /// </summary>
-public sealed class RunStartBriefTests : IDisposable
+public sealed class RunStartBriefTests : IAsyncLifetime
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static readonly string[] Common = ["--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate"];
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose() => _probe.Dispose();
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _probe.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>Installs the conductor's real reference files at the project-scope location for Claude.</summary>
     private void InstallConductorReferences()
@@ -32,7 +41,7 @@ public sealed class RunStartBriefTests : IDisposable
     }
 
     [Fact]
-    public void AppendsOnlyTheBriefForThePathAndAutonomyGiven()
+    public async Task AppendsOnlyTheBriefForThePathAndAutonomyGiven()
     {
         InstallConductorReferences();
 
@@ -52,7 +61,7 @@ public sealed class RunStartBriefTests : IDisposable
     }
 
     [Fact]
-    public void AutonomousKeepsTheAutonomousSections()
+    public async Task AutonomousKeepsTheAutonomousSections()
     {
         InstallConductorReferences();
 
@@ -64,7 +73,7 @@ public sealed class RunStartBriefTests : IDisposable
     }
 
     [Fact]
-    public void WithoutBriefTheOutputIsUnchanged()
+    public async Task WithoutBriefTheOutputIsUnchanged()
     {
         InstallConductorReferences();
 
@@ -75,7 +84,7 @@ public sealed class RunStartBriefTests : IDisposable
     }
 
     [Fact]
-    public void JsonCarriesTheBriefAsAFieldOnlyWhenAsked()
+    public async Task JsonCarriesTheBriefAsAFieldOnlyWhenAsked()
     {
         InstallConductorReferences();
 
@@ -93,29 +102,29 @@ public sealed class RunStartBriefTests : IDisposable
     }
 
     [Fact]
-    public void ABriefThatCannotBeBuiltIsAWarningAndTheRunStillSucceeds()
+    public async Task ABriefThatCannotBeBuiltIsAWarningAndTheRunStillSucceeds()
     {
         ProbeResult result = _probe.RunStart([.. Common, "--brief", "--path", "plan"]);
 
         Assert.True(result.ExitCode == 0, result.Output);
         Assert.Contains("the conductor's brief could not be built", result.Output, StringComparison.Ordinal);
         Assert.Contains("read its reference files whole", result.Output, StringComparison.Ordinal);
-        Assert.True(_probe.BranchExists("claude/fix/tighten-the-gate"));
+        Assert.True(await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"));
     }
 
     [Theory]
     [InlineData("--path", "sideways")]
     [InlineData("--autonomy", "reckless")]
-    public void AFactOutsideTheVocabularyIsRefusedBeforeAnyBranchIsMade(string option, string value)
+    public async Task AFactOutsideTheVocabularyIsRefusedBeforeAnyBranchIsMade(string option, string value)
     {
         ProbeResult result = _probe.RunStart([.. Common, "--brief", option, value]);
 
         Assert.Equal(2, result.ExitCode);
-        Assert.False(_probe.BranchExists("claude/fix/tighten-the-gate"));
+        Assert.False(await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"));
     }
 
     [Fact]
-    public void PathWithoutBriefIsRefused()
+    public async Task PathWithoutBriefIsRefused()
     {
         ProbeResult result = _probe.RunStart([.. Common, "--path", "plan"]);
 

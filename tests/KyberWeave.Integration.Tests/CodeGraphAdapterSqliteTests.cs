@@ -12,12 +12,12 @@ namespace KyberWeave.Integration.Tests;
 public class CodeGraphAdapterSqliteTests
 {
     [Fact]
-    public void CodeGraphResolverAdapterPreservesResolveByNameRouteAndHasFilesUnder()
+    public async Task CodeGraphResolverAdapterPreservesResolveByNameRouteAndHasFilesUnder()
     {
-        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
-        fixture.IndexSymbol("AdapterSymbol", "3-Domain/Adapter/Symbol.cs", 7);
-        fixture.IndexRoute("GET /api/adapter/ping");
-        fixture.IndexFile("3-Domain/Adapter/Symbol.cs");
+        using CodeGraphFixtureDb fixture = await CodeGraphFixtureDb.CreateAsync();
+        await fixture.IndexSymbol("AdapterSymbol", "3-Domain/Adapter/Symbol.cs", 7);
+        await fixture.IndexRoute("GET /api/adapter/ping");
+        await fixture.IndexFile("3-Domain/Adapter/Symbol.cs");
 
         ICodeGraphResolver adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
 
@@ -30,14 +30,14 @@ public class CodeGraphAdapterSqliteTests
     }
 
     [Fact]
-    public void AdapterReadsEndLinesAndEnumeratesByKind()
+    public async Task AdapterReadsEndLinesAndEnumeratesByKind()
     {
         // Guards the SELECT: duplicate detection needs the whole span, and a node with no
         // end line has no body to compare, so losing the column would silently empty the gate.
-        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
-        fixture.IndexMethod("Total", "src/Adapter/Sums.cs", 10, 24);
-        fixture.IndexMethod("Count", "src/Adapter/Sums.cs", 26, 30);
-        fixture.IndexSymbol("Sums", "src/Adapter/Sums.cs", 5, 40);
+        using CodeGraphFixtureDb fixture = await CodeGraphFixtureDb.CreateAsync();
+        await fixture.IndexMethod("Total", "src/Adapter/Sums.cs", 10, 24);
+        await fixture.IndexMethod("Count", "src/Adapter/Sums.cs", 26, 30);
+        await fixture.IndexSymbol("Sums", "src/Adapter/Sums.cs", 5, 40);
 
         ICodeGraphSymbolEnumerator adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
         IReadOnlyList<CodeGraphNode> methods = adapter.NodesOfKind("method");

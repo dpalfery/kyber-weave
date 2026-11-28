@@ -22,7 +22,7 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// nothing live: the process asks a pass-through question before it builds anything, through an adapter that has no
 /// decision engine, and that adapter answered that a turn's end passes through. Only the process shows that.
 /// </remarks>
-public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
+public sealed class CopilotBackgroundReturnHookProcessTests : IAsyncLifetime
 {
     private const string Session = "af9f5f9f-a2f8-484f-83ba-69a7fc41f915";
     private const string BackendAgent = "baa94c73-10e2-4e4a-8a67-8b7051f84f2a";
@@ -66,39 +66,41 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         "TASK_GATE: PASS — agent=dev-medium gates=4 failed=none skipped=0 report=.agent_scratchpad/t2/task-gate.json runs=4\n" +
         "COMMIT: fe9034b\nOPEN_QUESTIONS: none";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
 
-    public CopilotBackgroundReturnHookProcessTests()
+    public async ValueTask InitializeAsync()
     {
+        _probe = await RunStartProbe.CreateAsync();
         // The user-level hook decides under the user's configuration, as on the machine the run came from.
         Directory.CreateDirectory(Path.Combine(_home.Path, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(_home.Path, ".kyber-weave", "kyber-weave.yml"),
             "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
         Directory.CreateDirectory(Path.Combine(_probe.Root, "docs", "plans"));
-        File.WriteAllText(Path.Combine(_probe.Root, Plan), PlanText);
-        File.WriteAllText(Path.Combine(_probe.Root, "docs", "plans", "README.md"), "# Plans\n\n**Status: Ready**\n");
+        await File.WriteAllTextAsync(Path.Combine(_probe.Root, Plan), PlanText);
+        await File.WriteAllTextAsync(Path.Combine(_probe.Root, "docs", "plans", "README.md"), "# Plans\n\n**Status: Ready**\n");
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
-    public void TheInstalledHookCommand_RecordsEachBackgroundTurnAsItsTasksReturn_AndTheDependentTaskIsReady()
+    public async Task TheInstalledHookCommand_RecordsEachBackgroundTurnAsItsTasksReturn_AndTheDependentTaskIsReady()
     {
-        Hook(Pre("dev-medium", "T1"));
-        Hook(Pre("dev-medium", "T2"));
-        Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
-        Hook(BackgroundStart("dev-medium", "T2", FrontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
+        await Hook(Pre("dev-medium", "T1"));
+        await Hook(Pre("dev-medium", "T2"));
+        await Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        await Hook(BackgroundStart("dev-medium", "T2", FrontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
         Assert.DoesNotContain(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
 
-        Hook(Stop(FrontendAgent, "dev-medium", FrontendTurn));
-        Hook(Stop(BackendAgent, "dev-medium", BackendFirstTurn));
-        Hook(Stop(BackendAgent, "dev-medium", BackendReworkTurn));
+        await Hook(Stop(FrontendAgent, "dev-medium", FrontendTurn));
+        await Hook(Stop(BackendAgent, "dev-medium", BackendFirstTurn));
+        await Hook(Stop(BackendAgent, "dev-medium", BackendReworkTurn));
 
         IReadOnlyList<ArbiterLedgerEvent> ledger = Ledger();
         List<ArbiterLedgerEvent> posts = [.. ledger.Where(e => e.Phase == ArbiterLedgerPhases.Post)];
@@ -111,7 +113,7 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         Assert.All(posts, post => Assert.Equal("PASS", post.Returns?.TaskGate));
         Assert.Equal(["T1", "T2"], ArbiterLedgerQueries.CompletedTasks(ledger, Plan));
 
-        string answer = Hook(Pre("dev-medium", "T3"));
+        string answer = await Hook(Pre("dev-medium", "T3"));
 
         ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
         ArbiterDecisionRule ready = Assert.Single(decision.Rules, rule => rule.Id == "KW-ARB-READY-001");
@@ -127,81 +129,81 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     }
 
     [Fact]
-    public void TheInstalledWorkerGuard_ClosesTheBudgetWindowWhenTheTurnEnds()
+    public async Task TheInstalledWorkerGuard_ClosesTheBudgetWindowWhenTheTurnEnds()
     {
         string budgets = Path.Combine(_home.Path, ".kyber-weave", "arbiter", "budgets");
 
-        Run(["worker-guard", "--harness", "copilot-cli"], ToolCall(BackendAgent, "dev-medium"));
+        await Run(["worker-guard", "--harness", "copilot-cli"], ToolCall(BackendAgent, "dev-medium"));
         Assert.Single(Directory.GetFiles(budgets, "*.log"));
 
-        Run(["worker-guard", "--harness", "copilot-cli"], Stop(BackendAgent, "dev-medium", BackendFirstTurn));
+        await Run(["worker-guard", "--harness", "copilot-cli"], Stop(BackendAgent, "dev-medium", BackendFirstTurn));
         Assert.Empty(Directory.GetFiles(budgets, "*.log"));
     }
 
     [Fact]
-    public void ADispatchAnEarlierRunNeverSawReturn_DoesNotHoldItsFilesForTheNextRun()
+    public async Task ADispatchAnEarlierRunNeverSawReturn_DoesNotHoldItsFilesForTheNextRun()
     {
         // A live case: run 5's two background workers never got a return row, and run 6, started later over the
         // same plan path and files, had its first two dispatches refused as overlapping them.
         StartRun("run-a");
-        Hook(Pre("dev-medium", "T1"));
+        await Hook(Pre("dev-medium", "T1"));
         AssertDispatched();
-        Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        await Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
 
         StartRun("run-b");
-        string answer = Hook(Pre("dev-medium", "T1"));
+        string answer = await Hook(Pre("dev-medium", "T1"));
 
         Assert.Equal("ready", ReadyAnswer());
         Assert.DoesNotContain("KW-ARB-READY-001", answer, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WithinOneRun_AnUnreturnedDispatchStillHoldsItsFiles()
+    public async Task WithinOneRun_AnUnreturnedDispatchStillHoldsItsFiles()
     {
         StartRun("run-a");
-        Hook(Pre("dev-medium", "T1"));
+        await Hook(Pre("dev-medium", "T1"));
         AssertDispatched();
-        Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        await Hook(BackgroundStart("dev-medium", "T1", BackendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
 
-        string answer = Hook(Pre("dev-medium", "T1"));
+        string answer = await Hook(Pre("dev-medium", "T1"));
 
         Assert.Equal("overlaps-in-flight", ReadyAnswer());
         Assert.Contains("KW-ARB-READY-001", answer, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TasksAnEarlierRunCompleted_DoNotCompleteTheSameNamedTasksOfTheNextRun()
+    public async Task TasksAnEarlierRunCompleted_DoNotCompleteTheSameNamedTasksOfTheNextRun()
     {
         StartRun("run-a");
-        ReturnBothDependencies(BackendAgent, FrontendAgent);
-        Hook(Pre("dev-medium", "T3"));
+        await ReturnBothDependencies(BackendAgent, FrontendAgent);
+        await Hook(Pre("dev-medium", "T3"));
         Assert.Equal("ready", ReadyAnswer());
 
         StartRun("run-b");
-        Hook(Pre("dev-medium", "T3"));
+        await Hook(Pre("dev-medium", "T3"));
         // The ledger no longer says ready, so the question goes to the model; with none configured it is unanswered.
         Assert.Equal(ArbiterStep1BatchResult.NotEvaluated, ReadyAnswer());
 
         // That dispatch ran (no model refused it) and ends blocked, so it holds no files when it is tried again.
         const string VerifierAgent = "33333333-9085-4edf-a169-44bd0cdfbffc";
-        Hook(BackgroundStart("dev-medium", "T3", VerifierAgent, "call_Z6JSwlrA2mQeT1yUo8pLkNbV"));
-        Hook(Stop(VerifierAgent, "dev-medium", "STATUS: BLOCKED\nBLOCKER: T1 and T2 are not committed yet."));
+        await Hook(BackgroundStart("dev-medium", "T3", VerifierAgent, "call_Z6JSwlrA2mQeT1yUo8pLkNbV"));
+        await Hook(Stop(VerifierAgent, "dev-medium", "STATUS: BLOCKED\nBLOCKER: T1 and T2 are not committed yet."));
 
-        ReturnBothDependencies("11111111-0e61-4a61-8785-43b058ab723a", "22222222-20dd-4012-a22b-041605f7a556");
-        Hook(Pre("dev-medium", "T3"));
+        await ReturnBothDependencies("11111111-0e61-4a61-8785-43b058ab723a", "22222222-20dd-4012-a22b-041605f7a556");
+        await Hook(Pre("dev-medium", "T3"));
         Assert.Equal("ready", ReadyAnswer());
     }
 
-    private void ReturnBothDependencies(string backendAgent, string frontendAgent)
+    private async Task ReturnBothDependencies(string backendAgent, string frontendAgent)
     {
-        Hook(Pre("dev-medium", "T1"));
+        await Hook(Pre("dev-medium", "T1"));
         AssertDispatched();
-        Hook(Pre("dev-medium", "T2"));
+        await Hook(Pre("dev-medium", "T2"));
         AssertDispatched();
-        Hook(BackgroundStart("dev-medium", "T1", backendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
-        Hook(BackgroundStart("dev-medium", "T2", frontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
-        Hook(Stop(frontendAgent, "dev-medium", FrontendTurn));
-        Hook(Stop(backendAgent, "dev-medium", BackendFirstTurn));
+        await Hook(BackgroundStart("dev-medium", "T1", backendAgent, "call_Kiv5uIqrjMOUoE5TQNeEZqLx"));
+        await Hook(BackgroundStart("dev-medium", "T2", frontendAgent, "call_e2Tq0oDqJ2nUO6rVY7sC1kLm"));
+        await Hook(Stop(frontendAgent, "dev-medium", FrontendTurn));
+        await Hook(Stop(backendAgent, "dev-medium", BackendFirstTurn));
     }
 
     /// <summary>The newest task dispatch was let through, so its worker ran and holds its files.</summary>
@@ -322,10 +324,10 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         ["toolArgs"] = new JsonObject { ["command"] = "kyber-weave docs packet T1 --agent dev-medium" },
     }.ToJsonString();
 
-    private string Hook(string stdin) => Run(["hook", "--harness", "copilot-cli", "--scope", "global"], stdin);
+    private async Task<string> Hook(string stdin) => await Run(["hook", "--harness", "copilot-cli", "--scope", "global"], stdin);
 
     /// <summary>Starts the arbiter host as the hook file does, with the operator's home pointed at a scratch one.</summary>
-    private string Run(string[] arguments, string stdin)
+    private async Task<string> Run(string[] arguments, string stdin)
     {
         ProcessStartInfo startInfo = new("dotnet")
         {
@@ -346,7 +348,7 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
         startInfo.Environment["USERPROFILE"] = _home.Path;
         startInfo.Environment.Remove("XDG_CONFIG_HOME");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, stdin, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, stdin, TimeSpan.FromSeconds(60));
 
         Assert.True(result.ExitCode == 0, result.StandardError);
         Assert.DoesNotContain(HookCommand.FailClosedCode, result.StandardError, StringComparison.Ordinal);

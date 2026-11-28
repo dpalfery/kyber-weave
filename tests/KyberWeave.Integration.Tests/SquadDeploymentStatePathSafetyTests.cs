@@ -110,7 +110,8 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         string fixturePath = fixture.Path;
         string caseSensitiveParent = Path.Combine(fixturePath, "case-sensitive-parent");
         Directory.CreateDirectory(caseSensitiveParent);
-        if (!TryEnableWindowsDirectoryCaseSensitivity(caseSensitiveParent, out string diagnostic))
+        (bool enabled, string diagnostic) = await TryEnableWindowsDirectoryCaseSensitivity(caseSensitiveParent);
+        if (!enabled)
         {
             output.WriteLine(
                 $"Windows per-directory case sensitivity is unavailable: {diagnostic}");
@@ -172,19 +173,22 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     }
 
     [Fact]
-    public void ResolveFileOnWindowsCaseSensitiveRealDiskRejectsSiblingSymlinkEscape()
+    public async Task ResolveFileOnWindowsCaseSensitiveRealDiskRejectsSiblingSymlinkEscape()
     {
         using TempDirectory fixture = new();
         AssertHomeStoreSymlinkEscapesAreRejected(fixture.Path);
 
         string caseSensitiveParent = Path.Combine(fixture.Path, "case-sensitive-parent");
         Directory.CreateDirectory(caseSensitiveParent);
-        if (OperatingSystem.IsWindows() &&
-            !TryEnableWindowsDirectoryCaseSensitivity(caseSensitiveParent, out string diagnostic))
+        if (OperatingSystem.IsWindows())
         {
-            output.WriteLine(
-                $"Windows per-directory case sensitivity is unavailable: {diagnostic}");
-            return;
+            (bool enabled, string diagnostic) = await TryEnableWindowsDirectoryCaseSensitivity(caseSensitiveParent);
+            if (!enabled)
+            {
+                output.WriteLine(
+                    $"Windows per-directory case sensitivity is unavailable: {diagnostic}");
+                return;
+            }
         }
 
         string upperRoot = Path.Combine(caseSensitiveParent, "Root");

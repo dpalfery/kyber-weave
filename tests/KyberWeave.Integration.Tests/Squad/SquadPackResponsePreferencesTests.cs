@@ -54,10 +54,10 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     /// routes the same preferences on every machine.
     /// </summary>
     [Fact]
-    public void Pack_Apm_ShipsTheShippedDefaultInTheConductorAndBugCrusherCarriers()
+    public async Task Pack_Apm_ShipsTheShippedDefaultInTheConductorAndBugCrusherCarriers()
     {
         string archivePath = RealSquadPacker.Create().PackApm(ProductRoot, _temp.Path, "rp-apm");
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        using ZipArchive archive = await ZipFile.OpenReadAsync(archivePath);
 
         AssertCarrierShipsDefault(archive, ConductorAgent);
         AssertCarrierShipsDefault(archive, BugCrusherAgent);
@@ -70,10 +70,10 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     /// the wrong preferences with no install step to repair it.
     /// </summary>
     [Fact]
-    public void Pack_Plugins_ShipsTheShippedDefaultInTheBugCrusherSkillCarrier()
+    public async Task Pack_Plugins_ShipsTheShippedDefaultInTheBugCrusherSkillCarrier()
     {
         string archivePath = RealSquadPacker.Create().PackPlugins(ProductRoot, _temp.Path, "rp-plugins");
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        using ZipArchive archive = await ZipFile.OpenReadAsync(archivePath);
 
         AssertCarrierShipsDefault(archive, BugCrusherSkill);
     }
@@ -84,14 +84,14 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     /// preferences at all after an offline install from the archive.
     /// </summary>
     [Fact]
-    public void Pack_NoPackedArchiveHoldsAnEmptyResponsePreferencesBlock()
+    public async Task Pack_NoPackedArchiveHoldsAnEmptyResponsePreferencesBlock()
     {
         string apmPath = RealSquadPacker.Create().PackApm(ProductRoot, _temp.Path, "rp-empty-apm");
         string pluginsPath = RealSquadPacker.Create().PackPlugins(ProductRoot, _temp.Path, "rp-empty-plugins");
 
         foreach (string archivePath in new[] { apmPath, pluginsPath })
         {
-            using ZipArchive archive = ZipFile.OpenRead(archivePath);
+            using ZipArchive archive = await ZipFile.OpenReadAsync(archivePath);
             foreach (ZipArchiveEntry entry in archive.Entries)
             {
                 string text = ReadEntryText(entry);
@@ -132,24 +132,24 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     /// <see cref="Pack_ChildProcessWithASentinelHomeShipsTheDefaultAndNoSentinel"/> covers a real home.
     /// </summary>
     [Fact]
-    public void Pack_OfTheShippedSourceShipsTheDefaultAndNoOperatorMarkerBecauseItTakesNoHomeInput()
+    public async Task Pack_OfTheShippedSourceShipsTheDefaultAndNoOperatorMarkerBecauseItTakesNoHomeInput()
     {
         string apmPath = RealSquadPacker.Create().PackApm(ProductRoot, _temp.Path, "rp-home");
         string pluginsPath = RealSquadPacker.Create().PackPlugins(ProductRoot, _temp.Path, "rp-home");
 
-        using (ZipArchive apmArchive = ZipFile.OpenRead(apmPath))
+        using (ZipArchive apmArchive = await ZipFile.OpenReadAsync(apmPath))
         {
             AssertCarrierShipsDefault(apmArchive, ConductorAgent);
         }
 
-        using (ZipArchive pluginsArchive = ZipFile.OpenRead(pluginsPath))
+        using (ZipArchive pluginsArchive = await ZipFile.OpenReadAsync(pluginsPath))
         {
             AssertCarrierShipsDefault(pluginsArchive, BugCrusherSkill);
         }
 
         foreach (string archivePath in new[] { apmPath, pluginsPath })
         {
-            using ZipArchive archive = ZipFile.OpenRead(archivePath);
+            using ZipArchive archive = await ZipFile.OpenReadAsync(archivePath);
             foreach (ZipArchiveEntry entry in archive.Entries)
             {
                 Assert.False(
@@ -167,14 +167,14 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     /// in. The sentinel home is visible only to the child, so parallel tests can never observe it.
     /// </summary>
     [Fact]
-    public void Pack_ChildProcessWithASentinelHomeShipsTheDefaultAndNoSentinel()
+    public async Task Pack_ChildProcessWithASentinelHomeShipsTheDefaultAndNoSentinel()
     {
         const string sentinel = "operator pack-isolation real-home sentinel: must never reach an archive";
         const string version = "rp-realhome";
         string fakeHome = Path.Combine(_temp.Path, "fake-home");
         string guidanceDir = Path.Combine(fakeHome, ".kyber-weave");
         Directory.CreateDirectory(guidanceDir);
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(guidanceDir, "response-guidance.md"),
             "<response-preferences>" + sentinel + "</response-preferences>\n",
             Encoding.UTF8);
@@ -201,7 +201,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         startInfo.Environment["HOME"] = fakeHome;
         startInfo.Environment["USERPROFILE"] = fakeHome;
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(120));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(120));
         Assert.True(
             result.ExitCode == 0,
             $"squad pack failed with exit {result.ExitCode}: {result.StandardOutput}\n{result.StandardError}");
@@ -209,19 +209,19 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         string apmPath = Path.Combine(outDir, $"kyber-squad-{version}.zip");
         string pluginsPath = Path.Combine(outDir, $"kyber-squad-plugin-{version}.zip");
 
-        using (ZipArchive apmArchive = ZipFile.OpenRead(apmPath))
+        using (ZipArchive apmArchive = await ZipFile.OpenReadAsync(apmPath))
         {
             AssertCarrierShipsDefault(apmArchive, ConductorAgent);
         }
 
-        using (ZipArchive pluginsArchive = ZipFile.OpenRead(pluginsPath))
+        using (ZipArchive pluginsArchive = await ZipFile.OpenReadAsync(pluginsPath))
         {
             AssertCarrierShipsDefault(pluginsArchive, BugCrusherSkill);
         }
 
         foreach (string archivePath in new[] { apmPath, pluginsPath })
         {
-            using ZipArchive archive = ZipFile.OpenRead(archivePath);
+            using ZipArchive archive = await ZipFile.OpenReadAsync(archivePath);
             foreach (ZipArchiveEntry entry in archive.Entries)
             {
                 Assert.False(

@@ -33,72 +33,72 @@ public sealed class ArbiterPlanWorktreeTests
         File.WriteAllText(path, "# Plan\n\n## Tasks\n\n### T7 — Status cards tests\nFiles: tests/StatusCardsTests.cs\n");
     }
 
-    private static string AddWorktree(RunStartProbe probe, string name)
+    private static async Task<string> AddWorktree(RunStartProbe probe, string name)
     {
         string path = Path.Combine(Path.GetDirectoryName(probe.Root)!, name);
-        probe.Git("worktree", "add", "-b", name, path, "origin/main");
+        await probe.GitAsync("worktree", "add", "-b", name, path, "origin/main");
         return path;
     }
 
     private static bool HoldsPlan(string root) => File.Exists(Path.Combine(root, PlanRelative));
 
     [Fact]
-    public void APlanThatExistsOnlyInARunWorktree_IsReadFromThatWorktree()
+    public async Task APlanThatExistsOnlyInARunWorktree_IsReadFromThatWorktree()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
-        string worktree = AddWorktree(probe, "run-wt");
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
+        string worktree = await AddWorktree(probe, "run-wt");
         WritePlan(worktree);
 
-        string root = RealPlanRoots.Create().Resolve(probe.Root, Prompt());
+        string root = await RealPlanRoots.Create().ResolveAsync(probe.Root, Prompt());
 
         Assert.True(HoldsPlan(root), $"resolved '{root}', which does not hold the plan");
         Assert.NotEqual(Path.GetFullPath(probe.Root), Path.GetFullPath(root));
     }
 
     [Fact]
-    public void APlanInTheHookCheckout_KeepsTheHookCheckout()
+    public async Task APlanInTheHookCheckout_KeepsTheHookCheckout()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
-        string worktree = AddWorktree(probe, "run-wt");
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
+        string worktree = await AddWorktree(probe, "run-wt");
         WritePlan(worktree);
         WritePlan(probe.Root);
 
-        Assert.Equal(probe.Root, RealPlanRoots.Create().Resolve(probe.Root, Prompt()));
+        Assert.Equal(probe.Root, await RealPlanRoots.Create().ResolveAsync(probe.Root, Prompt()));
     }
 
     [Fact]
-    public void APlanNoWorktreeHolds_KeepsTheHookCheckout()
+    public async Task APlanNoWorktreeHolds_KeepsTheHookCheckout()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
-        _ = AddWorktree(probe, "run-wt");
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
+        _ = await AddWorktree(probe, "run-wt");
 
-        Assert.Equal(probe.Root, RealPlanRoots.Create().Resolve(probe.Root, Prompt()));
+        Assert.Equal(probe.Root, await RealPlanRoots.Create().ResolveAsync(probe.Root, Prompt()));
     }
 
     [Fact]
-    public void SeveralWorktreesHoldingThePlan_PreferTheOneTheDispatchNames()
+    public async Task SeveralWorktreesHoldingThePlan_PreferTheOneTheDispatchNames()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
-        string first = AddWorktree(probe, "run-a");
-        string second = AddWorktree(probe, "run-b");
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
+        string first = await AddWorktree(probe, "run-a");
+        string second = await AddWorktree(probe, "run-b");
         WritePlan(first);
         WritePlan(second);
         File.SetLastWriteTimeUtc(Path.Combine(first, PlanRelative), DateTime.UtcNow.AddHours(1));
 
-        string named = RealPlanRoots.Create().Resolve(probe.Root, Prompt($"Worktree: {second}\n\nWrite the tests."));
-        string newest = RealPlanRoots.Create().Resolve(probe.Root, Prompt());
+        string named = await RealPlanRoots.Create().ResolveAsync(probe.Root, Prompt($"Worktree: {second}\n\nWrite the tests."));
+        string newest = await RealPlanRoots.Create().ResolveAsync(probe.Root, Prompt());
 
         Assert.EndsWith("run-b", Path.TrimEndingDirectorySeparator(named), StringComparison.Ordinal);
         Assert.EndsWith("run-a", Path.TrimEndingDirectorySeparator(newest), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AReturnWhoseHeadersWereStripped_FollowsTheWorktreeItsBodyNames()
+    public async Task AReturnWhoseHeadersWereStripped_FollowsTheWorktreeItsBodyNames()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
-        string worktree = AddWorktree(probe, "run-wt");
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
+        string worktree = await AddWorktree(probe, "run-wt");
 
-        string root = RealPlanRoots.Create().Resolve(probe.Root, $"Worktree: {worktree}\n\nWrite the tests.");
+        string root = await RealPlanRoots.Create().ResolveAsync(probe.Root, $"Worktree: {worktree}\n\nWrite the tests.");
 
         Assert.EndsWith("run-wt", Path.TrimEndingDirectorySeparator(root), StringComparison.Ordinal);
     }
@@ -110,9 +110,9 @@ public sealed class ArbiterPlanWorktreeTests
     [Fact]
     public async Task TheHookInTheMainCheckout_DecidesFromThePlanInTheRunWorktree()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
         using TempDirectory home = new();
-        string worktree = AddWorktree(probe, "run-wt");
+        string worktree = await AddWorktree(probe, "run-wt");
         WritePlan(worktree);
         // run start recorded the run, so KW-ARB-RUN-001 sees it live.
         string? commonDirectory = await RealGitFacts.Create()
@@ -164,9 +164,9 @@ public sealed class ArbiterPlanWorktreeTests
     [Fact]
     public async Task AHeaderlessCopilotDispatch_ResolvesItsPlanAndTaskInTheRunWorktree()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
         using TempDirectory home = new();
-        string worktree = AddWorktree(probe, "run-wt");
+        string worktree = await AddWorktree(probe, "run-wt");
         string plan = Path.Combine(worktree, PlanRelative);
         Directory.CreateDirectory(Path.GetDirectoryName(plan)!);
         await File.WriteAllTextAsync(plan, "# Plan\n\n**Status: Ready.**\n\n## Tasks\n\n### T7 — Status cards tests\nFiles: tests/StatusCardsTests.cs\n");

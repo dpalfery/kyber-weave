@@ -20,13 +20,13 @@ internal static class SqliteTestFixture
         return repository;
     }
 
-    public static void RequireSqlite(string skipMessage = "sqlite3 is unavailable; SQLite parity was not run.")
+    public static async Task RequireSqliteAsync(string skipMessage = "sqlite3 is unavailable; SQLite parity was not run.")
     {
         ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("--version");
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+            ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
             if (result.ExitCode != 0)
             {
                 throw SkipException.ForSkip(skipMessage);
@@ -38,20 +38,20 @@ internal static class SqliteTestFixture
         }
     }
 
-    public static string QuerySqlite(string databasePath, string sql)
+    public static async Task<string> QuerySqliteAsync(string databasePath, string sql)
     {
-        ProcessResult result = RunSqlite(databasePath, sql);
+        ProcessResult result = await RunSqliteAsync(databasePath, sql);
         Assert.Equal(0, result.ExitCode);
         return result.StandardOutput;
     }
 
-    public static ProcessResult RunSqlite(string databasePath, string sql)
+    public static async Task<ProcessResult> RunSqliteAsync(string databasePath, string sql)
     {
         ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);
-        return ProcessRunner.Run(startInfo, sql, TimeSpan.FromSeconds(60));
+        return await ProcessRunner.RunAsync(startInfo, sql, TimeSpan.FromSeconds(60));
     }
 
     private static ProcessStartInfo SqliteStartInfo() => new("sqlite3")

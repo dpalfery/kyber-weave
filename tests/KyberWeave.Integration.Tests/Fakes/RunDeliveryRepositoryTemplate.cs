@@ -25,14 +25,18 @@ public sealed class RunDeliveryRepositoryTemplate : IDisposable
     private const string ActivePlan = "docs/plans/2026-11-13-widget-export.md";
     private const string ArchivedPlan = "docs/archive/plans/2026-11-13-widget-export.md";
 
-    private readonly ConcurrentDictionary<PlanState, Lazy<string>> _templates = new();
+    private readonly ConcurrentDictionary<PlanState, string> _templates = new();
     private readonly TempDirectory _root = new();
-    private readonly Lazy<string> _seed;
+    private string _seed = string.Empty;
 
-    /// <summary>Builds the seed the three templates are derived from, on first use.</summary>
+    /// <summary>Builds the seed and the three templates, each copy sharing the one bare remote.</summary>
     public RunDeliveryRepositoryTemplate()
     {
-        _seed = new Lazy<string>(() => BuildSeed());
+        _seed = BuildSeedAsync().GetAwaiter().GetResult();
+        foreach (PlanState state in Enum.GetValues<PlanState>())
+        {
+            _templates[state] = Build(state);
+        }
     }
 
     /// <summary>The state of the plan a delivery test starts from.</summary>
@@ -59,7 +63,7 @@ public sealed class RunDeliveryRepositoryTemplate : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(workPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(remotePath);
 
-        string template = _templates.GetOrAdd(state, key => new Lazy<string>(() => Build(key))).Value;
+        string template = _templates[state];
         TestGitRepositoryTemplate.CopyDirectory(Path.Combine(template, "remote.git"), remotePath);
         TestGitRepositoryTemplate.CopyDirectory(Path.Combine(template, "run-delivery-model"), workPath);
     }
@@ -73,11 +77,11 @@ public sealed class RunDeliveryRepositoryTemplate : IDisposable
         _root.Dispose();
     }
 
-    private string BuildSeed()
+    private async Task<string> BuildSeedAsync()
     {
         string seed = Path.Combine(_root.Path, "seed");
         Directory.CreateDirectory(seed);
-        TestGitRepositoryTemplate.InitializeRunDeliverySeedTemplate(seed);
+        await TestGitRepositoryTemplate.InitializeRunDeliverySeedTemplate(seed);
         return seed;
     }
 
@@ -85,7 +89,7 @@ public sealed class RunDeliveryRepositoryTemplate : IDisposable
     {
         string template = Path.Combine(_root.Path, state.ToString());
         Directory.CreateDirectory(template);
-        TestGitRepositoryTemplate.CopyDirectory(_seed.Value, template);
+        TestGitRepositoryTemplate.CopyDirectory(_seed, template);
         if (state == PlanState.Active)
             return template;
 

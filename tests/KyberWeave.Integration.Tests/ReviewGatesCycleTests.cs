@@ -45,11 +45,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheCouncilRunWritesTheEvidenceTheSeatsStartFrom()
+    public async Task TheCouncilRunWritesTheEvidenceTheSeatsStartFrom()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/a.cs", "// changed\n");
-        Commit("work");
+        await Commit("work");
         Write("src/new.cs", "// untracked\n");
 
         (int exit, string output) = Gates(1, "--base", baseCommit);
@@ -57,22 +57,22 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Equal(0, exit);
         string evidencePath = Path.Combine(CycleFolder(1), ReviewEvidence.FileName);
         Assert.Contains($"evidence: {evidencePath}", output, StringComparison.Ordinal);
-        string evidence = File.ReadAllText(evidencePath);
+        string evidence = await File.ReadAllTextAsync(evidencePath);
         Assert.Contains($"- Diff: {Path.Combine(CycleFolder(1), ReviewEvidence.DiffFileName)}", evidence, StringComparison.Ordinal);
         Assert.Contains($"- Gate report: {GatesPath(1)}", evidence, StringComparison.Ordinal);
         Assert.Contains("passed 2, failed 0, not run 0, not applicable 0", evidence, StringComparison.Ordinal);
         Assert.Contains("- build: passed", evidence, StringComparison.Ordinal);
         Assert.Contains("- untracked src/new.cs", evidence, StringComparison.Ordinal);
         Assert.Contains("src/a.cs", evidence, StringComparison.Ordinal);
-        Assert.Contains("+// changed", File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.DiffFileName)), StringComparison.Ordinal);
+        Assert.Contains("+// changed", await File.ReadAllTextAsync(Path.Combine(CycleFolder(1), ReviewEvidence.DiffFileName)), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ReviewSeatsWritesTheEvidencePacketsAndBlocksBeforeAnyGateRuns()
+    public async Task ReviewSeatsWritesTheEvidencePacketsAndBlocksBeforeAnyGateRuns()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/a.cs", "// changed\n");
-        Commit("work");
+        await Commit("work");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
             ["review", "seats", _repo, "--task", Task, "--base", baseCommit]));
@@ -83,7 +83,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Contains($"run: kyber-weave review gates {_repo} --council --out {GatesPath(1)} --base {baseCommit} --deadline", output, StringComparison.Ordinal);
         Assert.False(File.Exists(GatesPath(1)));
 
-        string evidence = File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
+        string evidence = await File.ReadAllTextAsync(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
         Assert.Contains("running: the council's gate run rewrites this file", evidence, StringComparison.Ordinal);
         Assert.Contains("- modified src/a.cs (diff lines 1-", evidence, StringComparison.Ordinal);
 
@@ -101,7 +101,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Contains($"LENS: correctness\nREVIEW_RUN: {Task}-cycle-1\n\nPacket: {Path.Combine(CycleFolder(1), "packets", "correctness.md")}\n--- end ---", output.ReplaceLineEndings("\n"), StringComparison.Ordinal);
         Assert.DoesNotContain("Seat file:", output, StringComparison.Ordinal);
 
-        string packet = File.ReadAllText(Path.Combine(CycleFolder(1), "packets", "correctness.md"));
+        string packet = await File.ReadAllTextAsync(Path.Combine(CycleFolder(1), "packets", "correctness.md"));
         Assert.Contains($"- Evidence: {Path.Combine(CycleFolder(1), ReviewEvidence.FileName)}", packet, StringComparison.Ordinal);
         Assert.Contains($"- projectPath: {_repo}", packet, StringComparison.Ordinal);
         Assert.Contains("# Lens: correctness", packet, StringComparison.Ordinal);
@@ -109,11 +109,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ReviewSeatsInHandBackModeNamesEachSeatFile()
+    public async Task ReviewSeatsInHandBackModeNamesEachSeatFile()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/a.cs", "// changed\n");
-        Commit("work");
+        await Commit("work");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
             ["review", "seats", _repo, "--task", Task, "--base", baseCommit, "--hand-back"]));
@@ -123,11 +123,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheCouncilGateRunPrintsTheGateProvenSkipsAndRewritesTheEvidence()
+    public async Task TheCouncilGateRunPrintsTheGateProvenSkipsAndRewritesTheEvidence()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/a.cs", "// changed\n");
-        Commit("work");
+        await Commit("work");
         ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "seats", _repo, "--task", Task, "--base", baseCommit]));
 
         (int exit, string output) = Gates(1, "--base", baseCommit);
@@ -137,17 +137,17 @@ public sealed class ReviewGatesCycleTests : IDisposable
         Assert.Contains("after-gates: send ", output, StringComparison.Ordinal);
         Assert.Contains("test-adequacy", output[output.IndexOf("after-gates: send ", StringComparison.Ordinal)..], StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(CycleFolder(1), "duplicates.json")));
-        string evidence = File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
+        string evidence = await File.ReadAllTextAsync(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
         Assert.Contains("- build: passed", evidence, StringComparison.Ordinal);
         Assert.Contains("Coverage: none collected. Floor (review.coverage): none declared.", evidence, StringComparison.Ordinal);
         Assert.DoesNotContain("running: the council's gate run", evidence, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void VerdictCandidatesListsMajorsFromTheSeatsSoFarWithoutRefusingOrWriting()
+    public async Task VerdictCandidatesListsMajorsFromTheSeatsSoFarWithoutRefusingOrWriting()
     {
         Write("src/a.cs", "int x = 1;\n");
-        Commit("work");
+        await Commit("work");
         string seats = Path.Combine(CycleFolder(1), "seats");
         Write($".agent_scratchpad/{Task}/review/cycle-1/seats/correctness.md", """
             - id: correctness/x
@@ -186,20 +186,20 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void AVerifierCyclesEvidenceDiffIsTheFixDeltaFromThePriorHead()
+    public async Task AVerifierCyclesEvidenceDiffIsTheFixDeltaFromThePriorHead()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/a.cs", "// first\n");
-        Commit("work");
-        string priorHead = Git("rev-parse", "HEAD").Trim();
-        FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
+        await Commit("work");
+        string priorHead = (await Git("rev-parse", "HEAD")).Trim();
+        await FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
         Write("src/b.cs", "// fix\n");
-        Commit("fix");
+        await Commit("fix");
 
         Gates(2, "--base", baseCommit);
 
-        string evidence = File.ReadAllText(Path.Combine(CycleFolder(2), ReviewEvidence.FileName));
-        string diff = File.ReadAllText(Path.Combine(CycleFolder(2), ReviewEvidence.DiffFileName));
+        string evidence = await File.ReadAllTextAsync(Path.Combine(CycleFolder(2), ReviewEvidence.FileName));
+        string diff = await File.ReadAllTextAsync(Path.Combine(CycleFolder(2), ReviewEvidence.DiffFileName));
         Assert.Contains($"the prior cycle's head {priorHead}", evidence, StringComparison.Ordinal);
         Assert.Contains("+// fix", diff, StringComparison.Ordinal);
         Assert.DoesNotContain("+// first", diff, StringComparison.Ordinal);
@@ -211,12 +211,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
     /// the fix changed code; it writes no packet for any other lens, and the gate run's after-gates line follows suit.
     /// </summary>
     [Fact]
-    public void ReviewSeatsInALaterCycleSeatsOnlyTheFindingsLensesAndTheGateRunWidensNothing()
+    public async Task ReviewSeatsInALaterCycleSeatsOnlyTheFindingsLensesAndTheGateRunWidensNothing()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/Domain/JobStatusSummaryDto.cs", "// first\n");
-        Commit("work");
-        FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
+        await Commit("work");
+        await FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
         Write(
             $".agent_scratchpad/{Task}/review/cycle-1/findings.json",
             ReviewJson.Write(new FindingsReport(
@@ -228,7 +228,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
                 [],
                 0)));
         Write("src/Contracts/JobStatusSummaryDto.cs", "// moved\n");
-        Commit("fix");
+        await Commit("fix");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
             ["review", "seats", _repo, "--task", Task, "--base", baseCommit]));
@@ -249,14 +249,14 @@ public sealed class ReviewGatesCycleTests : IDisposable
 
     /// <summary>A person can still ask a later cycle for every applicable lens; the loop itself never passes --full.</summary>
     [Fact]
-    public void ReviewSeatsWithFullInALaterCycleSeatsEveryApplicableLens()
+    public async Task ReviewSeatsWithFullInALaterCycleSeatsEveryApplicableLens()
     {
-        string baseCommit = Git("rev-parse", "HEAD").Trim();
+        string baseCommit = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/a.cs", "// first\n");
-        Commit("work");
-        FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
+        await Commit("work");
+        await FinishCycle1(baseCommit: ReviewTestServices.WorkTrees.IdentityOf(_repo, baseCommit)!.Base);
         Write("src/b.cs", "// fix\n");
-        Commit("fix");
+        await Commit("fix");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
             ["review", "seats", _repo, "--task", Task, "--base", baseCommit, "--full"]));
@@ -267,23 +267,23 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ABaseGitCannotResolveStillWritesTheGatesAndSaysWhyThereIsNoDiff()
+    public async Task ABaseGitCannotResolveStillWritesTheGatesAndSaysWhyThereIsNoDiff()
     {
         (int exit, _) = Gates(1, "--base", "no-such-ref");
 
         Assert.Equal(0, exit);
-        string evidence = File.ReadAllText(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
+        string evidence = await File.ReadAllTextAsync(Path.Combine(CycleFolder(1), ReviewEvidence.FileName));
         Assert.Contains("- Diff: none, because git could not name the change (git merge-base no-such-ref HEAD", evidence, StringComparison.Ordinal);
         Assert.DoesNotContain("Archive", evidence, StringComparison.Ordinal);
         Assert.Contains("- build: passed", evidence, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ASecondCycleRunsOnlyTheGateTheFixTouchedAndCarriesTheRestIntoACompleteReport()
+    public async Task ASecondCycleRunsOnlyTheGateTheFixTouchedAndCarriesTheRestIntoACompleteReport()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
 
         (int exit, string output) = Gates(2);
 
@@ -302,11 +302,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheCompleteReportYieldsAVerdictWithoutRunningTheCarriedGate()
+    public async Task TheCompleteReportYieldsAVerdictWithoutRunningTheCarriedGate()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
         Gates(2);
 
         CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
@@ -320,9 +320,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void AGateThatFailedInThePriorCycleRunsAgainEvenWhenNoInputChanged()
+    public async Task AGateThatFailedInThePriorCycleRunsAgainEvenWhenNoInputChanged()
     {
-        FinishCycle1(buildExit: 1);
+        await FinishCycle1(buildExit: 1);
 
         (_, string output) = Gates(2);
 
@@ -332,9 +332,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void FullRunsEveryGateInASecondCycle()
+    public async Task FullRunsEveryGateInASecondCycle()
     {
-        FinishCycle1();
+        await FinishCycle1();
 
         (_, string output) = Gates(2, "--full");
 
@@ -344,9 +344,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void WithoutCouncilTheRunIsNotTreatedAsAVerifierCycle()
+    public async Task WithoutCouncilTheRunIsNotTreatedAsAVerifierCycle()
     {
-        FinishCycle1();
+        await FinishCycle1();
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => CreateApp().Run(
             ["review", "gates", _repo, "--out", GatesPath(2)]));
@@ -356,9 +356,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void AStructuredFormatStaysOneDocumentWithNoCycleHeader()
+    public async Task AStructuredFormatStaysOneDocumentWithNoCycleHeader()
     {
-        FinishCycle1();
+        await FinishCycle1();
 
         (_, string output) = Gates(2, "--format", "json");
 
@@ -367,9 +367,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleFolderThatIsAlreadyFinishedIsNotItsOwnPrior()
+    public async Task ACycleFolderThatIsAlreadyFinishedIsNotItsOwnPrior()
     {
-        FinishCycle1();
+        await FinishCycle1();
 
         (_, string output) = Gates(1);
 
@@ -378,11 +378,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheHeaderComesBeforeTheGateReportAndTheSummaryClosesTheOutput()
+    public async Task TheHeaderComesBeforeTheGateReportAndTheSummaryClosesTheOutput()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
 
         (_, string output) = Gates(2);
 
@@ -396,11 +396,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleRecordedForAnotherBranchIsIgnoredAndTheRunIsFull()
+    public async Task ACycleRecordedForAnotherBranchIsIgnoredAndTheRunIsFull()
     {
-        FinishCycle1(branch: "someone-elses-change");
+        await FinishCycle1(branch: "someone-elses-change");
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
 
         (_, string output) = Gates(2);
 
@@ -412,9 +412,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleRecordedAgainstAnotherBaseIsIgnored()
+    public async Task ACycleRecordedAgainstAnotherBaseIsIgnored()
     {
-        FinishCycle1(baseCommit: OffBranchCommit());
+        await FinishCycle1(baseCommit: await OffBranchCommit());
 
         (_, string output) = Gates(2);
 
@@ -423,10 +423,10 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleWhoseHeadIsNotAnAncestorOfHeadIsIgnored()
+    public async Task ACycleWhoseHeadIsNotAnAncestorOfHeadIsIgnored()
     {
-        string stale = OffBranchCommit();
-        FinishCycle1(head: stale);
+        string stale = await OffBranchCommit();
+        await FinishCycle1(head: stale);
 
         (_, string output) = Gates(2);
 
@@ -435,9 +435,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleThatRecordedNoBranchAndBaseIsIgnored()
+    public async Task ACycleThatRecordedNoBranchAndBaseIsIgnored()
     {
-        FinishCycle1(identity: false);
+        await FinishCycle1(identity: false);
 
         (_, string output) = Gates(2);
 
@@ -446,11 +446,11 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleOfThisBranchWhoseHeadIsAnAncestorCountsAndIsNotListedAsIgnored()
+    public async Task ACycleOfThisBranchWhoseHeadIsAnAncestorCountsAndIsNotListedAsIgnored()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
 
         (_, string output) = Gates(2);
 
@@ -459,14 +459,14 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheGateRunRecordsTheBranchBaseAndHeadInTheCycleFolder()
+    public async Task TheGateRunRecordsTheBranchBaseAndHeadInTheCycleFolder()
     {
         Gates(1);
 
-        using JsonDocument identity = JsonDocument.Parse(File.ReadAllText(Path.Combine(CycleFolder(1), "cycle.json")));
+        using JsonDocument identity = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(CycleFolder(1), "cycle.json")));
         Assert.Equal("feature", identity.RootElement.GetProperty("branch").GetString());
-        Assert.Equal(Git("rev-parse", "HEAD").Trim(), identity.RootElement.GetProperty("head").GetString());
-        Assert.Equal(Git("rev-list", "--max-parents=0", "HEAD").Trim(), identity.RootElement.GetProperty("base").GetString());
+        Assert.Equal((await Git("rev-parse", "HEAD")).Trim(), identity.RootElement.GetProperty("head").GetString());
+        Assert.Equal((await Git("rev-list", "--max-parents=0", "HEAD")).Trim(), identity.RootElement.GetProperty("base").GetString());
     }
 
     [Fact]
@@ -480,18 +480,18 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheVerdictTakesTheBaseFromItsOwnCycleSoItNeedsNoBaseFlagOnAStackedBranch()
+    public async Task TheVerdictTakesTheBaseFromItsOwnCycleSoItNeedsNoBaseFlagOnAStackedBranch()
     {
         // The gate runs were given a base other than the one a bare ref guess finds, as on a stacked branch.
         Write("src/b.cs", "// b\n");
-        Commit("stack");
-        string stackBase = Git("rev-parse", "HEAD").Trim();
+        await Commit("stack");
+        string stackBase = (await Git("rev-parse", "HEAD")).Trim();
         Write("src/c.cs", "// c\n");
-        Commit("work");
+        await Commit("work");
         Gates(1, "--base", stackBase);
         FinishFindings(1);
         Write("src/c.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
         Gates(2, "--base", stackBase);
 
         CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
@@ -504,9 +504,9 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheVerdictRefusesAPriorFolderThatBelongsToAnotherChange()
+    public async Task TheVerdictRefusesAPriorFolderThatBelongsToAnotherChange()
     {
-        FinishCycle1(branch: "someone-elses-change");
+        await FinishCycle1(branch: "someone-elses-change");
 
         CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
         [
@@ -520,12 +520,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void AWorktreeResolvesItsReviewFolderInsideItselfAndIgnoresTheCanonicalCheckoutsStaleFolder()
+    public async Task AWorktreeResolvesItsReviewFolderInsideItselfAndIgnoresTheCanonicalCheckoutsStaleFolder()
     {
         // A finished cycle left in the canonical checkout by an earlier run must not be read for the worktree's run.
-        FinishCycle1();
+        await FinishCycle1();
         string worktree = Path.Combine(_temp.Path, "repo.worktrees", "run");
-        Git("worktree", "add", "--quiet", "-b", "wt-branch", worktree);
+        await Git("worktree", "add", "--quiet", "-b", "wt-branch", worktree);
         Directory.CreateDirectory(Path.Combine(worktree, ".kyber-weave"));
         File.Copy(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), Path.Combine(worktree, ".kyber-weave", "kyber-weave.yml"));
         string subdirectory = Path.Combine(worktree, "src");
@@ -545,10 +545,10 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void AReviewRunFromTheCanonicalCheckoutNamesTheLiveRunWorktree()
+    public async Task AReviewRunFromTheCanonicalCheckoutNamesTheLiveRunWorktree()
     {
         string worktree = Path.Combine(_temp.Path, "repo.worktrees", "run");
-        Git("worktree", "add", "--quiet", "-b", "run-branch", worktree);
+        await Git("worktree", "add", "--quiet", "-b", "run-branch", worktree);
         string home = Path.Combine(_temp.Path, "home");
         RunStartTestServices.RunStateStore().Write(home, "run-branch", "master", new RunStartPlace(Path.Combine(_repo, ".git"), worktree, DateTimeOffset.UtcNow));
 
@@ -561,12 +561,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void ReviewCycleEndsWithTheOneCommandThatRunsTheGatesIntoThisCyclesFolder()
+    public async Task ReviewCycleEndsWithTheOneCommandThatRunsTheGatesIntoThisCyclesFolder()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
         Write("README.md", "# changed\n");
-        Commit("fix");
+        await Commit("fix");
 
         CapturedConsoleExecution<int> cycle = ProcessConsoleCapture.Run(() => CreateApp().Run(["review", "cycle", _repo]));
 
@@ -581,12 +581,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void RunningTheCommandReviewCycleSuggestsLeavesNothingOutstandingForTheVerdict()
+    public async Task RunningTheCommandReviewCycleSuggestsLeavesNothingOutstandingForTheVerdict()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
         Write("README.md", "# changed\n");
-        Commit("fix");
+        await Commit("fix");
 
         (int exit, _) = Gates(2);
         CapturedConsoleExecution<int> verdict = ProcessConsoleCapture.Run(() => CreateApp().Run(
@@ -614,12 +614,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
     }
 
     [Fact]
-    public void EveryOutstandingGateRefusalNamesAllOutstandingGatesAndTheSingleCommandThatRunsThem()
+    public async Task EveryOutstandingGateRefusalNamesAllOutstandingGatesAndTheSingleCommandThatRunsThem()
     {
-        FinishCycle1();
+        await FinishCycle1();
         Write("src/a.cs", "// fixed\n");
         Write("README.md", "# changed\n");
-        Commit("fix");
+        await Commit("fix");
         Write(
             $".agent_scratchpad/{Task}/review/cycle-2/gates.json",
             ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("always", true, 0, "ok")])));
@@ -659,13 +659,13 @@ public sealed class ReviewGatesCycleTests : IDisposable
         return (run.Result, run.Output);
     }
 
-    private string OffBranchCommit()
+    private async Task<string> OffBranchCommit()
     {
-        Git("checkout", "--quiet", "-b", "side");
+        await Git("checkout", "--quiet", "-b", "side");
         Write("side.txt", "side\n");
-        Commit("side");
-        string commit = Git("rev-parse", "HEAD").Trim();
-        Git("checkout", "--quiet", "feature");
+        await Commit("side");
+        string commit = (await Git("rev-parse", "HEAD")).Trim();
+        await Git("checkout", "--quiet", "feature");
         return commit;
     }
 
@@ -676,7 +676,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         return (run.Result, run.Output);
     }
 
-    private void FinishCycle1(int buildExit = 0, string? branch = null, string? baseCommit = null, string? head = null, bool identity = true)
+    private async Task FinishCycle1(int buildExit = 0, string? branch = null, string? baseCommit = null, string? head = null, bool identity = true)
     {
         GateResult[] gates =
         [
@@ -685,7 +685,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
             new("always", true, 0, "ok")
         ];
         Write($".agent_scratchpad/{Task}/review/cycle-1/gates.json", ReviewJson.Write(new GateReport(GateReport.CurrentSchema, gates)));
-        Write($".agent_scratchpad/{Task}/review/cycle-1/head", Git("rev-parse", "HEAD").Trim());
+        Write($".agent_scratchpad/{Task}/review/cycle-1/head", (await Git("rev-parse", "HEAD")).Trim());
         if (identity)
         {
             ReviewCycleIdentity current = ReviewTestServices.WorkTrees.IdentityOf(_repo, null)!;
@@ -721,10 +721,10 @@ public sealed class ReviewGatesCycleTests : IDisposable
 
     private string[] ReportedIds(int cycle) => [.. ReviewJson.ReadGates(ReadGates(cycle)).Gates.Select(gate => gate.Id)];
 
-    private void Commit(string message)
+    private async Task Commit(string message)
     {
-        Git("add", "-A");
-        Git(
+        await Git("add", "-A");
+        await Git(
             "-c", "user.name=cycle", "-c", "user.email=cycle@example.invalid", "-c", "commit.gpgsign=false",
             "commit", "--quiet", "-m", message);
     }
@@ -736,7 +736,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         File.WriteAllText(path, content);
     }
 
-    private string Git(params string[] arguments)
+    private async Task<string> Git(params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -750,7 +750,7 @@ public sealed class ReviewGatesCycleTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
         return result.StandardOutput;
     }

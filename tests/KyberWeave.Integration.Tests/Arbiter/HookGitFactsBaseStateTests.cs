@@ -23,38 +23,44 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// driver of a real git repository: the stacked case needs a parent branch and a feature
 /// branch off it, which that fixture supplies with a real origin.
 /// </remarks>
-public sealed class HookGitFactsBaseStateTests : IDisposable
+public sealed class HookGitFactsBaseStateTests : IAsyncLifetime
 {
     private const string ParentBranch = "slice/parent";
     private const string FeatureBranch = "slice/feature";
     private const string ParentFile = "src/Parent.cs";
     private const string FeatureFile = "src/Feature.cs";
 
-    private readonly RunStartProbe _probe = StackedBranches();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await StackedBranches();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
     /// A parent slice branch and a feature branch off it, each with one commit: the stacked
     /// shape the default base misjudges.
     /// </summary>
-    private static RunStartProbe StackedBranches()
+    private static async Task<RunStartProbe> StackedBranches()
     {
-        RunStartProbe probe = RunStartProbe.Create();
-        probe.Git("switch", "-c", ParentBranch, "origin/main");
+        RunStartProbe probe = await RunStartProbe.CreateAsync();
+        await probe.GitAsync("switch", "-c", ParentBranch, "origin/main");
         Write(probe, ParentFile, "// parent slice change\n");
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", "feat: parent slice change");
+        await probe.GitAsync("add", "-A");
+        await probe.GitAsync("commit", "-m", "feat: parent slice change");
 
-        probe.Git("switch", "-c", FeatureBranch, ParentBranch);
+        await probe.GitAsync("switch", "-c", FeatureBranch, ParentBranch);
         Write(probe, FeatureFile, "// feature change\n");
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", "feat: feature change");
+        await probe.GitAsync("add", "-A");
+        await probe.GitAsync("commit", "-m", "feat: feature change");
         return probe;
     }
 

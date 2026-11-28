@@ -29,13 +29,19 @@ namespace KyberWeave.Integration.Tests;
 ///         would not compile.
 ///     </para>
 /// </remarks>
-public sealed class RunStartCommandTests : IDisposable
+public sealed class RunStartCommandTests : IAsyncLifetime
 {
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -44,15 +50,15 @@ public sealed class RunStartCommandTests : IDisposable
     ///     cases that fake them.
     /// </summary>
     [Fact]
-    public void TheRealHostStartsARunAndReportsItsBranch()
+    public async Task TheRealHostStartsARunAndReportsItsBranch()
     {
-        ProbeResult result = _probe.RunStartInChildProcess(
+        ProbeResult result = await _probe.RunStartInChildProcessAsync(
             "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
 
         Assert.True(result.ExitCode == 0, $"The real host must start the run. {result.Output}");
         using JsonDocument document = ParseJson(result.StandardOutput);
         Assert.Equal("claude/fix/tighten-the-gate", document.RootElement.GetProperty("branch").GetString());
-        Assert.True(_probe.BranchExists("claude/fix/tighten-the-gate"));
+        Assert.True(await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"));
     }
 
     /// <summary>
@@ -60,7 +66,7 @@ public sealed class RunStartCommandTests : IDisposable
     ///     folder carries a timestamp, while the branch keeps the shape the pull request naming check needs.
     /// </summary>
     [Fact]
-    public void AFolderLeftByAnEarlierRunDoesNotStopANewWorktree()
+    public async Task AFolderLeftByAnEarlierRunDoesNotStopANewWorktree()
     {
         _probe.AppendLine("README.md", "uncommitted work");
         string leftover = Path.Combine(
@@ -68,7 +74,7 @@ public sealed class RunStartCommandTests : IDisposable
             ".agent_worktrees",
             "claude-fix-tighten-the-gate");
         Directory.CreateDirectory(leftover);
-        File.WriteAllText(Path.Combine(leftover, "left-behind.txt"), "an earlier run\n");
+        await File.WriteAllTextAsync(Path.Combine(leftover, "left-behind.txt"), "an earlier run\n");
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
@@ -101,10 +107,10 @@ public sealed class RunStartCommandTests : IDisposable
     ///     and the message says how to continue that branch instead of repeating git's error.
     /// </summary>
     [Fact]
-    public void RefusesABranchThatAlreadyExistsAndNamesResume()
+    public async Task RefusesABranchThatAlreadyExistsAndNamesResume()
     {
-        _probe.CreateBranchWithCommit("claude/fix/tighten-the-gate", "earlier work");
-        _probe.Git("switch", "main");
+        await _probe.CreateBranchWithCommitAsync("claude/fix/tighten-the-gate", "earlier work");
+        await _probe.GitAsync("switch", "main");
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
@@ -119,14 +125,14 @@ public sealed class RunStartCommandTests : IDisposable
     ///     one worktree, so adding a second would fail.
     /// </summary>
     [Fact]
-    public void ResumeReturnsTheWorktreeAlreadyHoldingTheBranch()
+    public async Task ResumeReturnsTheWorktreeAlreadyHoldingTheBranch()
     {
         _probe.AppendLine("README.md", "uncommitted work");
         ProbeResult started = _probe.RunStart(
             "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate", "--json");
         Assert.True(started.ExitCode == 0, $"The first run must succeed. {started.Output}");
         using JsonDocument first = ParseJson(started.StandardOutput);
-        int worktreesAfterStart = _probe.WorktreeCount();
+        int worktreesAfterStart = await _probe.WorktreeCountAsync();
 
         ProbeResult resumed = _probe.RunStart(
             "--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate",
@@ -137,7 +143,7 @@ public sealed class RunStartCommandTests : IDisposable
         Assert.Equal(
             Path.GetFileName(first.RootElement.GetProperty("worktree").GetString()),
             Path.GetFileName(second.RootElement.GetProperty("worktree").GetString()));
-        Assert.Equal(worktreesAfterStart, _probe.WorktreeCount());
+        Assert.Equal(worktreesAfterStart, await _probe.WorktreeCountAsync());
     }
 
     /// <summary>
@@ -145,7 +151,7 @@ public sealed class RunStartCommandTests : IDisposable
     ///     resume clears that stale entry and creates a new folder.
     /// </summary>
     [Fact]
-    public void ResumeRecoversWhenTheWorktreeFolderWasDeletedByHand()
+    public async Task ResumeRecoversWhenTheWorktreeFolderWasDeletedByHand()
     {
         _probe.AppendLine("README.md", "uncommitted work");
         ProbeResult started = _probe.RunStart(
@@ -165,7 +171,7 @@ public sealed class RunStartCommandTests : IDisposable
 
     /// <summary>A prune that fails is named as the failure, rather than surfacing as git's later complaint.</summary>
     [Fact]
-    public void ResumeNamesAFailedPrune()
+    public async Task ResumeNamesAFailedPrune()
     {
         _probe.AppendLine("README.md", "uncommitted work");
         ProbeResult started = _probe.RunStart(
@@ -185,7 +191,7 @@ public sealed class RunStartCommandTests : IDisposable
 
     /// <summary>A well-formed request against a clean checkout is ready, and says so with <c>0</c>.</summary>
     [Fact]
-    public void ExitsZeroOnAReadyRun()
+    public async Task ExitsZeroOnAReadyRun()
     {
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
@@ -198,7 +204,7 @@ public sealed class RunStartCommandTests : IDisposable
     /// guessing it.
     /// </summary>
     [Fact]
-    public void AReadyRunRecordsItsBaseForLaterHooks()
+    public async Task AReadyRunRecordsItsBaseForLaterHooks()
     {
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
@@ -214,27 +220,27 @@ public sealed class RunStartCommandTests : IDisposable
     ///     branched: the caller supplied input the command cannot act on.
     /// </summary>
     [Fact]
-    public void RefusesAnUnknownHarnessTokenWithExitTwo()
+    public async Task RefusesAnUnknownHarnessTokenWithExitTwo()
     {
         ProbeResult result = _probe.RunStart("--harness", "gpt5", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 2,
             $"An unknown harness token must exit 2, not {result.ExitCode}. {result.Output}");
         Assert.False(
-            _probe.BranchExists("gpt5/fix/tighten-the-gate"),
+            await _probe.BranchExistsAsync("gpt5/fix/tighten-the-gate"),
             "A refused request must create no branch.");
     }
 
     /// <summary>A type outside the conventional-commit set is refused with <c>2</c> for the same reason.</summary>
     [Fact]
-    public void RefusesATypeThatIsNotAConventionalCommitTypeWithExitTwo()
+    public async Task RefusesATypeThatIsNotAConventionalCommitTypeWithExitTwo()
     {
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "feature", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 2,
             $"A non-conventional type must exit 2, not {result.ExitCode}. {result.Output}");
         Assert.False(
-            _probe.BranchExists("claude/feature/tighten-the-gate"),
+            await _probe.BranchExistsAsync("claude/feature/tighten-the-gate"),
             "A refused request must create no branch.");
     }
 
@@ -265,7 +271,7 @@ public sealed class RunStartCommandTests : IDisposable
     ///     product failure, because there is no missing binary to observe.
     /// </remarks>
     [Fact]
-    public void ExitsThreeWhenTheCodeGraphBinaryIsMissing()
+    public async Task ExitsThreeWhenTheCodeGraphBinaryIsMissing()
     {
         if (_probe.CodegraphResolvesWithoutItsStub())
             throw SkipException.ForSkip(
@@ -286,7 +292,7 @@ public sealed class RunStartCommandTests : IDisposable
     ///     versions it compared.
     /// </summary>
     [Fact]
-    public void PrintsTheRunFactsAsJson()
+    public async Task PrintsTheRunFactsAsJson()
     {
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -314,10 +320,10 @@ public sealed class RunStartCommandTests : IDisposable
     ///     rather than false.
     /// </summary>
     [Fact]
-    public void JsonLeavesAlignedNullWhenDivergenceCannotBeDetermined()
+    public async Task JsonLeavesAlignedNullWhenDivergenceCannotBeDetermined()
     {
-        _probe.Git("checkout", "--orphan", "unborn-branch");
-        _probe.Git("rm", "-rf", ".");
+        await _probe.GitAsync("checkout", "--orphan", "unborn-branch");
+        await _probe.GitAsync("rm", "-rf", ".");
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -336,9 +342,9 @@ public sealed class RunStartCommandTests : IDisposable
     ///     treating the failure as a dirty checkout and attempting worktree creation.
     /// </summary>
     [Fact]
-    public void FailsAndSurfacesErrorWhenCheckoutStatusProbeFails()
+    public async Task FailsAndSurfacesErrorWhenCheckoutStatusProbeFails()
     {
-        _probe.Git("config", "core.excludesfile", _probe.Root);
+        await _probe.GitAsync("config", "core.excludesfile", _probe.Root);
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -354,7 +360,7 @@ public sealed class RunStartCommandTests : IDisposable
     ///     than treating the failure as absent worktrees and creating the branch in place.
     /// </summary>
     [Fact]
-    public void FailsAndSurfacesErrorWhenWorktreeListProbeFails()
+    public async Task FailsAndSurfacesErrorWhenWorktreeListProbeFails()
     {
         _probe.WriteGitFailOn("worktree", "fatal: simulated worktree list error");
 
@@ -377,7 +383,7 @@ public sealed class RunStartCommandTests : IDisposable
     ///     say what version <c>HEAD</c> is still owes the operator the column, marked unknown.
     /// </remarks>
     [Fact]
-    public void ComparesTheFailingVersionWithHeadAndTheRemoteBase()
+    public async Task ComparesTheFailingVersionWithHeadAndTheRemoteBase()
     {
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -396,9 +402,9 @@ public sealed class RunStartCommandTests : IDisposable
     ///     without reading the source.
     /// </summary>
     [Fact]
-    public void DocumentsItsRequiredArgumentsInHelp()
+    public async Task DocumentsItsRequiredArgumentsInHelp()
     {
-        ProbeResult result = _probe.RunCli("run", "start", "--help");
+        ProbeResult result = await _probe.RunCliAsync("run", "start", "--help");
 
         Assert.True(result.ExitCode == 0, $"'run start --help' must exit 0, not {result.ExitCode}. {result.Output}");
         foreach (string flag in new[] { "--harness", "--type", "--slug" })

@@ -224,19 +224,19 @@ public sealed class DocsCloseoutRealFileSystemTests
     {
         using DocFixture fixture = Repository();
         Directory.Delete(Path.Combine(fixture.Root, ".git"));
-        Git(fixture, "init", "--quiet");
-        Git(fixture, "add", "-A");
-        Git(fixture, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start");
+        await Git(fixture, "init", "--quiet");
+        await Git(fixture, "add", "-A");
+        await Git(fixture, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "start");
 
         (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
-        string status = Git(fixture, "status", "--porcelain");
+        string status = await Git(fixture, "status", "--porcelain");
         Assert.DoesNotContain("??", status, StringComparison.Ordinal);
         Assert.Contains("6-Docs/archive/plans/2026-10-20-widget.md", status, StringComparison.Ordinal);
     }
 
-    private static string Git(DocFixture fixture, params string[] arguments)
+    private static async Task<string> Git(DocFixture fixture, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -250,7 +250,7 @@ public sealed class DocsCloseoutRealFileSystemTests
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)}: {result.StandardError}");
         return result.StandardOutput;
     }

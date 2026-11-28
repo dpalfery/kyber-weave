@@ -74,11 +74,11 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Target Not Deployed in Project Scope
 
     [Fact]
-    public void UseWhenTargetNotDeployedInProjectRecordsSelectionAndExitsZeroWithGuidance()
+    public async Task UseWhenTargetNotDeployedInProjectRecordsSelectionAndExitsZeroWithGuidance()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Recorded `fast` for `claude` in this project; it applies on install or `squad run`.",
@@ -95,7 +95,7 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Acceptance Criterion 2.1: Use on Deployed Target Updates Files via Transaction
 
     [Fact]
-    public void UseOnDeployedProjectTargetUpdatesFilesThroughTransactionAndRecordsSelection()
+    public async Task UseOnDeployedProjectTargetUpdatesFilesThroughTransactionAndRecordsSelection()
     {
         WritePreset("fast", FastPresetYaml);
 
@@ -108,7 +108,7 @@ public sealed class SquadPresetCliTests : IDisposable
                                      """;
         SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", initialAgentContent));
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude");
 
         Assert.Equal(0, result.ExitCode);
 
@@ -116,7 +116,7 @@ public sealed class SquadPresetCliTests : IDisposable
         Assert.NotNull(selection);
         Assert.Equal("fast", selection.ModelPresets[SquadTarget.Claude]);
 
-        string updatedAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        string updatedAgent = await File.ReadAllTextAsync(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
         Assert.Contains("model: gpt-4o-mini", updatedAgent, StringComparison.Ordinal);
     }
 
@@ -131,7 +131,7 @@ public sealed class SquadPresetCliTests : IDisposable
         "\"agents\":{\"architect\":{\"profile\":\"architect\",\"token\":\"bundled-model\"}}}";
 
     [Fact]
-    public void UseOnDeployedProjectTargetRewritesArbiterTableInTheSameTransactionAsAgents()
+    public async Task UseOnDeployedProjectTargetRewritesArbiterTableInTheSameTransactionAsAgents()
     {
         WritePreset("fast", FastPresetYaml);
         string initialAgentContent = """
@@ -147,13 +147,13 @@ public sealed class SquadPresetCliTests : IDisposable
             (".claude/agents/architect.md", initialAgentContent),
             ("artifacts/arbiter/model-targets.claude.json", StaleArbiterTable));
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude");
 
         Assert.Equal(0, result.ExitCode);
-        string updatedAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        string updatedAgent = await File.ReadAllTextAsync(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
         Assert.Contains("model: gpt-4o-mini", updatedAgent, StringComparison.Ordinal);
         using JsonDocument table = JsonDocument.Parse(
-            File.ReadAllText(Path.Combine(_projectDir, "artifacts", "arbiter", "model-targets.claude.json")));
+            await File.ReadAllTextAsync(Path.Combine(_projectDir, "artifacts", "arbiter", "model-targets.claude.json")));
         Assert.Equal(
             "gpt-4o-mini",
             table.RootElement.GetProperty("agents").GetProperty("architect").GetProperty("token").GetString());
@@ -161,7 +161,7 @@ public sealed class SquadPresetCliTests : IDisposable
 
     [Fact]
     [UnsupportedOSPlatform("windows")]
-    public void UseWhenArbiterTableCannotBeWrittenLeavesAgentsAndTableUnchanged()
+    public async Task UseWhenArbiterTableCannotBeWrittenLeavesAgentsAndTableUnchanged()
     {
         // Forced failure: the arbiter directory is read-only, so the table cannot be written. The
         // transaction must fail as a whole, leaving the agent and the table exactly as they were.
@@ -188,11 +188,11 @@ public sealed class SquadPresetCliTests : IDisposable
         File.SetUnixFileMode(arbiterDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude");
+            CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude");
 
             Assert.NotEqual(0, result.ExitCode);
-            Assert.Equal(initialAgentContent, File.ReadAllText(agentPath));
-            Assert.Equal(StaleArbiterTable, File.ReadAllText(tablePath));
+            Assert.Equal(initialAgentContent, await File.ReadAllTextAsync(agentPath));
+            Assert.Equal(StaleArbiterTable, await File.ReadAllTextAsync(tablePath));
         }
         finally
         {
@@ -205,7 +205,7 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Acceptance Criterion 2.4: Dry-Run Prints Diffs and Writes Nothing
 
     [Fact]
-    public void UseWithDryRunPrintsAgentDiffsAndWritesNothing()
+    public async Task UseWithDryRunPrintsAgentDiffsAndWritesNothing()
     {
         WritePreset("fast", FastPresetYaml);
 
@@ -218,12 +218,12 @@ public sealed class SquadPresetCliTests : IDisposable
                                      """;
         SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", initialAgentContent));
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude", "--dry-run");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude", "--dry-run");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("architect: bundled-model -> gpt-4o-mini", result.Output, StringComparison.Ordinal);
 
-        string agentContentAfter = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        string agentContentAfter = await File.ReadAllTextAsync(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
         Assert.Equal(initialAgentContent, agentContentAfter);
 
         SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
@@ -235,12 +235,12 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Acceptance Criterion 4.1: Unknown Names and Targets Exit Non-Zero
 
     [Fact]
-    public void UseWithUnknownPresetNameExitsWithCode2AndListsExistingPresets()
+    public async Task UseWithUnknownPresetNameExitsWithCode2AndListsExistingPresets()
     {
         WritePreset("fast", FastPresetYaml);
         WritePreset("custom", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "use", "unknown-preset", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "use", "unknown-preset", "--target", "claude");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("unknown-preset", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -249,40 +249,40 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
-    public void UseWithUnknownTargetExitsWithCode2AndNamesOffendingTarget()
+    public async Task UseWithUnknownTargetExitsWithCode2AndNamesOffendingTarget()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "unknown-harness");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "unknown-harness");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("unknown-harness", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ClearWithUnknownTargetExitsWithCode2AndNamesOffendingTarget()
+    public async Task ClearWithUnknownTargetExitsWithCode2AndNamesOffendingTarget()
     {
-        CliResult result = Run("squad", "preset", "clear", "--target", "unknown-harness");
+        CliResult result = await Run("squad", "preset", "clear", "--target", "unknown-harness");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("unknown-harness", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ShowWithUnknownPresetNameExitsWithCode2AndNamesOffendingPreset()
+    public async Task ShowWithUnknownPresetNameExitsWithCode2AndNamesOffendingPreset()
     {
-        CliResult result = Run("squad", "preset", "show", "nonexistent-preset", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "show", "nonexistent-preset", "--target", "claude");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("nonexistent-preset", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ShowWithUnknownTargetExitsWithCode2AndNamesOffendingTarget()
+    public async Task ShowWithUnknownTargetExitsWithCode2AndNamesOffendingTarget()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "show", "fast", "--target", "invalid-target");
+        CliResult result = await Run("squad", "preset", "show", "fast", "--target", "invalid-target");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("invalid-target", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -293,11 +293,11 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Global Deployment Requirement
 
     [Fact]
-    public void UseWhenTargetNotDeployedGloballyExitsWithCode2AndInstallGuidance()
+    public async Task UseWhenTargetNotDeployedGloballyExitsWithCode2AndInstallGuidance()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude", "--global");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude", "--global");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("claude is not deployed globally", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -305,11 +305,11 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
-    public void ClearWhenTargetNotDeployedGloballyExitsWithCode2AndInstallGuidance()
+    public async Task ClearWhenTargetNotDeployedGloballyExitsWithCode2AndInstallGuidance()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "clear", "--target", "claude", "--global");
+        CliResult result = await Run("squad", "preset", "clear", "--target", "claude", "--global");
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("claude is not deployed globally", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -321,7 +321,7 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Acceptance Criterion 3.3: Clear Restores Bundled Models
 
     [Fact]
-    public void ClearOnDeployedProjectTargetRestoresBundledModelsAndClearsSelection()
+    public async Task ClearOnDeployedProjectTargetRestoresBundledModelsAndClearsSelection()
     {
         string presetAgentContent = """
                                     ---
@@ -333,23 +333,23 @@ public sealed class SquadPresetCliTests : IDisposable
         SeedProjectDeployment(_projectDir, "claude", (".claude/agents/architect.md", presetAgentContent));
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
 
-        CliResult result = Run("squad", "preset", "clear", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "clear", "--target", "claude");
 
         Assert.Equal(0, result.ExitCode);
 
         SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
         Assert.Null(selection);
 
-        string restoredAgent = File.ReadAllText(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
+        string restoredAgent = await File.ReadAllTextAsync(Path.Combine(_projectDir, ".claude", "agents", "architect.md"));
         Assert.DoesNotContain("gpt-4o-mini", restoredAgent, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ClearWhenTargetNotDeployedInProjectClearsSelectionAndExitsZero()
+    public async Task ClearWhenTargetNotDeployedInProjectClearsSelectionAndExitsZero()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
 
-        CliResult result = Run("squad", "preset", "clear", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "clear", "--target", "claude");
 
         Assert.Equal(0, result.ExitCode);
         SquadModelPresetSelection? selection = _selectionStore.Read(_projectDir);
@@ -361,14 +361,14 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Acceptance Criterion 5.1: Squad Preset List Output
 
     [Fact]
-    public void ListWhenPresetsExistPrintsNamePathAndUsedBy()
+    public async Task ListWhenPresetsExistPrintsNamePathAndUsedBy()
     {
         WritePreset("fast", FastPresetYaml);
         WritePreset("pro", FastPresetYaml);
 
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
 
-        CliResult result = Run("squad", "preset", "list");
+        CliResult result = await Run("squad", "preset", "list");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("fast", result.Output, StringComparison.Ordinal);
@@ -380,11 +380,11 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
-    public void ListWhenNoPresetsInUseShowsUsedByNone()
+    public async Task ListWhenNoPresetsInUseShowsUsedByNone()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "list");
+        CliResult result = await Run("squad", "preset", "list");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("fast", result.Output, StringComparison.Ordinal);
@@ -396,7 +396,7 @@ public sealed class SquadPresetCliTests : IDisposable
     #region Acceptance Criterion 5.2: Squad Preset Show Output
 
     [Fact]
-    public void ShowDisplaysResolvedModelsPerCategoryMarkingBundledValues()
+    public async Task ShowDisplaysResolvedModelsPerCategoryMarkingBundledValues()
     {
         WritePreset("fast", """
                             schema: kyber-squad.model-preset/v1
@@ -405,7 +405,7 @@ public sealed class SquadPresetCliTests : IDisposable
                                 claude: custom-fast-claude
                             """);
 
-        CliResult result = Run("squad", "preset", "show", "fast", "--target", "claude");
+        CliResult result = await Run("squad", "preset", "show", "fast", "--target", "claude");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("general: custom-fast-claude", result.Output, StringComparison.Ordinal);
@@ -414,11 +414,11 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
-    public void ShowForWarpTargetPrintsWarpRendersNoModel()
+    public async Task ShowForWarpTargetPrintsWarpRendersNoModel()
     {
         WritePreset("fast", FastPresetYaml);
 
-        CliResult result = Run("squad", "preset", "show", "fast", "--target", "warp");
+        CliResult result = await Run("squad", "preset", "show", "fast", "--target", "warp");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Warp renders no model.", result.Output, StringComparison.Ordinal);
@@ -1035,7 +1035,7 @@ public sealed class SquadPresetCliTests : IDisposable
     }
 
     [Fact]
-    public void PresetUseGlobalWhenLockExistsWithTargetsButReceiptIsMissingExitsNonZeroWithoutNullReferenceException()
+    public async Task PresetUseGlobalWhenLockExistsWithTargetsButReceiptIsMissingExitsNonZeroWithoutNullReferenceException()
     {
         WritePreset("fast", FastPresetYaml);
 
@@ -1056,9 +1056,9 @@ public sealed class SquadPresetCliTests : IDisposable
             "b".PadRight(64, '0'),
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        File.WriteAllText(lockPath, _stateStore.SerializeLock(squadLock), Encoding.UTF8);
+        await File.WriteAllTextAsync(lockPath, _stateStore.SerializeLock(squadLock), Encoding.UTF8);
 
-        CliResult result = Run("squad", "preset", "use", "fast", "--target", "claude", "--global");
+        CliResult result = await Run("squad", "preset", "use", "fast", "--target", "claude", "--global");
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.DoesNotContain("NullReferenceException", result.Output, StringComparison.Ordinal);
@@ -1085,12 +1085,12 @@ public sealed class SquadPresetCliTests : IDisposable
         Assert.Equal(original, reconstructed);
     }
 
-    private CliResult Run(params string[] args)
+    private async Task<CliResult> Run(params string[] args)
     {
-        return RunIn(_projectDir, args);
+        return await RunIn(_projectDir, args);
     }
 
-    private CliResult RunIn(string workingDirectory, params string[] args)
+    private async Task<CliResult> RunIn(string workingDirectory, params string[] args)
     {
         string host = CliHostPath();
         ProcessStartInfo startInfo = new(host)
@@ -1120,7 +1120,7 @@ public sealed class SquadPresetCliTests : IDisposable
             if (value is not null) startInfo.Environment[key] = value;
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
         return new CliResult(result.ExitCode, result.StandardOutput + "\n" + result.StandardError);
     }
 

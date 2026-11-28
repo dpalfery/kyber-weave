@@ -26,18 +26,24 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// <c>HookGitFacts.Enrich</c> — because a hand-fed fact set proved nothing in the
 /// earlier planner-diff rounds.
 /// </remarks>
-public sealed class HookGitFactsSnapshotTests : IDisposable
+public sealed class HookGitFactsSnapshotTests : IAsyncLifetime
 {
     private const string SinceDispatchFact = "git.changed-paths.since-dispatch";
     private const string PlannerPrompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nPlan prompt";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _arbiter = new();
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _arbiter.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -46,11 +52,11 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
     /// answered <c>inside</c>/<c>allow</c> for a write it never observed.
     /// </summary>
     [Fact]
-    public void MissingPreSnapshotLeavesSinceDispatchAbsent()
+    public async Task MissingPreSnapshotLeavesSinceDispatchAbsent()
     {
         Write("docs/plans/dispatch.md", "// committed dispatch write\n");
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", "feat: dispatch write");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", "feat: dispatch write");
         Write("docs/plans/dirty.md", "// uncommitted dispatch write\n");
 
         ArbiterFactSet facts = PostFacts(prompt: PlannerPrompt, callId: "call-missing");
@@ -66,14 +72,14 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
     /// <c>outside</c> to <c>inside</c>.
     /// </summary>
     [Fact]
-    public void RetryWithSameToolCallIdReusesTheSameBaseline()
+    public async Task RetryWithSameToolCallIdReusesTheSameBaseline()
     {
         const string callId = "call-retry-1";
         Pre(prompt: PlannerPrompt, callId: callId);
 
         Write("src/Dispatch.cs", "// dispatch write\n");
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", "feat: dispatch write");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", "feat: dispatch write");
 
         IReadOnlyList<string> first = SinceDispatch(prompt: PlannerPrompt, callId: callId);
         IReadOnlyList<string> second = SinceDispatch(prompt: PlannerPrompt, callId: callId);
@@ -152,14 +158,14 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
     /// read of a whole document, so a held lock must not turn a good baseline absent.
     /// </summary>
     [Fact]
-    public void PeekPairsWithoutTheLock()
+    public async Task PeekPairsWithoutTheLock()
     {
         const string callId = "call-peek-locked";
         Pre(prompt: PlannerPrompt, callId: callId);
 
         Write("src/Peeked.cs", "// dispatch write\n");
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", "feat: dispatch write");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", "feat: dispatch write");
 
         using (File.Open(LockPath(), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
         {

@@ -43,7 +43,7 @@ public sealed class CopilotMcpServerProbeTests : IDisposable
         return await probe;
     }
 
-    private static void MakeFifo(string path)
+    private static async Task MakeFifo(string path)
     {
         ProcessStartInfo info = new("mkfifo")
         {
@@ -53,7 +53,7 @@ public sealed class CopilotMcpServerProbeTests : IDisposable
             RedirectStandardError = true
         };
         info.ArgumentList.Add(path);
-        ProcessResult result = ProcessRunner.Run(info, string.Empty, TimeSpan.FromSeconds(30));
+        ProcessResult result = await ProcessRunner.RunAsync(info, string.Empty, TimeSpan.FromSeconds(30));
         Assert.Equal(0, result.ExitCode);
     }
 
@@ -103,7 +103,7 @@ public sealed class CopilotMcpServerProbeTests : IDisposable
     public async Task FifoAtConfigPath_ReturnsFalseWithoutOpeningIt()
     {
         string root = NewRoot();
-        MakeFifo(Path.Combine(root, "mcp-config.json"));
+        await MakeFifo(Path.Combine(root, "mcp-config.json"));
 
         Assert.False(await HasServerWithinDeadlineAsync(root));
     }
@@ -124,7 +124,7 @@ public sealed class CopilotMcpServerProbeTests : IDisposable
     {
         string root = NewRoot();
         string fifo = Path.Combine(root, "real-fifo");
-        MakeFifo(fifo);
+        await MakeFifo(fifo);
         File.CreateSymbolicLink(Path.Combine(root, "mcp-config.json"), fifo);
 
         Assert.False(await HasServerWithinDeadlineAsync(root));

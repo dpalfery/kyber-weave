@@ -31,7 +31,7 @@ public sealed class AnalysisPersistenceTests
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        bool actual = DocsPorts.IsCacheSafe(repository.Path);
+        bool actual = DocsPorts.CacheSafety.IsSafe(repository.Path);
 
         Assert.Equal(expected, actual);
     }
@@ -47,30 +47,30 @@ public sealed class AnalysisPersistenceTests
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        Assert.False(DocsPorts.IsCacheSafe(repository.Path));
+        Assert.False(DocsPorts.CacheSafety.IsSafe(repository.Path));
     }
 
     [Fact]
-    public void IsSafeWhenDatabaseIsAlreadyTrackedReturnsFalse()
+    public async Task IsSafeWhenDatabaseIsAlreadyTrackedReturnsFalse()
     {
-        RequireGit();
+        await RequireGit();
         using TempDirectory repository = SafeRepository(createCache: true);
         string databasePath = DatabasePath(repository.Path);
-        File.WriteAllText(databasePath, "tracked cache placeholder");
-        RunGit(repository.Path, "init");
-        RunGit(repository.Path, "add", "-f", ".kyber-weave/cache/docs-analysis.sqlite3");
+        await File.WriteAllTextAsync(databasePath, "tracked cache placeholder");
+        await RunGit(repository.Path, "init");
+        await RunGit(repository.Path, "add", "-f", ".kyber-weave/cache/docs-analysis.sqlite3");
 
-        Assert.False(DocsPorts.IsCacheSafe(repository.Path));
+        Assert.False(await DocsPorts.CacheSafety.IsSafeAsync(repository.Path));
     }
 
     [Theory]
     [InlineData("state")]
     [InlineData("cache")]
     [InlineData("database")]
-    public void ConstructorWhenPersistencePathContainsSymbolicLinkRejectsWithoutChangingExternalTarget(
+    public async Task ConstructorWhenPersistencePathContainsSymbolicLinkRejectsWithoutChangingExternalTarget(
         string linkedSegment)
     {
-        RequireSqlite();
+        await RequireSqlite();
         if (OperatingSystem.IsWindows())
             throw SkipException.ForSkip("Symbolic-link creation requires platform-specific privileges on Windows.");
 
@@ -80,28 +80,28 @@ public sealed class AnalysisPersistenceTests
         string cacheDirectory = Path.Combine(stateDirectory, "cache");
         string databasePath = Path.Combine(cacheDirectory, "docs-analysis.sqlite3");
         string sentinelPath = Path.Combine(external.Path, "sentinel.txt");
-        File.WriteAllText(sentinelPath, "external state must remain unchanged");
+        await File.WriteAllTextAsync(sentinelPath, "external state must remain unchanged");
 
         switch (linkedSegment)
         {
             case "state":
                 Directory.CreateSymbolicLink(stateDirectory, external.Path);
-                File.WriteAllText(Path.Combine(external.Path, ".gitignore"), "cache/\n");
+                await File.WriteAllTextAsync(Path.Combine(external.Path, ".gitignore"), "cache/\n");
                 break;
             case "cache":
                 Directory.CreateDirectory(stateDirectory);
-                File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
+                await File.WriteAllTextAsync(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
                 Directory.CreateSymbolicLink(cacheDirectory, external.Path);
                 break;
             case "database":
                 Directory.CreateDirectory(cacheDirectory);
-                File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
+                await File.WriteAllTextAsync(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
                 File.CreateSymbolicLink(databasePath, sentinelPath);
                 break;
         }
 
         Assert.Throws<InvalidOperationException>(() => DocsPorts.Sqlite(repository.Path));
-        Assert.Equal("external state must remain unchanged", File.ReadAllText(sentinelPath));
+        Assert.Equal("external state must remain unchanged", await File.ReadAllTextAsync(sentinelPath));
         Assert.False(File.Exists(Path.Combine(external.Path, "docs-analysis.sqlite3")));
     }
 
@@ -130,9 +130,9 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void ConstructorWhenCacheIsSafeInitializesVersionedSchemaIdempotently()
+    public async Task ConstructorWhenCacheIsSafeInitializesVersionedSchemaIdempotently()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence first = DocsPorts.Sqlite(repository.Path);
         PersistedClaim claim = Claim("claim-idempotent");
@@ -144,14 +144,14 @@ public sealed class AnalysisPersistenceTests
         Assert.True(second.IsAvailable);
         Assert.Equal(
             SqliteAnalysisPersistence.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            QuerySqlite(second.DatabasePath, "PRAGMA user_version;").Trim());
+            (await QuerySqlite(second.DatabasePath, "PRAGMA user_version;")).Trim());
         Assert.Equal(claim, Assert.Single(second.LoadClaims([claim.Id])).Value);
     }
 
     [Fact]
-    public void SaveAndLoadClaimsPreservesDuplicateOccurrencesAndLineAddressableText()
+    public async Task SaveAndLoadClaimsPreservesDuplicateOccurrencesAndLineAddressableText()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         PersistedClaim first = Claim("claim-left", filePath: "docs/left.md", startLine: 11);
@@ -166,9 +166,9 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void SaveAndLoadEmbeddingsUsesEveryContentProviderModelAndShapeKeyField()
+    public async Task SaveAndLoadEmbeddingsUsesEveryContentProviderModelAndShapeKeyField()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         EmbeddingCacheKey storedKey = Key("context", provider: "local-a", model: "embed-a", dimensions: 2);
@@ -191,9 +191,9 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void SaveAndLoadCandidateVerdictPreservesReviewFingerprintAndUnicodeText()
+    public async Task SaveAndLoadCandidateVerdictPreservesReviewFingerprintAndUnicodeText()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         PersistedCandidateFingerprint candidate = Candidate("candidate-review");
@@ -228,9 +228,9 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void SaveBatchesWithApostrophesNewlinesAndSqlTokensRoundTripWithoutExecutingInput()
+    public async Task SaveBatchesWithApostrophesNewlinesAndSqlTokensRoundTripWithoutExecutingInput()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         const string hostile = "'close\n); DROP TABLE analysis_claims; --\nnext";
@@ -250,9 +250,9 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void SaveEmbeddingsWhenAnyVectorIsNotFiniteAndNormalizedRollsBackWholeBatch()
+    public async Task SaveEmbeddingsWhenAnyVectorIsNotFiniteAndNormalizedRollsBackWholeBatch()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         StoredEmbedding valid = Embedding(Key("valid"));
@@ -264,9 +264,9 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void SaveVerdictsWhenAnyVerdictIsInvalidRollsBackWholeBatch()
+    public async Task SaveVerdictsWhenAnyVerdictIsInvalidRollsBackWholeBatch()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         PersistedCandidateFingerprint first = Candidate("candidate-valid");
@@ -283,46 +283,46 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void ConstructorWhenMigrationFailsRollsBackSchemaAndVersion()
+    public async Task ConstructorWhenMigrationFailsRollsBackSchemaAndVersion()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository(createCache: true);
         string databasePath = DatabasePath(repository.Path);
-        RunSqlite(
+        await RunSqlite(
             databasePath,
             "CREATE TABLE analysis_claims (broken TEXT);\nPRAGMA user_version = 0;");
-        string originalSchema = QuerySqlite(databasePath, ".schema analysis_claims");
+        string originalSchema = await QuerySqlite(databasePath, ".schema analysis_claims");
 
         Assert.Throws<InvalidDataException>(() => DocsPorts.Sqlite(repository.Path));
 
-        Assert.Equal("0", QuerySqlite(databasePath, "PRAGMA user_version;").Trim());
-        Assert.Equal(originalSchema, QuerySqlite(databasePath, ".schema analysis_claims"));
+        Assert.Equal("0", (await QuerySqlite(databasePath, "PRAGMA user_version;")).Trim());
+        Assert.Equal(originalSchema, await QuerySqlite(databasePath, ".schema analysis_claims"));
     }
 
     [Fact]
-    public void ConstructorWhenDatabaseIsInvalidDoesNotOverwriteIt()
+    public async Task ConstructorWhenDatabaseIsInvalidDoesNotOverwriteIt()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository(createCache: true);
         string databasePath = DatabasePath(repository.Path);
         string original = "not a sqlite database\nwith operator-owned evidence";
-        File.WriteAllText(databasePath, original);
+        await File.WriteAllTextAsync(databasePath, original);
 
         Assert.Throws<InvalidDataException>(() => DocsPorts.Sqlite(repository.Path));
 
-        Assert.Equal(original, File.ReadAllText(databasePath));
+        Assert.Equal(original, await File.ReadAllTextAsync(databasePath));
     }
 
     [Theory]
     [InlineData("analysis_claims", "stored-id", "payload-id")]
     [InlineData("analysis_candidates", "stored-id", "payload-id")]
     [InlineData("analysis_verdicts", "stored-id", "payload-id")]
-    public void LoadWhenRowKeyDoesNotMatchPayloadIdentityReportsCorruptCache(
+    public async Task LoadWhenRowKeyDoesNotMatchPayloadIdentityReportsCorruptCache(
         string table,
         string rowId,
         string payloadId)
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         byte[] payload = table switch
@@ -333,7 +333,7 @@ public sealed class AnalysisPersistenceTests
             _ => throw new InvalidOperationException()
         };
         string keyColumn = table == "analysis_claims" ? "id" : "candidate_id";
-        RunSqlite(
+        await RunSqlite(
             persistence.DatabasePath,
             $"PRAGMA foreign_keys=OFF; INSERT INTO {table}({keyColumn}, payload) VALUES " +
             $"({Blob(rowId)}, {Blob(payload)});");
@@ -355,9 +355,9 @@ public sealed class AnalysisPersistenceTests
     [InlineData("verdict-invalid-label")]
     [InlineData("verdict-invalid-confidence")]
     [InlineData("verdict-empty-rationale")]
-    public void LoadWhenPersistedPayloadViolatesDomainContractReportsCorruptCache(string scenario)
+    public async Task LoadWhenPersistedPayloadViolatesDomainContractReportsCorruptCache(string scenario)
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         (string table, string keyColumn, string rowId, byte[] payload) = scenario switch
@@ -394,7 +394,7 @@ public sealed class AnalysisPersistenceTests
                     Verdict("verdict-row") with { Rationale = string.Empty })),
             _ => throw new InvalidOperationException()
         };
-        RunSqlite(
+        await RunSqlite(
             persistence.DatabasePath,
             $"PRAGMA foreign_keys=OFF; INSERT INTO {table}({keyColumn}, payload) VALUES " +
             $"({Blob(rowId)}, {Blob(payload)});");
@@ -411,12 +411,12 @@ public sealed class AnalysisPersistenceTests
     }
 
     [Fact]
-    public void SaveClaimsWhenDatabaseHasConcurrentImmediateTransactionDoesNotMisreportCorruption()
+    public async Task SaveClaimsWhenDatabaseHasConcurrentImmediateTransactionDoesNotMisreportCorruption()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
-        using Process lockProcess = StartSqliteLock(persistence.DatabasePath);
+        using Process lockProcess = await StartSqliteLock(persistence.DatabasePath);
         try
         {
             Assert.False(lockProcess.HasExited, "sqlite lock fixture exited before SaveClaims ran.");
@@ -432,22 +432,22 @@ public sealed class AnalysisPersistenceTests
         }
         finally
         {
-            lockProcess.StandardInput.WriteLine("ROLLBACK;");
+            await lockProcess.StandardInput.WriteLineAsync("ROLLBACK;");
             lockProcess.StandardInput.Close();
-            Assert.True(lockProcess.WaitForExit(5_000), "sqlite lock fixture did not exit.");
+            Assert.True(await WaitForExitWithinAsync(lockProcess, TimeSpan.FromSeconds(5)), "sqlite lock fixture did not exit.");
         }
     }
 
     [Fact]
-    public void StartSqliteLockWhenContendedFailsFastWithBailAndReportsError()
+    public async Task StartSqliteLockWhenContendedFailsFastWithBailAndReportsError()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
-        using Process primaryLock = StartSqliteLock(persistence.DatabasePath);
+        using Process primaryLock = await StartSqliteLock(persistence.DatabasePath);
         try
         {
-            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => StartSqliteLock(persistence.DatabasePath, sqliteTimeoutMilliseconds: 50));
 
             Assert.True(
@@ -461,7 +461,7 @@ public sealed class AnalysisPersistenceTests
             {
                 try
                 {
-                    primaryLock.StandardInput.WriteLine("ROLLBACK;");
+                    await primaryLock.StandardInput.WriteLineAsync("ROLLBACK;");
                     primaryLock.StandardInput.Close();
                 }
                 catch (Exception ex) when (ex is IOException or InvalidOperationException)
@@ -472,32 +472,32 @@ public sealed class AnalysisPersistenceTests
 
             if (!primaryLock.HasExited)
             {
-                Assert.True(primaryLock.WaitForExit(5_000), "sqlite primary lock fixture did not exit.");
+                Assert.True(await WaitForExitWithinAsync(primaryLock, TimeSpan.FromSeconds(5)), "sqlite primary lock fixture did not exit.");
             }
         }
     }
 
     [Fact]
-    public void StartSqliteLockWhenOutputIsNotAcquiredKillsChildAndFailsFastWithoutHanging()
+    public async Task StartSqliteLockWhenOutputIsNotAcquiredKillsChildAndFailsFastWithoutHanging()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
 
-        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => StartSqliteLock(persistence.DatabasePath, acquireAckQuery: "SELECT 'UNEXPECTED';"));
 
         Assert.Contains("Output: 'UNEXPECTED'", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void StartSqliteLockWhenRollbackCleanupFailsPreservesCleanupDiagnosticInAggregateException()
+    public async Task StartSqliteLockWhenRollbackCleanupFailsPreservesCleanupDiagnosticInAggregateException()
     {
-        RequireSqlite();
+        await RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
 
-        AggregateException exception = Assert.Throws<AggregateException>(
+        AggregateException exception = await Assert.ThrowsAsync<AggregateException>(
             () => StartSqliteLock(
                 persistence.DatabasePath,
                 probeTimeoutSeconds: 0,
@@ -611,16 +611,16 @@ public sealed class AnalysisPersistenceTests
 
     private static StoredEmbedding Embedding(EmbeddingCacheKey key) => new(key, [0.6f, 0.8f]);
 
-    private static void RequireSqlite() =>
-        SqliteTestFixture.RequireSqlite("sqlite3 is unavailable; SQLite adapter parity was not run.");
+    private static Task RequireSqlite() =>
+        SqliteTestFixture.RequireSqliteAsync("sqlite3 is unavailable; SQLite adapter parity was not run.");
 
-    private static void RequireGit()
+    private static async Task RequireGit()
     {
         ProcessStartInfo startInfo = ProcessStartInfo("git");
         startInfo.ArgumentList.Add("--version");
         try
         {
-            if (ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60)).ExitCode != 0)
+            if ((await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60))).ExitCode != 0)
                 throw SkipException.ForSkip("git is unavailable; tracked-file safety was not run.");
         }
         catch (Win32Exception)
@@ -629,16 +629,16 @@ public sealed class AnalysisPersistenceTests
         }
     }
 
-    private static void RunGit(string workingDirectory, params string[] arguments)
+    private static async Task RunGit(string workingDirectory, params string[] arguments)
     {
         ProcessStartInfo startInfo = ProcessStartInfo("git");
         startInfo.WorkingDirectory = workingDirectory;
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         if (result.ExitCode != 0) throw new InvalidOperationException(result.StandardError);
     }
 
-    private static Process StartSqliteLock(
+    private static async Task<Process> StartSqliteLock(
         string databasePath,
         int acquireTimeoutSeconds = 60,
         int probeTimeoutSeconds = 60,
@@ -656,11 +656,11 @@ public sealed class AnalysisPersistenceTests
         bool acquired = false;
         try
         {
-            process.StandardInput.WriteLine(
+            await process.StandardInput.WriteLineAsync(
                 $".timeout {sqliteTimeoutMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
-            process.StandardInput.WriteLine("BEGIN IMMEDIATE;");
-            process.StandardInput.WriteLine(acquireAckQuery);
-            process.StandardInput.Flush();
+            await process.StandardInput.WriteLineAsync("BEGIN IMMEDIATE;");
+            await process.StandardInput.WriteLineAsync(acquireAckQuery);
+            await process.StandardInput.FlushAsync();
 
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(acquireTimeoutSeconds));
             string? line;
@@ -680,7 +680,7 @@ public sealed class AnalysisPersistenceTests
                     if (!process.HasExited)
                     {
                         process.Kill(entireProcessTree: true);
-                        process.WaitForExit(5_000);
+                        await WaitForExitWithinAsync(process, TimeSpan.FromSeconds(5));
                     }
                 }
                 catch (Exception ex) when (ex is Win32Exception or NotSupportedException or InvalidOperationException)
@@ -712,7 +712,7 @@ public sealed class AnalysisPersistenceTests
             DateTime deadline = DateTime.UtcNow.AddSeconds(probeTimeoutSeconds);
             while (DateTime.UtcNow < deadline)
             {
-                ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 50\nBEGIN IMMEDIATE;");
+                ProcessResult result = await RunSqliteAllowFailure(databasePath, ".timeout 50\nBEGIN IMMEDIATE;");
                 if (result.ExitCode != 0
                     && (result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase)
                         || result.StandardError.Contains("busy", StringComparison.OrdinalIgnoreCase)))
@@ -720,7 +720,7 @@ public sealed class AnalysisPersistenceTests
                     return process;
                 }
 
-                Thread.Sleep(20);
+                await Task.Delay(20);
             }
 
             throw new TimeoutException("sqlite lock fixture verified acquire, but concurrent transaction probe did not detect lock.");
@@ -749,11 +749,11 @@ public sealed class AnalysisPersistenceTests
                     }
                     else if (!process.HasExited)
                     {
-                        process.StandardInput.WriteLine("ROLLBACK;");
+                        await process.StandardInput.WriteLineAsync("ROLLBACK;");
                         process.StandardInput.Close();
                         if (!process.HasExited)
                         {
-                            process.WaitForExit(5_000);
+                            await WaitForExitWithinAsync(process, TimeSpan.FromSeconds(5));
                         }
                     }
                 }
@@ -768,7 +768,7 @@ public sealed class AnalysisPersistenceTests
                 if (!process.HasExited)
                 {
                     process.Kill(entireProcessTree: true);
-                    process.WaitForExit(5_000);
+                    await WaitForExitWithinAsync(process, TimeSpan.FromSeconds(5));
                 }
             }
             catch (Exception ex) when (ex is Win32Exception or NotSupportedException or InvalidOperationException)
@@ -889,27 +889,38 @@ public sealed class AnalysisPersistenceTests
         Assert.False(IsStandardInputOpen(process));
     }
 
-    private static string QuerySqlite(string databasePath, string input)
+    private static async Task<string> QuerySqlite(string databasePath, string input)
     {
-        ProcessResult result = RunSqlite(databasePath, input);
+        ProcessResult result = await RunSqlite(databasePath, input);
         return result.StandardOutput;
     }
 
-    private static ProcessResult RunSqlite(string databasePath, string input)
+    private static async Task<ProcessResult> RunSqlite(string databasePath, string input)
     {
-        ProcessResult result = RunSqliteAllowFailure(databasePath, input);
+        ProcessResult result = await RunSqliteAllowFailure(databasePath, input);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.StandardError);
         return result;
     }
 
-    private static ProcessResult RunSqliteAllowFailure(string databasePath, string input)
+    private static async Task<ProcessResult> RunSqliteAllowFailure(string databasePath, string input)
     {
         ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);
-        return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(60));
+        return await ProcessRunner.RunAsync(startInfo, input, TimeSpan.FromSeconds(60));
+    }
+
+    private static async Task<bool> WaitForExitWithinAsync(Process process, TimeSpan timeout)
+    {
+        Task wait = process.WaitForExitAsync();
+        Task completed = await Task.WhenAny(wait, Task.Delay(timeout));
+        if (completed != wait)
+            return false;
+
+        await wait;
+        return true;
     }
 
     private static ProcessStartInfo SqliteStartInfo() => ProcessStartInfo("sqlite3");

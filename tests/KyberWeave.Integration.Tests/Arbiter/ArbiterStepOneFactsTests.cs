@@ -16,26 +16,32 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// so each test runs the real classifier, fact builder and <c>HookGitFacts.Enrich</c>
 /// against a real repository from <see cref="RunStartProbe" />.
 /// </summary>
-public sealed class ArbiterStepOneFactsTests : IDisposable
+public sealed class ArbiterStepOneFactsTests : IAsyncLifetime
 {
     private const string FindingId = "security/key-in-argv";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
-    public void DiffSummaryListsEachChangedPathWithItsHunkHeaders()
+    public async Task DiffSummaryListsEachChangedPathWithItsHunkHeaders()
     {
-        _probe.Git("switch", "-c", "feature/summary", "origin/main");
+        await _probe.GitAsync("switch", "-c", "feature/summary", "origin/main");
         Write("src/Tracked.cs", "  one\n  two\n");
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", "feat: tracked");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", "feat: tracked");
         Write("src/Tracked.cs", "  one\n  two\n  three\n");
         Write("src/Untracked.cs", "  new\n");
 
@@ -54,29 +60,29 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
 
     /// <summary>A body line can look like a file header, and must not move later hunks to another file.</summary>
     [Fact]
-    public void DiffSummaryKeepsHunksOnTheirFileWhenABodyLineLooksLikeAFileHeader()
+    public async Task DiffSummaryKeepsHunksOnTheirFileWhenABodyLineLooksLikeAFileHeader()
     {
         Write("query.sql", "-- one\n  keep\n  keep\n  keep\n-- two\n");
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", "chore: base");
-        string baseCommit = _probe.GitOutput("rev-parse", "HEAD").Trim();
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", "chore: base");
+        string baseCommit = (await _probe.GitOutputAsync("rev-parse", "HEAD")).Trim();
         Write("query.sql", "++ one\n  keep\n  keep\n  keep\n++ two\n");
 
-        string? summary = RealGitFacts.Create().GetDiffSummary(_probe.Root, baseCommit, ["query.sql"]);
+        string? summary = await RealGitFacts.Create().GetDiffSummaryAsync(_probe.Root, baseCommit, ["query.sql"]);
 
         Assert.Equal("query.sql\n@@ -1 +1 @@\n@@ -5 +5 @@", summary);
     }
 
     [Fact]
-    public void DiffSummaryNamesADeletedFileByItsOldPath()
+    public async Task DiffSummaryNamesADeletedFileByItsOldPath()
     {
         Write("gone.txt", "  only\n");
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", "chore: base");
-        string baseCommit = _probe.GitOutput("rev-parse", "HEAD").Trim();
-        _probe.Git("rm", "gone.txt");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", "chore: base");
+        string baseCommit = (await _probe.GitOutputAsync("rev-parse", "HEAD")).Trim();
+        await _probe.GitAsync("rm", "gone.txt");
 
-        string? summary = RealGitFacts.Create().GetDiffSummary(_probe.Root, baseCommit, ["gone.txt"]);
+        string? summary = await RealGitFacts.Create().GetDiffSummaryAsync(_probe.Root, baseCommit, ["gone.txt"]);
 
         Assert.Equal("gone.txt\n@@ -1 +0,0 @@", summary);
     }

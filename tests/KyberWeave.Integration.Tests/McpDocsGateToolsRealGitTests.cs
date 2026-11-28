@@ -24,9 +24,9 @@ public sealed class McpDocsGateToolsRealGitTests
     [Fact]
     public async Task DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
     {
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
+        await repo.CommitAsync("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
         string response = await InvokeValidateAsync(tools, true, gitBase: "HEAD");
@@ -37,9 +37,9 @@ public sealed class McpDocsGateToolsRealGitTests
     [Fact]
     public async Task DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
     {
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
+        await repo.CommitAsync("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
         string response = await InvokeValidateAsync(tools, true, gitBase: "origin/this-ref-is-not-present");
@@ -54,10 +54,10 @@ public sealed class McpDocsGateToolsRealGitTests
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         using TempDirectory outside = new();
         _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
+        await repo.CommitAsync("initial");
 
         string target = Path.Combine(outside.Path, "target.md");
         await File.WriteAllTextAsync(

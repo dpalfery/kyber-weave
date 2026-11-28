@@ -17,7 +17,7 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// <c>subagentStop</c> event that ends each of the agent's turns. Payload shapes are trimmed from a live run on
 /// Copilot CLI 1.0.112.
 /// </summary>
-public sealed class CopilotBackgroundReturnTests : IDisposable
+public sealed class CopilotBackgroundReturnTests : IAsyncLifetime
 {
     private const string Session = "aa1cf341-f8f2-4674-8050-1ec54f6dee55";
     private const string BackendAgent = "9a30af38-0e61-4a61-8785-43b058ab723a";
@@ -32,22 +32,24 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
         "COMMIT: 4fd4083\n" +
         "TASK_GATE: PASS — agent=dev-medium gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=4";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
     private readonly RecordingProvider _provider = new();
 
-    public CopilotBackgroundReturnTests()
+    public async ValueTask InitializeAsync()
     {
+        _probe = await RunStartProbe.CreateAsync();
         Directory.CreateDirectory(Path.Combine(_probe.Root, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(_probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

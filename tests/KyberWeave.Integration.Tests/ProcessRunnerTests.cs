@@ -55,25 +55,26 @@ public sealed class ProcessRunnerTests
     /// Runs the capture on a worker so a regression fails on a timeout rather than hanging
     /// the whole suite forever, which is what a deadlock would otherwise do to CI.
     /// </summary>
-    private static ProcessResult CaptureWithinTimeout(Process process)
+    private static async Task<ProcessResult> CaptureWithinTimeoutAsync(Process process)
     {
-        Task<ProcessResult> capture = Task.Run(() => ProcessRunner.ReadToEnd(process));
+        Task<ProcessResult> capture = ProcessRunner.ReadToEndAsync(process);
+        Task completed = await Task.WhenAny(capture, Task.Delay(TimeSpan.FromSeconds(TimeoutSeconds)));
 
-        if (!capture.Wait(TimeSpan.FromSeconds(TimeoutSeconds)))
+        if (completed != capture)
         {
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { /* already gone */ }
 
             Assert.Fail(
-                $"ProcessRunner.ReadToEnd did not return within {TimeoutSeconds}s. " +
+                $"ProcessRunner.ReadToEndAsync did not return within {TimeoutSeconds}s. " +
                 "Both pipes must be drained concurrently; reading one to the end before " +
                 "the other, or waiting for exit before draining, deadlocks here.");
         }
 
-        return capture.Result;
+        return await capture;
     }
 
     [Fact]
-    public void DrainsBothStreamsWhenEachExceedsThePipeBuffer()
+    public async Task DrainsBothStreamsWhenEachExceedsThePipeBuffer()
     {
         using Process? process = StartTalkativeChild(
             $"{Emit(BytesPerStream, 'e', toStandardError: true)}; " +
@@ -82,7 +83,7 @@ public sealed class ProcessRunnerTests
 
         if (process is null) return; // Windows
 
-        ProcessResult result = CaptureWithinTimeout(process);
+        ProcessResult result = await CaptureWithinTimeoutAsync(process);
 
         // Full length, not merely non-empty: a truncated read would mean a pipe was
         // abandoned rather than drained.
@@ -96,7 +97,7 @@ public sealed class ProcessRunnerTests
     /// stderr looks fine, right up until the child has something to say on stderr.
     /// </summary>
     [Fact]
-    public void DrainsALargeStdoutAlongsideASmallStderr()
+    public async Task DrainsALargeStdoutAlongsideASmallStderr()
     {
         using Process? process = StartTalkativeChild(
             $"{Emit(BytesPerStream, 'o', toStandardError: false)}; " +
@@ -104,7 +105,7 @@ public sealed class ProcessRunnerTests
 
         if (process is null) return; // Windows
 
-        ProcessResult result = CaptureWithinTimeout(process);
+        ProcessResult result = await CaptureWithinTimeoutAsync(process);
 
         Assert.Equal(BytesPerStream, result.StandardOutput.Length);
         Assert.Equal("warning", result.StandardError.Trim());
@@ -112,12 +113,12 @@ public sealed class ProcessRunnerTests
     }
 
     [Fact]
-    public void CapturesExitCodeAndOutputFromAQuietChild()
+    public async Task CapturesExitCodeAndOutputFromAQuietChild()
     {
         using Process? process = StartTalkativeChild("echo out; echo err >&2; exit 7");
         if (process is null) return; // Windows
 
-        ProcessResult result = CaptureWithinTimeout(process);
+        ProcessResult result = await CaptureWithinTimeoutAsync(process);
 
         Assert.Equal("out", result.StandardOutput.Trim());
         Assert.Equal("err", result.StandardError.Trim());
@@ -125,6 +126,6 @@ public sealed class ProcessRunnerTests
     }
 
     [Fact]
-    public void RejectsANullProcess() =>
-        Assert.Throws<ArgumentNullException>(() => ProcessRunner.ReadToEnd(null!));
+    public async Task RejectsANullProcess() =>
+        await Assert.ThrowsAsync<ArgumentNullException>(() => ProcessRunner.ReadToEndAsync(null!));
 }

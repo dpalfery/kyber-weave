@@ -103,11 +103,11 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     /// </summary>
     [Theory]
     [MemberData(nameof(CleanCases))]
-    public void CleanFixturePassesCouncilAndAgentGates(string family, string agent, string sourcePath)
+    public async Task CleanFixturePassesCouncilAndAgentGates(string family, string agent, string sourcePath)
     {
         RequireToolchain();
 
-        string repo = NewToolchainRepo(family, "clean");
+        string repo = await NewToolchainRepo(family, "clean");
 
         string councilReport = NewReportPath("council");
         CliRun council = Gates(CouncilArguments(repo, councilReport));
@@ -136,12 +136,12 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     /// </summary>
     [Theory]
     [MemberData(nameof(DefectCases))]
-    public void SeededDefectFailsItsNamedGate(
+    public async Task SeededDefectFailsItsNamedGate(
         string family, string agent, string sourcePath, string defect, string expectedGateId)
     {
         RequireToolchain();
 
-        string repo = NewToolchainRepo(family, Path.Combine("defects", defect));
+        string repo = await NewToolchainRepo(family, Path.Combine("defects", defect));
 
         string councilReport = NewReportPath("council");
         CliRun council = Gates(CouncilArguments(repo, councilReport));
@@ -296,7 +296,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     /// technologies, runs <c>docs init</c> in-process, and commits the scaffolded tree.
     /// Never builds in place: the repository's own build props must not apply to the fixture.
     /// </summary>
-    private string NewToolchainRepo(string family, string variant)
+    private async Task<string> NewToolchainRepo(string family, string variant)
     {
         string source = Path.Combine(
             Corpus.Root, "tests", "fixtures", "gate-catalogue", family, variant);
@@ -306,10 +306,10 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
 
         string repo = Path.Combine(_temp.Path, family + "-" + Guid.NewGuid().ToString("N"));
         CopyDirectory(source, repo);
-        MustGit(repo, "init", "--quiet");
+        await MustGit(repo, "init", "--quiet");
         WriteHostConfig(repo, TechnologiesFor(family));
-        MustGit(repo, "add", "-A");
-        Commit(repo, "fixture");
+        await MustGit(repo, "add", "-A");
+        await Commit(repo, "fixture");
 
         CapturedConsoleExecution<int> init = ProcessConsoleCapture.Run(
             () => CommandAppFixture.DocsInit().Run(["docs", "init", repo, "--no-skill"]));
@@ -318,12 +318,12 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
             $"docs init exited {init.Result} on the {family} {variant} fixture. " +
             $"Output:{Environment.NewLine}{init.Output}");
 
-        MustGit(repo, "add", "-A");
-        Commit(repo, "docs init");
+        await MustGit(repo, "add", "-A");
+        await Commit(repo, "docs init");
 
         if (string.Equals(family, "typescript", StringComparison.Ordinal))
         {
-            NpmCi(repo);
+            await NpmCi(repo);
         }
 
         return repo;
@@ -341,7 +341,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     /// <c>npm run</c> gates test the fixture rather than the network. Reports the transcript
     /// on failure: a failed install is a broken premise, not a failed gate.
     /// </summary>
-    private void NpmCi(string repo)
+    private async Task NpmCi(string repo)
     {
         ProcessStartInfo startInfo = new("npm")
         {
@@ -354,7 +354,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
         };
         startInfo.ArgumentList.Add("ci");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromMinutes(10));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromMinutes(10));
         output.WriteLine($"typescript npm ci exit code: {result.ExitCode}");
         Assert.True(
             result.ExitCode == 0,
@@ -504,9 +504,9 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
         }
     }
 
-    private static void Commit(string repo, string message)
+    private static async Task Commit(string repo, string message)
     {
-        MustGit(
+        await MustGit(
             repo,
             "-c", "user.name=ship-gate-13",
             "-c", "user.email=ship-gate-13@example.invalid",
@@ -514,7 +514,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
             "commit", "--quiet", "-m", message);
     }
 
-    private static void MustGit(string repo, params string[] arguments)
+    private static async Task MustGit(string repo, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -530,7 +530,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
             startInfo.ArgumentList.Add(argument);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} failed: {result.StandardOutput} {result.StandardError}");

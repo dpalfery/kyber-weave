@@ -12,26 +12,35 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// a comment-only file must not make the change look comment-only, so the change set is absent (undecidable)
 /// rather than measured. Ordinary untracked files are still measured.
 /// </summary>
-public sealed class ArbiterUntrackedSymlinkTests : IDisposable
+public sealed class ArbiterUntrackedSymlinkTests : IAsyncLifetime
 {
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
     /// <summary>Deletes the probe repository.</summary>
-    public void Dispose() => _probe.Dispose();
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _probe.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>
     /// An untracked link to a comment-only file is not read through: the change set is absent, so no lens
     /// can skip the link as a comment-only change.
     /// </summary>
     [Fact]
-    public void AnUntrackedLinkToACommentOnlyFileLeavesTheChangeSetAbsent()
+    public async Task AnUntrackedLinkToACommentOnlyFileLeavesTheChangeSetAbsent()
     {
-        CommitFile("src/Tracked.cs", "class Tracked { }\n");
+        await CommitFile("src/Tracked.cs", "class Tracked { }\n");
         string baseRef = Head();
         Write("notes/Comment.cs", "// only a comment\n");
         CreateLinkOrSkip("src/Link.cs", Path.Combine("..", "notes", "Comment.cs"));
 
-        ChangeSet? change = RealGitFacts.Create().GetChangeSet(_probe.Root, baseRef);
+        ChangeSet? change = await RealGitFacts.Create().GetChangeSetAsync(_probe.Root, baseRef);
 
         Assert.Null(change);
     }
@@ -41,13 +50,13 @@ public sealed class ArbiterUntrackedSymlinkTests : IDisposable
     /// fail-safe above applies to links alone.
     /// </summary>
     [Fact]
-    public void AnUntrackedRegularFileIsStillMeasured()
+    public async Task AnUntrackedRegularFileIsStillMeasured()
     {
-        CommitFile("src/Tracked.cs", "class Tracked { }\n");
+        await CommitFile("src/Tracked.cs", "class Tracked { }\n");
         string baseRef = Head();
         Write("notes/Comment.cs", "// only a comment\n");
 
-        ChangeSet? change = RealGitFacts.Create().GetChangeSet(_probe.Root, baseRef);
+        ChangeSet? change = await RealGitFacts.Create().GetChangeSetAsync(_probe.Root, baseRef);
 
         Assert.NotNull(change);
         Assert.Contains(change.Hunks, measured => measured.Hunk.Path == "notes/Comment.cs");
@@ -70,11 +79,11 @@ public sealed class ArbiterUntrackedSymlinkTests : IDisposable
     private string Head() =>
         RealGitFacts.Create().GetHead(_probe.Root) ?? throw new InvalidOperationException("the probe repository has no HEAD.");
 
-    private void CommitFile(string relative, string text)
+    private async Task CommitFile(string relative, string text)
     {
         Write(relative, text);
-        _probe.Git("add", "-A");
-        _probe.Git("commit", "-m", $"test: {relative}");
+        await _probe.GitAsync("add", "-A");
+        await _probe.GitAsync("commit", "-m", $"test: {relative}");
     }
 
     private void Write(string relative, string text)

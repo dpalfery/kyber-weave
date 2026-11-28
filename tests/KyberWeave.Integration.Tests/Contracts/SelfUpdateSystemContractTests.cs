@@ -100,7 +100,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
     }
 
     [Fact]
-    public void AnArchiveMadeBySystemTarAsTheReleaseWorkflowDoesExtractsWithItsExecutableBit()
+    public async Task AnArchiveMadeBySystemTarAsTheReleaseWorkflowDoesExtractsWithItsExecutableBit()
     {
         if (OperatingSystem.IsWindows())
             return;
@@ -115,7 +115,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
         foreach (string argument in new[] { "-C", packed, "-czf", archive, "kyber-weave" })
             tar.ArgumentList.Add(argument);
 
-        ProcessResult made = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));
+        ProcessResult made = await ProcessRunner.RunAsync(tar, string.Empty, TimeSpan.FromSeconds(30));
         Assert.Equal(0, made.ExitCode);
 
         _system.ExtractArchive(archive, Path.Combine(_root, "extract"), windows: false);

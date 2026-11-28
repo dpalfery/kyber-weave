@@ -58,9 +58,9 @@ public sealed class UpstreamSeveranceTests
     };
 
     [Fact]
-    public void NoTrackedFileOutsideDocsNamesTheUpstream()
+    public async Task NoTrackedFileOutsideDocsNamesTheUpstream()
     {
-        List<string> trackedFiles = ListTrackedFiles();
+        List<string> trackedFiles = await ListTrackedFiles();
         ConcurrentBag<string> offenders = new();
 
         Parallel.ForEach(trackedFiles, relativePath =>
@@ -162,7 +162,7 @@ public sealed class UpstreamSeveranceTests
         return normalized == "docs" || normalized.StartsWith("docs/", StringComparison.Ordinal);
     }
 
-    private static List<string> ListTrackedFiles()
+    private static async Task<List<string>> ListTrackedFiles()
     {
         ProcessStartInfo start = new("git")
         {
@@ -175,7 +175,7 @@ public sealed class UpstreamSeveranceTests
         start.ArgumentList.Add("ls-files");
         start.ArgumentList.Add("-z");
 
-        ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(start, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git ls-files failed: {result.StandardError}");
 
         // -z separates entries with NUL, so paths with spaces or quotes stay
