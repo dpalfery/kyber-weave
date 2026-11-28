@@ -186,6 +186,19 @@ internal sealed partial class InMemoryArbiterHost : IDisposable
         return new ArbiterCommandRun(exitCode, Console.Output[before..]);
     }
 
+    /// <summary>
+    /// Runs an async command and reports its exit code with only what it wrote to the console during the call;
+    /// the token it hands to the command is <see cref="CancellationToken.None"/>, so the run cannot be cancelled.
+    /// </summary>
+    /// <param name="execute">Runs the command, passed the token the run hands it.</param>
+    internal async Task<ArbiterCommandRun> RunAsync(Func<CancellationToken, Task<int>> execute)
+    {
+        ArgumentNullException.ThrowIfNull(execute);
+        int before = Console.Output.Length;
+        int exitCode = await execute(CancellationToken.None).ConfigureAwait(false);
+        return new ArbiterCommandRun(exitCode, Console.Output[before..]);
+    }
+
     /// <summary>A path under the working directory.</summary>
     /// <param name="segments">The names below the working directory.</param>
     internal string InWork(params string[] segments) => Path.Combine([WorkingDirectory, .. segments]);

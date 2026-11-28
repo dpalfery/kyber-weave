@@ -19,54 +19,54 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void AConfiguredModelThatWasNeverAsked_IsReported()
+    public async Task AConfiguredModelThatWasNeverAsked_IsReported()
     {
-        string output = Audit(provider: "systemone", step: 0);
+        string output = await AuditAsync(provider: "systemone", step: 0);
 
         Assert.Contains(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
         Assert.Contains("0 decision-model evaluation(s) over 1 dispatch(es)", output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AModelThatWasAsked_IsCountedAndNotReported()
+    public async Task AModelThatWasAsked_IsCountedAndNotReported()
     {
-        string output = Audit(provider: "systemone", step: 1);
+        string output = await AuditAsync(provider: "systemone", step: 1);
 
         Assert.DoesNotContain(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
         Assert.Contains("1 decision-model evaluation(s) over 1 dispatch(es)", output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WithProviderNone_TheGuardStaysSilent()
+    public async Task WithProviderNone_TheGuardStaysSilent()
     {
-        string output = Audit(provider: "none", step: 0);
+        string output = await AuditAsync(provider: "none", step: 0);
 
         Assert.DoesNotContain(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ModelTargetingAnswersAlone_DoNotHideAJudgementGap()
+    public async Task ModelTargetingAnswersAlone_DoNotHideAJudgementGap()
     {
-        string output = Audit(provider: "systemone", step: 1, trigger: "delegate.model");
+        string output = await AuditAsync(provider: "systemone", step: 1, trigger: "delegate.model");
 
         Assert.Contains(ArbiterAuditCommand.NoModelEvaluations, output, StringComparison.Ordinal);
     }
 
-    private string Audit(string provider, int step, string trigger = "delegate")
+    private async Task<string> AuditAsync(string provider, int step, string trigger = "delegate")
     {
         string root = _host.InWork("host");
         _ = _host.Write(
             Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
             $"ontology:\n  docs-root: docs\narbiter:\n  provider:\n    kind: {provider}\n");
         string arbiter = Path.Combine(root, "artifacts", "arbiter");
-        _host.State.Ledger(arbiter).AppendAsync(
+        await _host.State.Ledger(arbiter).AppendAsync(
             new ArbiterLedgerEvent(LedgerId, DateTimeOffset.UtcNow, "hook", "copilot-cli", "s-1", ArbiterLedgerPhases.Pre)
             {
                 Trigger = "delegate",
                 Target = "dev-medium",
-            }).GetAwaiter().GetResult();
+            });
         string answer = step == 1 ? "within-task" : "no-task";
-        _host.State.Log.AppendLineAsync(
+        await _host.State.Log.AppendLineAsync(
             arbiter,
             "decisions.jsonl",
             "{\"id\":\"0000000000000009-bbbbbbbb\",\"at\":\"2026-11-14T00:00:00Z\",\"source\":\"hook\",\"harness\":\"copilot-cli\"," +
@@ -74,10 +74,10 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
             "\"rule-set\":\"x\",\"rules\":[{\"id\":\"KW-ARB-SCOPE-002\",\"step\":" + step + ",\"answer\":\"" + answer +
             "\",\"effect\":\"allow\",\"facts\":[]}],\"provider\":{\"kind\":\"systemone\",\"latency-ms\":1,\"status\":\"answered\"}," +
             "\"outcome\":\"allow\",\"repeat\":1,\"duration-ms\":1,\"schema\":\"kyber-arbiter.decision/v1\"}",
-            CancellationToken.None).GetAwaiter().GetResult();
+            CancellationToken.None);
 
-        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
-            null!, new ArbiterSettings { Path = root }));
+        ArbiterCommandRun run = await _host.RunAsync(token => _host.Command<ArbiterAuditCommand>().ExecuteAsync(
+            null!, new ArbiterSettings { Path = root }, token));
         return run.Output;
     }
 }

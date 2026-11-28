@@ -50,14 +50,14 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void Setup_WritesOverrideAndStore_NeverEchoing()
+    public async Task Setup_WritesOverrideAndStore_NeverEchoing()
     {
         const string key = "TS-SETUP-KEY-7f3a9c1e";
         _keyStdinValue = key;
         string host = NewDir("setup-cloud");
 
         ArbiterSetupCommand command = _host.Command<ArbiterSetupCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -66,14 +66,15 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Endpoint = "https://api.typesafe.ai/v1",
                 Model = "jev-1.13.0",
                 KeyStdin = true,
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         string written = _host.Files.ReadAllText(OverridePath());
         Assert.Contains("systemone", written, StringComparison.Ordinal);
         Assert.Contains("https://api.typesafe.ai/v1", written, StringComparison.Ordinal);
         Assert.DoesNotContain(key, written, StringComparison.Ordinal);
-        Assert.Equal(key, _store.Read("https://api.typesafe.ai"));
+        Assert.Equal(key, await _store.ReadAsync("https://api.typesafe.ai"));
         Assert.DoesNotContain(key, execution.Output, StringComparison.Ordinal);
         Assert.Contains("systemone", execution.Output, StringComparison.Ordinal);
     }
@@ -90,12 +91,12 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     [InlineData("model 'single'")]
     [InlineData("model\\backslash")]
     [InlineData("  padded  ")]
-    public void Setup_WritesAModelThatRoundTripsThroughTheUserSettings(string model)
+    public async Task Setup_WritesAModelThatRoundTripsThroughTheUserSettings(string model)
     {
         string host = NewDir("setup-model");
         ArbiterSetupCommand command = _host.Command<ArbiterSetupCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -103,7 +104,8 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Provider = "none",
                 Endpoint = "https://api.typesafe.ai/v1",
                 Model = model,
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         ArbiterProviderConfig applied = _host.Get<IArbiterUserSettings>().ApplyTo(
@@ -118,11 +120,11 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     [InlineData("model\nendpoint: https://evil.example/v1")]
     [InlineData("model\r\nother: value")]
     [InlineData("model\ttab")]
-    public void Setup_RejectsAModelCarryingControlCharacters(string model)
+    public async Task Setup_RejectsAModelCarryingControlCharacters(string model)
     {
         string host = NewDir("setup-control");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -130,20 +132,21 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Provider = "none",
                 Endpoint = "https://api.typesafe.ai/v1",
                 Model = model,
-            }));
+            },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.DoesNotContain("evil.example", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Setup_MaskedPrompt_StoresKeyWithoutEchoing()
+    public async Task Setup_MaskedPrompt_StoresKeyWithoutEchoing()
     {
         const string key = "TS-PROMPT-KEY-1a2b3c4d";
         _keyPromptValue = key;
         string host = NewDir("setup-prompt");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -151,20 +154,21 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Provider = "systemone",
                 Endpoint = "https://api.typesafe.ai/v1",
                 Model = "jev-1.13.0",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Equal(key, _store.Read("https://api.typesafe.ai"));
+        Assert.Equal(key, await _store.ReadAsync("https://api.typesafe.ai"));
         Assert.DoesNotContain(key, execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Setup_LocalOllama_SuggestsNimble()
+    public async Task Setup_LocalOllama_SuggestsNimble()
     {
         _ollamaResponder = _ => JsonResponse("""{"version":"0.35.0"}""");
         string host = NewDir("setup-ollama");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -172,7 +176,8 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Provider = "systemone",
                 Endpoint = "http://localhost:11434/v1",
                 Model = "nimble",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("0.35", execution.Output, StringComparison.Ordinal);
@@ -181,12 +186,12 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Setup_Tev1_WarnsSmallInputBudget()
+    public async Task Setup_Tev1_WarnsSmallInputBudget()
     {
         _ollamaResponder = _ => JsonResponse("""{"version":"0.35.0"}""");
         string host = NewDir("setup-tev1");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -194,7 +199,8 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Provider = "systemone",
                 Endpoint = "http://localhost:11434/v1",
                 Model = "tev1",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("tev1", execution.Output, StringComparison.Ordinal);
@@ -202,13 +208,14 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Setup_ProviderNone_WritesNoneWithoutKey()
+    public async Task Setup_ProviderNone_WritesNoneWithoutKey()
     {
         string host = NewDir("setup-none");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host, Provider = "none" }));
+            new ArbiterSettings { Path = host, Provider = "none" },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
 
@@ -218,29 +225,31 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Setup_UnknownProvider_ExitsOne()
+    public async Task Setup_UnknownProvider_ExitsOne()
     {
         string host = NewDir("setup-bad-provider");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host, Provider = "no-such-provider" }));
+            new ArbiterSettings { Path = host, Provider = "no-such-provider" },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("KW-ARB-CONFIG-001", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Status_ShowsProviderModelOriginAndKeyPresence_NeverValue()
+    public async Task Status_ShowsProviderModelOriginAndKeyPresence_NeverValue()
     {
         const string key = "TS-STATUS-KEY-4b2d8f0a";
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         _store.Seed("https://api.typesafe.ai", key);
         string host = NewDir("status-found");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterStatusCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("systemone", execution.Output, StringComparison.Ordinal);
@@ -251,27 +260,29 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Status_MissingKey_ReportsKey001WithoutValue()
+    public async Task Status_MissingKey_ReportsKey001WithoutValue()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         string host = NewDir("status-missing");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterStatusCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains(ArbiterStatusCommand.KeyMissing, execution.Output, StringComparison.Ordinal);
         Assert.Contains("missing", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Doctor_ProviderNone_RaisesConfig006()
+    public async Task Doctor_ProviderNone_RaisesConfig006()
     {
         string host = NewDir("doctor-006");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host, Format = "json" }));
+            new ArbiterSettings { Path = host, Format = "json" },
+            token));
 
         Assert.Contains("KW-ARB-CONFIG-006", execution.Output, StringComparison.Ordinal);
     }
@@ -280,13 +291,14 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     [InlineData("copilot-cli")]
     [InlineData("codex")]
     [InlineData("cursor")]
-    public void Doctor_NamesEachAdvisoryPostDispatchTarget(string target)
+    public async Task Doctor_NamesEachAdvisoryPostDispatchTarget(string target)
     {
         string host = NewDir("doctor-advisory-" + target);
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         // The runbook promises doctor surfaces every target whose post-dispatch
         // findings are advisory; none may be silently missing.
@@ -295,69 +307,74 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_UntunedModel_RaisesConfig007()
+    public async Task Doctor_UntunedModel_RaisesConfig007()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: mystery-model\n");
         string host = NewDir("doctor-007");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host, Format = "json" }));
+            new ArbiterSettings { Path = host, Format = "json" },
+            token));
 
         Assert.Contains("KW-ARB-CONFIG-007", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_BadOverride_RaisesConfig009()
+    public async Task Doctor_BadOverride_RaisesConfig009()
     {
         WriteOverride("provider:\n  model: nimble\nextra: 1\n");
         string host = NewDir("doctor-009");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host, Format = "json" }));
+            new ArbiterSettings { Path = host, Format = "json" },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("KW-ARB-CONFIG-009", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_PlainHttpEndpoint_RaisesConfig010()
+    public async Task Doctor_PlainHttpEndpoint_RaisesConfig010()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: http://example.com/v1\n  model: jev-1.13.0\n");
         string host = NewDir("doctor-010");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host, Format = "json" }));
+            new ArbiterSettings { Path = host, Format = "json" },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("KW-ARB-CONFIG-010", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_MissingKey_RaisesKey001()
+    public async Task Doctor_MissingKey_RaisesKey001()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         string host = NewDir("doctor-key");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains(ArbiterStatusCommand.KeyMissing, execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_SecretToolMissing_ReportsKey001WithActionableText()
+    public async Task Doctor_SecretToolMissing_ReportsKey001WithActionableText()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         _storeOverride = new SecretServiceCredentialStore(new MissingExecutableCredentialProcessRunner());
         string host = NewDir("doctor-no-secret-tool");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains(ArbiterStatusCommand.KeyMissing, execution.Output, StringComparison.Ordinal);
         Assert.Contains("TYPESAFE_API_KEY", execution.Output, StringComparison.Ordinal);
@@ -367,13 +384,13 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Setup_SecretToolMissing_ExitsOneWithActionableText()
+    public async Task Setup_SecretToolMissing_ExitsOneWithActionableText()
     {
         _keyStdinValue = "TS-NOTOOL-KEY-0c1d2e3f";
         _storeOverride = new SecretServiceCredentialStore(new MissingExecutableCredentialProcessRunner());
         string host = NewDir("setup-no-secret-tool");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterSetupCommand>().ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -382,7 +399,8 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 Endpoint = "https://api.typesafe.ai/v1",
                 Model = "jev-1.13.0",
                 KeyStdin = true,
-            }));
+            },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("TYPESAFE_API_KEY", execution.Output, StringComparison.Ordinal);
@@ -391,7 +409,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_UnignoredLog_RaisesLog001()
+    public async Task Doctor_UnignoredLog_RaisesLog001()
     {
         _runGit = (_, arguments) =>
             arguments.Contains("check-ignore")
@@ -399,34 +417,37 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 : new GitOutcome(1, string.Empty, "not a repo");
         string host = NewDir("doctor-log");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains(ArbiterDoctorCommand.LogNotIgnored, execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_MissingBinary_RaisesBin001()
+    public async Task Doctor_MissingBinary_RaisesBin001()
     {
         _probeResult = new ProcessResult(1, string.Empty, "missing");
         string host = NewDir("doctor-bin");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains(ArbiterDoctorCommand.BinaryMissing, execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_NoIndexes_RaisesGuard001()
+    public async Task Doctor_NoIndexes_RaisesGuard001()
     {
         string host = NewDir("doctor-guard");
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains(ArbiterDoctorCommand.GuardWithoutIndex, execution.Output, StringComparison.Ordinal);
     }

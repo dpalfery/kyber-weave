@@ -16,7 +16,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void Doctor_ReportsScopeSummary_AndWarnsWhenProjectEnabledWithoutHooks()
+    public async Task Doctor_ReportsScopeSummary_AndWarnsWhenProjectEnabledWithoutHooks()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi", "commandcode"]);
         WriteProjectConfig(
@@ -25,9 +25,10 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
               enabled: true
             """);
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = _host.WorkingDirectory }));
+            new ArbiterSettings { Path = _host.WorkingDirectory },
+            token));
 
         Assert.Contains("GLOBAL scope", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("PROJECT scope", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -87,12 +88,12 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     /// would be dropped without anyone seeing it, so the doctor warns and names the fix.
     /// </summary>
     [Fact]
-    public void Doctor_WarnsModelMissingWhenTargetingIsOnAndTheHookedTargetHasNoTargetsFile()
+    public async Task Doctor_WarnsModelMissingWhenTargetingIsOnAndTheHookedTargetHasNoTargetsFile()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
 
-        ArbiterCommandRun execution = RunDoctor();
+        ArbiterCommandRun execution = await RunDoctorAsync();
 
         Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
@@ -100,13 +101,13 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
 
     /// <summary>A targets file that does not parse is the same warning as a missing one.</summary>
     [Fact]
-    public void Doctor_WarnsModelUnreadableWhenTheTargetsFileDoesNotParse()
+    public async Task Doctor_WarnsModelUnreadableWhenTheTargetsFileDoesNotParse()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
         WriteFile(GlobalModelTargetsPath, "{not json");
 
-        ArbiterCommandRun execution = RunDoctor();
+        ArbiterCommandRun execution = await RunDoctorAsync();
 
         Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
@@ -117,7 +118,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     /// than the Squad lock means it was written before the last squad update.
     /// </summary>
     [Fact]
-    public void Doctor_WarnsModelStaleWhenTheTargetsFileIsOlderThanTheSquadLock()
+    public async Task Doctor_WarnsModelStaleWhenTheTargetsFileIsOlderThanTheSquadLock()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
@@ -125,7 +126,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
         _host.Clock.Advance(TimeSpan.FromHours(2));
         WriteFile(GlobalLockPath, "schema: kyber-squad.lock/v2\n");
 
-        ArbiterCommandRun execution = RunDoctor();
+        ArbiterCommandRun execution = await RunDoctorAsync();
 
         Assert.Contains("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
         Assert.Contains("Run kyber-weave squad update", execution.Output, StringComparison.Ordinal);
@@ -133,7 +134,7 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
 
     /// <summary>The negative for the stale case: a targets file newer than the lock is not warned.</summary>
     [Fact]
-    public void Doctor_DoesNotWarnModelWhenTheTargetsFileIsCurrent()
+    public async Task Doctor_DoesNotWarnModelWhenTheTargetsFileIsCurrent()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
@@ -141,14 +142,14 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
         _host.Clock.Advance(TimeSpan.FromHours(2));
         WriteFile(GlobalModelTargetsPath, ModelTargetsJson);
 
-        ArbiterCommandRun execution = RunDoctor();
+        ArbiterCommandRun execution = await RunDoctorAsync();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>Targeting off means no model is routed, so a missing targets file is not a warning.</summary>
     [Fact]
-    public void Doctor_DoesNotWarnModelWhenTargetingIsOff()
+    public async Task Doctor_DoesNotWarnModelWhenTargetingIsOff()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(
@@ -159,27 +160,28 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
                 mode: off
             """);
 
-        ArbiterCommandRun execution = RunDoctor();
+        ArbiterCommandRun execution = await RunDoctorAsync();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>With no hooked target installed there is no override to honour, so no warning.</summary>
     [Fact]
-    public void Doctor_DoesNotWarnModelWhenNoHookedTargetIsInstalled()
+    public async Task Doctor_DoesNotWarnModelWhenNoHookedTargetIsInstalled()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp"]);
         WriteProjectConfig(ShadowModelTargetingYaml);
 
-        ArbiterCommandRun execution = RunDoctor();
+        ArbiterCommandRun execution = await RunDoctorAsync();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", execution.Output, StringComparison.Ordinal);
     }
 
-    private ArbiterCommandRun RunDoctor() =>
-        _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+    private Task<ArbiterCommandRun> RunDoctorAsync() =>
+        _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = _host.WorkingDirectory }));
+            new ArbiterSettings { Path = _host.WorkingDirectory },
+            token));
 
     private void WriteFile(string path, string content) => _ = _host.Write(path, content);
 

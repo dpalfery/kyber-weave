@@ -40,12 +40,12 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// each raises exactly one project diagnostic. Claude is not installed here and must not appear.
     /// </summary>
     [Fact]
-    public void Doctor_ListsEachUngatedInstalledHarnessWithItsFixCommand_AndNeverNamesAnAbsentClaude()
+    public async Task Doctor_ListsEachUngatedInstalledHarnessWithItsFixCommand_AndNeverNamesAnAbsentClaude()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["antigravity", "copilot"]);
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertNoLineNames(output, "Claude");
         Assert.DoesNotContain("Project hooks: installed", output, StringComparison.Ordinal);
@@ -62,12 +62,12 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// block exists for Claude, so Claude is live under the global hook for this project's configuration.
     /// </summary>
     [Fact]
-    public void Doctor_NamesClaudeAsGatedByTheGlobalHookUnderThisProjectsConfiguration_WhenTheUserHookIsLive()
+    public async Task Doctor_NamesClaudeAsGatedByTheGlobalHookUnderThisProjectsConfiguration_WhenTheUserHookIsLive()
     {
         SetUpLiveClaudeHook("PreToolUse");
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertLineNames(output, "Claude", "gated by the global hook under this project's configuration");
         Assert.DoesNotContain("KW-ARB-PROJECT-001", output, StringComparison.Ordinal);
@@ -78,12 +78,12 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// does not gate anything: Claude is reported ungated with the Claude fix command.
     /// </summary>
     [Fact]
-    public void Doctor_ReportsClaudeUngated_WhenTheUserHookSitsOnlyUnderLowerCasePreToolUse()
+    public async Task Doctor_ReportsClaudeUngated_WhenTheUserHookSitsOnlyUnderLowerCasePreToolUse()
     {
         SetUpLiveClaudeHook("preToolUse");
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertLineNames(output, "Claude", "ungated", "kyber-weave arbiter install --target claude");
         Assert.Contains("KW-ARB-PROJECT-001", output, StringComparison.Ordinal);
@@ -94,7 +94,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// gates Claude, and the Claude line must name the file so the operator can see where it comes from.
     /// </summary>
     [Fact]
-    public void Doctor_NamesTheClaudeProjectAgentFile_WhenProjectHooksGateClaude()
+    public async Task Doctor_NamesTheClaudeProjectAgentFile_WhenProjectHooksGateClaude()
     {
         SetUpLiveClaudeHook("PreToolUse");
         WriteProjectConfig(EnabledYaml);
@@ -112,7 +112,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
             ---
             """);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertLineNames(output, "Claude", ClaudeProjectAgentPath);
     }
@@ -122,7 +122,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// receipt says Squad installed it, so the global targets file is out of step with the install.
     /// </summary>
     [Fact]
-    public void Doctor_WarnsGlobalWhenTheClaudeReceiptBlockIsNotInGlobalTargets()
+    public async Task Doctor_WarnsGlobalWhenTheClaudeReceiptBlockIsNotInGlobalTargets()
     {
         WriteGlobalReceipt(
             files: [],
@@ -130,7 +130,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["copilot"]);
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         Assert.Contains("KW-ARB-GLOBAL-001", output, StringComparison.Ordinal);
         Assert.Contains("kyber-weave arbiter install --target claude", output, StringComparison.Ordinal);
@@ -138,7 +138,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
 
     /// <summary>The same receipt block with Claude listed in the global targets is consistent, so no global warning.</summary>
     [Fact]
-    public void Doctor_DoesNotWarnGlobalWhenTheClaudeReceiptBlockIsListedInGlobalTargets()
+    public async Task Doctor_DoesNotWarnGlobalWhenTheClaudeReceiptBlockIsListedInGlobalTargets()
     {
         WriteGlobalReceipt(
             files: [],
@@ -146,7 +146,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         Assert.DoesNotContain("KW-ARB-GLOBAL-001", output, StringComparison.Ordinal);
     }
@@ -156,14 +156,14 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// Codex installed. Codex must not get a line and must not raise either diagnostic.
     /// </summary>
     [Fact]
-    public void Doctor_IgnoresOrdinaryAgentFilesInTheGlobalReceipt_ForCodex()
+    public async Task Doctor_IgnoresOrdinaryAgentFilesInTheGlobalReceipt_ForCodex()
     {
         WriteGlobalReceipt(
             files: [OwnedFile("agents/architect/references/arbiter-escalation.md", "codex")],
             blocks: []);
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertNoGatingLineNames(output, "Codex");
         Assert.DoesNotContain("KW-ARB-GLOBAL-001", output, StringComparison.Ordinal);
@@ -175,7 +175,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// but not in the global targets, so the global warning names it and gives its install command.
     /// </summary>
     [Fact]
-    public void Doctor_WarnsGlobalWhenTheCopilotShimHookFileIsOwnedButCopilotIsNotListed()
+    public async Task Doctor_WarnsGlobalWhenTheCopilotShimHookFileIsOwnedButCopilotIsNotListed()
     {
         WriteGlobalReceipt(
             files: [OwnedFile("hooks/kyber-arbiter.json", "copilot")],
@@ -183,7 +183,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["claude"]);
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         Assert.Contains("KW-ARB-GLOBAL-001", output, StringComparison.Ordinal);
         AssertLineNames(output, "Copilot", "kyber-weave arbiter install --target copilot");
@@ -194,12 +194,12 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// raises a project diagnostic.
     /// </summary>
     [Fact]
-    public void Doctor_ReportsWarpAsFallbackOnlyWithoutAFixOrADiagnostic()
+    public async Task Doctor_ReportsWarpAsFallbackOnlyWithoutAFixOrADiagnostic()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp"]);
         WriteProjectConfig(EnabledYaml);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertLineNames(output, "Warp", "fallback-only");
         Assert.DoesNotContain(
@@ -213,7 +213,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// diagnostic stays silent.
     /// </summary>
     [Fact]
-    public void Doctor_ReportsEachInstalledHarnessOptedOut_WhenTheProjectDisablesArbiter()
+    public async Task Doctor_ReportsEachInstalledHarnessOptedOut_WhenTheProjectDisablesArbiter()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["antigravity", "copilot"]);
         WriteProjectConfig(
@@ -222,7 +222,7 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
               enabled: false
             """);
 
-        string output = RunDoctor().Output;
+        string output = (await RunDoctorAsync()).Output;
 
         AssertLineNames(output, "Antigravity", "opted out");
         AssertLineNames(output, "Copilot", "opted out");
@@ -234,14 +234,15 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
     /// override that hides a harness nothing gates.
     /// </summary>
     [Fact]
-    public void Status_NamesClaudeGatedByTheGlobalHook_AndNeverReportsAProjectOverride()
+    public async Task Status_NamesClaudeGatedByTheGlobalHook_AndNeverReportsAProjectOverride()
     {
         SetUpLiveClaudeHook("PreToolUse");
         WriteProjectConfig(EnabledYaml);
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterStatusCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = _repo }));
+            new ArbiterSettings { Path = _repo },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("project overrides global", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -326,10 +327,11 @@ public sealed class ArbiterHarnessGatingTests : IDisposable
 
     private void WriteFile(string path, string content) => _host.Write(path, content);
 
-    private ArbiterCommandRun RunDoctor() =>
-        _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+    private Task<ArbiterCommandRun> RunDoctorAsync() =>
+        _host.RunAsync(token => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = _repo }));
+            new ArbiterSettings { Path = _repo },
+            token));
 
     private static IEnumerable<string> LinesNaming(string output, string label) =>
         output.Split('\n').Where(line => Regex.IsMatch(line, $@"\b{label}\b"));

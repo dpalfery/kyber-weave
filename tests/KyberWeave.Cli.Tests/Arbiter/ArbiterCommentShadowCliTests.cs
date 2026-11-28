@@ -50,14 +50,15 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
 
     /// <summary>An inline answer in shadow prints the real class and the line saying what the model would have given.</summary>
     [Fact]
-    public void Inline_InShadow_PrintsRealAndTheLineSayingWhatTheModelWouldHaveGiven()
+    public async Task Inline_InShadow_PrintsRealAndTheLineSayingWhatTheModelWouldHaveGiven()
     {
         WriteCitedFile();
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("class real", execution.Output, StringComparison.Ordinal);
@@ -67,14 +68,15 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
 
     /// <summary>With no provider the shadow line says nothing was answered, so an empty answer is not read as a nitpick.</summary>
     [Fact]
-    public void Inline_NoProvider_InShadow_SaysNothingWasAnswered()
+    public async Task Inline_NoProvider_InShadow_SaysNothingWasAnswered()
     {
         WriteCitedFile();
         ArbiterCommentCommand command = Command(new NoneProvider());
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("class real", execution.Output, StringComparison.Ordinal);
@@ -83,15 +85,16 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
 
     /// <summary>A host override that switches shadow off prints the model's class and no shadow line.</summary>
     [Fact]
-    public void Inline_HostOverrideSwitchingShadowOff_PrintsTheModelsClassWithNoShadowLine()
+    public async Task Inline_HostOverrideSwitchingShadowOff_PrintsTheModelsClassWithNoShadowLine()
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: false\n");
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("class nitpick", execution.Output, StringComparison.Ordinal);
@@ -100,15 +103,16 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
 
     /// <summary>Each summary row in shadow prints its real class and the would-have-been note beside it.</summary>
     [Fact]
-    public void Summary_InShadow_PrintsTheWouldHaveBeenNoteOnEachRow()
+    public async Task Summary_InShadow_PrintsTheWouldHaveBeenNoteOnEachRow()
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  comment-triage:\n    bot-logins:\n      - " + BotLogin + "\n");
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = BotLogin, Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = BotLogin, Body = Summary },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("src/Widget.cs:12 real", execution.Output, StringComparison.Ordinal);
@@ -118,7 +122,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
 
     /// <summary>With shadow switched off, each summary row prints the model's class and no shadow note.</summary>
     [Fact]
-    public void Summary_HostOverrideSwitchingShadowOff_PrintsTheModelsClassWithNoShadowNote()
+    public async Task Summary_HostOverrideSwitchingShadowOff_PrintsTheModelsClassWithNoShadowNote()
     {
         WriteCitedFile();
         WriteHostConfig(
@@ -126,9 +130,10 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
             "\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: false\n");
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = BotLogin, Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = BotLogin, Body = Summary },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("src/Widget.cs:12 nitpick", execution.Output, StringComparison.Ordinal);

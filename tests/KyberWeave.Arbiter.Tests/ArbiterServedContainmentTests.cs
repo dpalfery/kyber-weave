@@ -91,10 +91,10 @@ public sealed class ArbiterServedContainmentTests : IDisposable
 
     /// <summary>The CLI comment command refuses a cited file outside the root: exit 1, the containment message, and no decision.</summary>
     [Fact]
-    public void TheCommentCommandRefusesAFileOutsideTheRoot()
+    public async Task TheCommentCommandRefusesAFileOutsideTheRoot()
     {
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun run = _host.Run(() => command.Execute(
+        ArbiterCommandRun run = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -102,7 +102,8 @@ public sealed class ArbiterServedContainmentTests : IDisposable
                 Path = WriteOutsideDocument(),
                 Line = 2,
                 Body = "Shorten this heading.",
-            }));
+            },
+            token));
 
         Assert.Equal(1, run.ExitCode);
         ConsoleOutputAssert.ContainsUnwrapped(OutsideMessageStem, run.Output);
