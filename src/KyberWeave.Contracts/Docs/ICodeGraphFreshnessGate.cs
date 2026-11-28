@@ -10,5 +10,8 @@ public interface ICodeGraphFreshnessGate
 {
     /// <summary>The gate's verdict for this call: no refresh due, the refresh is someone else's, or a failure to report.</summary>
     /// <param name="resolverFactory">Builds the CodeGraph port the docs tools answer from.</param>
-    CodeGraphGate Evaluate(Func<ICodeGraphResolver> resolverFactory);
+    /// <param name="cancellationToken">Cancels the refresh.</param>
+    Task<CodeGraphGate> EvaluateAsync(
+        Func<ICodeGraphResolver> resolverFactory,
+        CancellationToken cancellationToken = default);
 }

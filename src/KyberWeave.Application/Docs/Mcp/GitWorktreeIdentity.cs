@@ -12,10 +12,8 @@ public sealed class GitWorktreeIdentity(IProcessRunner process, IPathResolver pa
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(5);
 
     /// <inheritdoc />
-    public bool TryRoots(string directory, out string? topLevel, out string? commonDirectory, out string? failure)
+    public async Task<GitWorktreeRoots> TryRootsAsync(string directory, CancellationToken cancellationToken = default)
     {
-        topLevel = null;
-        commonDirectory = null;
         ProcessRunRequest request = new()
         {
             Program = "git",
@@ -27,38 +25,36 @@ public sealed class GitWorktreeIdentity(IProcessRunner process, IPathResolver pa
 
         try
         {
-            ProcessRunResult result = process.RunAsync(request).GetAwaiter().GetResult();
+            ProcessRunResult result = await process.RunAsync(request, cancellationToken).ConfigureAwait(false);
             if (result.TimedOut)
             {
-                failure = $"The process did not exit within {GitTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.";
-                return false;
+                return new GitWorktreeRoots(
+                    null,
+                    null,
+                    $"The process did not exit within {GitTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
             }
 
             if (result.ExitCode != 0)
             {
-                failure = CorpusProvenance.FirstLine(result.StandardError);
-                return false;
+                return new GitWorktreeRoots(null, null, CorpusProvenance.FirstLine(result.StandardError));
             }
 
             string[] lines = result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length < 2)
             {
-                failure = "git reported no working tree";
-                return false;
+                return new GitWorktreeRoots(null, null, "git reported no working tree");
             }
 
-            topLevel = paths.GetFullPath(lines[0].Trim(), environment.CurrentDirectory);
-            commonDirectory = paths.GetFullPath(lines[1].Trim(), environment.CurrentDirectory);
-            failure = null;
-            return true;
+            string topLevel = paths.GetFullPath(lines[0].Trim(), environment.CurrentDirectory);
+            string commonDirectory = paths.GetFullPath(lines[1].Trim(), environment.CurrentDirectory);
+            return new GitWorktreeRoots(topLevel, commonDirectory, null);
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
             or FileNotFoundException
             or DirectoryNotFoundException
             or InvalidOperationException)
         {
-            failure = exception.Message;
-            return false;
+            return new GitWorktreeRoots(null, null, exception.Message);
         }
     }
 }

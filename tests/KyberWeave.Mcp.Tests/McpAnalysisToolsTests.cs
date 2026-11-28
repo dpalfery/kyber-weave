@@ -24,7 +24,7 @@ public sealed class McpAnalysisToolsTests
     private readonly MemoryDocsHost _host = new();
 
     [Fact]
-    public void AnalysisCandidatesKindFilterAndCursorPageStableOrderedCandidates()
+    public async Task AnalysisCandidatesKindFilterAndCursorPageStableOrderedCandidates()
     {
         StubAnalysisReader reader = new StubAnalysisReader(
             Result(
@@ -33,12 +33,12 @@ public sealed class McpAnalysisToolsTests
                 Candidate("candidate-a", AnalysisRuleKind.Duplicate)));
         DocsTools tools = Tools(reader);
 
-        string first = tools.AnalysisCandidates(
+        string first = await tools.AnalysisCandidatesAsync(
             kind: "duplicate",
             cursor: null,
             limit: 1,
             charBudget: 4_000);
-        string second = tools.AnalysisCandidates(
+        string second = await tools.AnalysisCandidatesAsync(
             kind: "duplicate",
             cursor: "candidate-a",
             limit: 1,
@@ -54,14 +54,14 @@ public sealed class McpAnalysisToolsTests
     }
 
     [Fact]
-    public void AnalysisCandidatesExcessiveLimitAndBudgetEnforcesHardConversationalCaps()
+    public async Task AnalysisCandidatesExcessiveLimitAndBudgetEnforcesHardConversationalCaps()
     {
         AnalysisCandidate[] candidates = Enumerable.Range(0, 40)
             .Select(index => Candidate($"candidate-{index:D2}", AnalysisRuleKind.Duplicate))
             .ToArray();
         DocsTools tools = Tools(new StubAnalysisReader(Result(candidates)));
 
-        string response = tools.AnalysisCandidates(
+        string response = await tools.AnalysisCandidatesAsync(
             kind: null,
             cursor: null,
             limit: int.MaxValue,
@@ -73,7 +73,7 @@ public sealed class McpAnalysisToolsTests
     }
 
     [Fact]
-    public void AnalysisCandidatesSmallBudgetKeepsMetricsAndLineEvidenceInsideBudget()
+    public async Task AnalysisCandidatesSmallBudgetKeepsMetricsAndLineEvidenceInsideBudget()
     {
         AnalysisCandidate candidate = Candidate(
             "candidate-budget",
@@ -82,7 +82,7 @@ public sealed class McpAnalysisToolsTests
             claimText: new string('x', 2_000));
         DocsTools tools = Tools(new StubAnalysisReader(Result(candidate)));
 
-        string response = tools.AnalysisCandidates(
+        string response = await tools.AnalysisCandidatesAsync(
             kind: "terminology",
             cursor: null,
             limit: 20,
@@ -99,11 +99,11 @@ public sealed class McpAnalysisToolsTests
     [Theory]
     [InlineData("99")]
     [InlineData("duplicate, conflict")]
-    public void AnalysisCandidatesNumericOrCompositeKindReturnsUnknownKind(string kind)
+    public async Task AnalysisCandidatesNumericOrCompositeKindReturnsUnknownKind(string kind)
     {
         DocsTools tools = Tools(new StubAnalysisReader(Result(Candidate("candidate-a", AnalysisRuleKind.Duplicate))));
 
-        string response = tools.AnalysisCandidates(kind: kind, cursor: null, limit: 20, charBudget: 4_000);
+        string response = await tools.AnalysisCandidatesAsync(kind: kind, cursor: null, limit: 20, charBudget: 4_000);
 
         Assert.Contains($"Unknown documentation-analysis kind '{kind}'", response, StringComparison.Ordinal);
         Assert.DoesNotContain("No 99 candidates", response, StringComparison.Ordinal);
@@ -111,7 +111,7 @@ public sealed class McpAnalysisToolsTests
     }
 
     [Fact]
-    public void GlossaryKnownAndUnknownTermsReturnConversationalReadOnlyResults()
+    public async Task GlossaryKnownAndUnknownTermsReturnConversationalReadOnlyResults()
     {
         StubAnalysisReader reader = new StubAnalysisReader(
             Result(),
@@ -129,8 +129,8 @@ public sealed class McpAnalysisToolsTests
             });
         DocsTools tools = Tools(reader);
 
-        string known = tools.Glossary("LOOP");
-        string unknown = tools.Glossary("missing-term");
+        string known = await tools.GlossaryAsync("LOOP");
+        string unknown = await tools.GlossaryAsync("missing-term");
 
         Assert.Contains("loop-gameplay", known, StringComparison.Ordinal);
         Assert.Contains("approved", known, StringComparison.OrdinalIgnoreCase);
@@ -142,7 +142,7 @@ public sealed class McpAnalysisToolsTests
     }
 
     [Fact]
-    public void GlossaryTermWithNewlinesDoesNotInjectResponseLines()
+    public async Task GlossaryTermWithNewlinesDoesNotInjectResponseLines()
     {
         StubAnalysisReader reader = new StubAnalysisReader(
             Result(),
@@ -159,31 +159,31 @@ public sealed class McpAnalysisToolsTests
             });
         DocsTools tools = Tools(reader);
 
-        string response = tools.Glossary("loop");
+        string response = await tools.GlossaryAsync("loop");
 
         Assert.Contains("glossary sense for 'loop status: injected'", response, StringComparison.Ordinal);
         Assert.DoesNotContain("\nstatus: injected", response, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnalysisCandidatesTermWithNewlinesDoesNotInjectResponseLines()
+    public async Task AnalysisCandidatesTermWithNewlinesDoesNotInjectResponseLines()
     {
         DocsTools tools = Tools(new StubAnalysisReader(Result(
             Candidate("candidate-a", AnalysisRuleKind.Terminology, term: "loop\ncandidate: forged"))));
 
-        string response = tools.AnalysisCandidates(kind: "terminology", cursor: null, limit: 20, charBudget: 4_000);
+        string response = await tools.AnalysisCandidatesAsync(kind: "terminology", cursor: null, limit: 20, charBudget: 4_000);
 
         Assert.Contains("term: loop candidate: forged", response, StringComparison.Ordinal);
         Assert.DoesNotContain("\ncandidate: forged", response, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void GlossaryLongUnknownTermEnforcesHardConversationalCap()
+    public async Task GlossaryLongUnknownTermEnforcesHardConversationalCap()
     {
         DocsTools tools = Tools(new StubAnalysisReader(Result()));
         string term = new string('x', 20_000);
 
-        string response = tools.Glossary(term);
+        string response = await tools.GlossaryAsync(term);
 
         Assert.True(response.Length <= 12_000, $"MCP response contained {response.Length} characters.");
         Assert.Contains("No glossary senses", response, StringComparison.OrdinalIgnoreCase);
@@ -192,21 +192,21 @@ public sealed class McpAnalysisToolsTests
     [Fact]
     public void McpAnalysisToolsExposeOnlyThePinnedReadParameters()
     {
-        MethodInfo? candidates = typeof(DocsTools).GetMethod(nameof(DocsTools.AnalysisCandidates));
-        MethodInfo? glossary = typeof(DocsTools).GetMethod(nameof(DocsTools.Glossary));
+        MethodInfo? candidates = typeof(DocsTools).GetMethod(nameof(DocsTools.AnalysisCandidatesAsync));
+        MethodInfo? glossary = typeof(DocsTools).GetMethod(nameof(DocsTools.GlossaryAsync));
 
         Assert.NotNull(candidates);
-        Assert.Equal(typeof(string), candidates.ReturnType);
+        Assert.Equal(typeof(Task<string>), candidates.ReturnType);
         Assert.Equal(
-            ["kind", "cursor", "limit", "charBudget", "projectPath"],
+            ["kind", "cursor", "limit", "charBudget", "projectPath", "cancellationToken"],
             candidates.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal(20, candidates.GetParameters()[2].DefaultValue);
         Assert.Equal(12_000, candidates.GetParameters()[3].DefaultValue);
         Assert.Equal("docs_find_duplicates_conflicts_ambiguous_terms", McpToolName(candidates));
 
         Assert.NotNull(glossary);
-        Assert.Equal(typeof(string), glossary.ReturnType);
-        Assert.Equal(["term", "projectPath"], glossary.GetParameters().Select(parameter => parameter.Name));
+        Assert.Equal(typeof(Task<string>), glossary.ReturnType);
+        Assert.Equal(["term", "projectPath", "cancellationToken"], glossary.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal("docs_look_up_glossary_term_definition", McpToolName(glossary));
         Assert.DoesNotContain(
             typeof(DocsTools).GetMethods(

@@ -62,11 +62,11 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void FinalizeSetsTheDraftPlanReadyAndNamesTheTaskFile()
+    public async Task FinalizeSetsTheDraftPlanReadyAndNamesTheTaskFile()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
 
-        string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+        string response = await Tools(fixture.Root).FinalizePlanAsync(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
             "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         Assert.Contains("result: finalized", response, StringComparison.Ordinal);
@@ -76,16 +76,16 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void FinalizeCommitsOnlyThePlanFilesAndListsTheReadyQueue()
+    public async Task FinalizeCommitsOnlyThePlanFilesAndListsTheReadyQueue()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
         Git(fixture.Root, "config", "user.name", "t");
         Git(fixture.Root, "config", "user.email", "t@example.com");
         Git(fixture.Root, "add", "-A");
         Git(fixture.Root, "commit", "-q", "-m", "init");
-        File.WriteAllText(Path.Combine(fixture.Root, "stray.txt"), "not part of the plan");
+        await File.WriteAllTextAsync(Path.Combine(fixture.Root, "stray.txt"), "not part of the plan");
 
-        string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+        string response = await Tools(fixture.Root).FinalizePlanAsync(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
             "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         Assert.Contains("result: finalized", response, StringComparison.Ordinal);
@@ -104,7 +104,7 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void FinalizeWithAConfiguredModel_WritesThePickAndTheReadyQueueNamesTheAgent()
+    public async Task FinalizeWithAConfiguredModel_WritesThePickAndTheReadyQueueNamesTheAgent()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
         Git(fixture.Root, "config", "user.name", "t");
@@ -116,14 +116,14 @@ public sealed class McpPlanLifecycleToolsTests
                 new PickingProvider(),
                 PlanTaskAgentPick.ImplementationAgents(),
                 new FakeEmbeddedResources().Add(PlanTaskAgentPick.RubricResourceName, "Rate the task by the rubric.")))));
-        string response = Tools(fixture.Root, picking).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+        string response = await Tools(fixture.Root, picking).FinalizePlanAsync(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
             "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         Assert.Contains("result: finalized", response, StringComparison.Ordinal);
         Assert.Contains("| agent=dev-medium |", response, StringComparison.Ordinal);
         PlanTaskFile written = Assert.IsType<PlanTaskFile>(PlanTaskFileFormat.Deserialize(
             PlanTaskFileProbe.TaskFilePath,
-            File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath))));
+            await File.ReadAllTextAsync(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath))));
         Assert.Equal(
             "dev-medium",
             Assert.Single(written.Tasks!, task => task.Id == PlanTaskFileProbe.FirstTask).Agent);
@@ -145,14 +145,14 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void FinalizeRefusesAndChangesNothingWhenOtherFilesAreStaged()
+    public async Task FinalizeRefusesAndChangesNothingWhenOtherFilesAreStaged()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
-        File.WriteAllText(Path.Combine(fixture.Root, "stray.txt"), "staged by someone else");
+        await File.WriteAllTextAsync(Path.Combine(fixture.Root, "stray.txt"), "staged by someone else");
         Git(fixture.Root, "add", "stray.txt");
         string before = Read(fixture, PlanTaskFileProbe.PlanPath);
 
-        string response = Tools(fixture.Root).FinalizePlan(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
+        string response = await Tools(fixture.Root).FinalizePlanAsync(fixture.Root, PlanTaskFileProbe.PlanPath, "autonomous",
             "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
@@ -163,7 +163,7 @@ public sealed class McpPlanLifecycleToolsTests
 
     /// <summary>A linked worktree named by projectPath is finalized and archived in that worktree, not refused.</summary>
     [Fact]
-    public void BothToolsWorkInALinkedWorktree()
+    public async Task BothToolsWorkInALinkedWorktree()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
         Git(fixture.Root, "add", "-A");
@@ -174,8 +174,8 @@ public sealed class McpPlanLifecycleToolsTests
         {
             DocsTools tools = Tools(fixture.Root);
 
-            string finalized = tools.FinalizePlan(worktree, PlanTaskFileProbe.PlanPath, "autonomous", "AUTONOMOUS_APPROVAL: approve-and-execute");
-            string archive = tools.ArchivePlan(worktree, PlanTaskFileProbe.PlanPath);
+            string finalized = await tools.FinalizePlanAsync(worktree, PlanTaskFileProbe.PlanPath, "autonomous", "AUTONOMOUS_APPROVAL: approve-and-execute");
+            string archive = await tools.ArchivePlanAsync(worktree, PlanTaskFileProbe.PlanPath);
 
             Assert.Contains("result: finalized", finalized, StringComparison.Ordinal);
             Assert.True(File.Exists(Path.Combine(worktree, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar))));
@@ -192,12 +192,12 @@ public sealed class McpPlanLifecycleToolsTests
     [Theory]
     [InlineData("", "autonomous")]
     [InlineData("ROOT", "approve")]
-    public void FinalizeWithoutAProjectPathOrAModeIsRefusedAndChangesNothing(string projectPath, string mode)
+    public async Task FinalizeWithoutAProjectPathOrAModeIsRefusedAndChangesNothing(string projectPath, string mode)
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
         string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
 
-        string response = Tools(fixture.Root).FinalizePlan(projectPath == "ROOT" ? fixture.Root : projectPath,
+        string response = await Tools(fixture.Root).FinalizePlanAsync(projectPath == "ROOT" ? fixture.Root : projectPath,
             PlanTaskFileProbe.PlanPath, mode, "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
@@ -206,12 +206,12 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void ArchiveRefusesAPlanWithoutCloseoutEvidenceAndSendsTheFindingsToDocsDev()
+    public async Task ArchiveRefusesAPlanWithoutCloseoutEvidenceAndSendsTheFindingsToDocsDev()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
         string plan = Read(fixture, PlanTaskFileProbe.PlanPath);
 
-        string response = Tools(fixture.Root).ArchivePlan(fixture.Root, PlanTaskFileProbe.PlanPath);
+        string response = await Tools(fixture.Root).ArchivePlanAsync(fixture.Root, PlanTaskFileProbe.PlanPath);
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
         Assert.Contains("KW-DOC-LIFECYCLE-004", response, StringComparison.Ordinal);
@@ -220,7 +220,7 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void ArchiveMovesAPlanWhoseCloseoutEvidenceIsComplete()
+    public async Task ArchiveMovesAPlanWhoseCloseoutEvidenceIsComplete()
     {
         using DocFixture fixture = GitRepository(DocFixture.Create().WithCatalog()
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
@@ -242,7 +242,7 @@ public sealed class McpPlanLifecycleToolsTests
                 | [2026-10-20-widget.md](2026-10-20-widget.md) | Ready |
                 """));
 
-        string response = Tools(fixture.Root).ArchivePlan(fixture.Root, "2026-10-20-widget");
+        string response = await Tools(fixture.Root).ArchivePlanAsync(fixture.Root, "2026-10-20-widget");
 
         Assert.Contains("result: archived", response, StringComparison.Ordinal);
         Assert.Contains("mergeReady true", response, StringComparison.Ordinal);
@@ -257,7 +257,7 @@ public sealed class McpPlanLifecycleToolsTests
     /// to the same rule.
     /// </summary>
     [Fact]
-    public void ArchiveRefusesAPlanWithAnUncheckedNumberedTaskAndMovesNothing()
+    public async Task ArchiveRefusesAPlanWithAnUncheckedNumberedTaskAndMovesNothing()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1")
             + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../reference/widget.md)"))
@@ -291,7 +291,7 @@ public sealed class McpPlanLifecycleToolsTests
                 """));
         string plan = Read(fixture, ClosedPlan);
 
-        string response = Tools(fixture.Root).ArchivePlan(fixture.Root, "2026-10-20-widget");
+        string response = await Tools(fixture.Root).ArchivePlanAsync(fixture.Root, "2026-10-20-widget");
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
         Assert.Contains("KW-DOC-CLOSEOUT-006", response, StringComparison.Ordinal);
@@ -301,11 +301,11 @@ public sealed class McpPlanLifecycleToolsTests
     }
 
     [Fact]
-    public void ArchiveRefusesAPathThatIsNotAPlan()
+    public async Task ArchiveRefusesAPathThatIsNotAPlan()
     {
         using DocFixture fixture = GitRepository(PlanFinalizeFixture.Repository());
 
-        string response = Tools(fixture.Root).ArchivePlan(fixture.Root, "src/Placeholder.cs");
+        string response = await Tools(fixture.Root).ArchivePlanAsync(fixture.Root, "src/Placeholder.cs");
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
         Assert.True(Exists(fixture, "src/Placeholder.cs"));

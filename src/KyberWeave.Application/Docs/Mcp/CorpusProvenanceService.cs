@@ -40,10 +40,14 @@ public sealed class CorpusProvenanceService(IGitCheckoutProbe probe, IPathResolv
     private readonly IGitCheckoutProbe _probe = probe ?? throw new ArgumentNullException(nameof(probe));
 
     /// <inheritdoc />
-    public string Line(string repositoryRoot, int? documentCount, int corpusStamp)
+    public async Task<string> LineAsync(
+        string repositoryRoot,
+        int? documentCount,
+        int corpusStamp,
+        CancellationToken cancellationToken = default)
     {
         string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
-        CachedIdentity identity = Identity(root, corpusStamp);
+        CachedIdentity identity = await IdentityAsync(root, corpusStamp, cancellationToken).ConfigureAwait(false);
         string docs = documentCount is { } count
             ? count.ToString(CultureInfo.InvariantCulture)
             : CorpusProvenance.Unavailable;
@@ -55,7 +59,10 @@ public sealed class CorpusProvenanceService(IGitCheckoutProbe probe, IPathResolv
             + " documents=" + docs;
     }
 
-    private CachedIdentity Identity(string root, int corpusStamp)
+    private async Task<CachedIdentity> IdentityAsync(
+        string root,
+        int corpusStamp,
+        CancellationToken cancellationToken)
     {
         long gitStamp = _probe.Fingerprint(root);
         if (Cache.TryGetValue(root, out CachedIdentity cached)
@@ -66,7 +73,7 @@ public sealed class CorpusProvenanceService(IGitCheckoutProbe probe, IPathResolv
         }
 
         GitCheckoutLocation location = _probe.ReadLocation(root);
-        GitCheckoutRevision revision = _probe.ReadRevision(root);
+        GitCheckoutRevision revision = await _probe.ReadRevisionAsync(root, cancellationToken).ConfigureAwait(false);
         CachedIdentity identity = new(
             corpusStamp,
             gitStamp,

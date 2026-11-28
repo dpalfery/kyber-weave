@@ -50,7 +50,7 @@ public sealed class DocsRootRegistryTests
         _files.CreateDirectory(worktree);
         DocsRootRegistry registry = Registry(new ScriptedGit().Add(Server, Server, Common).Add(worktree, worktree, Common));
 
-        bool resolved = registry.TryResolve("wt", out DocsTools? _, out string? refusal);
+        bool resolved = TryResolve(registry, "wt", out DocsTools? _, out string? refusal);
 
         Assert.True(resolved, refusal);
         Assert.Equal([worktree], _built);
@@ -61,7 +61,7 @@ public sealed class DocsRootRegistryTests
     {
         DocsRootRegistry registry = Registry(new ScriptedGit());
 
-        bool resolved = registry.TryResolve("missing", out DocsTools? tools, out string? refusal);
+        bool resolved = TryResolve(registry, "missing", out DocsTools? tools, out string? refusal);
 
         Assert.False(resolved);
         Assert.Null(tools);
@@ -75,7 +75,7 @@ public sealed class DocsRootRegistryTests
         _files.CreateDirectory(other);
         DocsRootRegistry registry = Registry(new ScriptedGit().Add(Server, Server, Common).Add(other, other, Absolute("kw", "other", ".git")));
 
-        bool resolved = registry.TryResolve(other, out _, out string? refusal);
+        bool resolved = TryResolve(registry, other, out _, out string? refusal);
 
         Assert.False(resolved);
         Assert.Contains("belongs to a different repository", refusal, StringComparison.Ordinal);
@@ -89,7 +89,7 @@ public sealed class DocsRootRegistryTests
         _files.CreateDirectory(worktree);
         DocsRootRegistry registry = Registry(new ScriptedGit().Add(worktree, worktree, Common));
 
-        bool resolved = registry.TryResolve(worktree, out _, out string? refusal);
+        bool resolved = TryResolve(registry, worktree, out _, out string? refusal);
 
         Assert.False(resolved);
         Assert.Contains("is not a git repository", refusal, StringComparison.Ordinal);
@@ -107,7 +107,7 @@ public sealed class DocsRootRegistryTests
             new ScriptedGit().Add(Server, Server, Common).Add(shouting, shouting, Common),
             platform);
 
-        bool resolved = registry.TryResolve(shouting, out _, out string? refusal);
+        bool resolved = TryResolve(registry, shouting, out _, out string? refusal);
 
         Assert.True(resolved, refusal);
         Assert.Equal(toolsBuilt, _built.Count);
@@ -143,7 +143,7 @@ public sealed class DocsRootRegistryTests
 
         for (int call = 0; call < 3; call++)
         {
-            Assert.True(registry.TryResolve(worktree, out _, out string? refusal), refusal);
+            Assert.True(TryResolve(registry, worktree, out _, out string? refusal), refusal);
         }
 
         Assert.Equal(1, git.CallsFor(worktree));
@@ -157,7 +157,7 @@ public sealed class DocsRootRegistryTests
         _files.CreateDirectory(inside);
         DocsRootRegistry registry = AnyRegistry(new ScriptedGit().Add(inside, RepoA, Path.Combine(RepoA, ".git")));
 
-        bool resolved = registry.TryResolve(inside, out DocsTools? tools, out string? refusal);
+        bool resolved = TryResolve(registry, inside, out DocsTools? tools, out string? refusal);
 
         Assert.True(resolved, refusal);
         Assert.NotNull(tools);
@@ -169,7 +169,7 @@ public sealed class DocsRootRegistryTests
     {
         DocsRootRegistry registry = AnyRegistry(new ScriptedGit());
 
-        bool resolved = registry.TryResolve(Path.Combine(Work, "missing"), out DocsTools? tools, out string? refusal);
+        bool resolved = TryResolve(registry, Path.Combine(Work, "missing"), out DocsTools? tools, out string? refusal);
 
         Assert.False(resolved);
         Assert.Null(tools);
@@ -184,7 +184,7 @@ public sealed class DocsRootRegistryTests
         _files.CreateDirectory(plain);
         DocsRootRegistry registry = AnyRegistry(new ScriptedGit());
 
-        bool resolved = registry.TryResolve(plain, out DocsTools? tools, out string? refusal);
+        bool resolved = TryResolve(registry, plain, out DocsTools? tools, out string? refusal);
 
         Assert.False(resolved);
         Assert.Null(tools);
@@ -199,7 +199,7 @@ public sealed class DocsRootRegistryTests
         _files.CreateDirectory(bare);
         DocsRootRegistry registry = AnyRegistry(new ScriptedGit().Add(bare, bare, Path.Combine(bare, ".git")));
 
-        bool resolved = registry.TryResolve(bare, out DocsTools? tools, out string? refusal);
+        bool resolved = TryResolve(registry, bare, out DocsTools? tools, out string? refusal);
 
         Assert.False(resolved);
         Assert.Null(tools);
@@ -213,7 +213,7 @@ public sealed class DocsRootRegistryTests
     {
         DocsRootRegistry registry = AnyRegistry(new ScriptedGit());
 
-        bool resolved = registry.TryResolve("  ", out DocsTools? tools, out string? refusal);
+        bool resolved = TryResolve(registry, "  ", out DocsTools? tools, out string? refusal);
 
         Assert.False(resolved);
         Assert.Null(tools);
@@ -228,7 +228,7 @@ public sealed class DocsRootRegistryTests
 
         for (int call = 0; call < 3; call++)
         {
-            Assert.True(registry.TryResolve(RepoA, out _, out string? refusal), refusal);
+            Assert.True(TryResolve(registry, RepoA, out _, out string? refusal), refusal);
         }
 
         Assert.Equal(1, git.CallsFor(RepoA));
@@ -244,8 +244,8 @@ public sealed class DocsRootRegistryTests
             .Add(RepoA, RepoA, Path.Combine(RepoA, ".git"))
             .Add(inside, RepoA, Path.Combine(RepoA, ".git")));
 
-        Assert.True(registry.TryResolve(RepoA, out DocsTools? first, out string? refusal), refusal);
-        Assert.True(registry.TryResolve(inside, out DocsTools? second, out refusal), refusal);
+        Assert.True(TryResolve(registry, RepoA, out DocsTools? first, out string? refusal), refusal);
+        Assert.True(TryResolve(registry, inside, out DocsTools? second, out refusal), refusal);
 
         Assert.Same(first, second);
         Assert.Equal([RepoA], _built);
@@ -264,18 +264,18 @@ public sealed class DocsRootRegistryTests
 
         foreach (string root in roots[..4])
         {
-            Assert.True(registry.TryResolve(root, out _, out string? refusal), refusal);
+            Assert.True(TryResolve(registry, root, out _, out string? refusal), refusal);
         }
 
-        Assert.True(registry.TryResolve(roots[0], out _, out string? again), again);
-        Assert.True(registry.TryResolve(roots[4], out _, out again), again);
+        Assert.True(TryResolve(registry, roots[0], out _, out string? again), again);
+        Assert.True(TryResolve(registry, roots[4], out _, out again), again);
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
         Assert.Equal(5, _built.Count);
 
-        Assert.True(registry.TryResolve(roots[0], out _, out again), again);
+        Assert.True(TryResolve(registry, roots[0], out _, out again), again);
         Assert.Equal(1, _built.Count(root => root == roots[0]));
 
-        Assert.True(registry.TryResolve(roots[1], out _, out again), again);
+        Assert.True(TryResolve(registry, roots[1], out _, out again), again);
         Assert.Equal(2, _built.Count(root => root == roots[1]));
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
     }
@@ -293,12 +293,12 @@ public sealed class DocsRootRegistryTests
             release.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         };
         DocsRootRegistry registry = AnyRegistry(Git(roots));
-        Assert.True(registry.TryResolve(roots[1], out DocsTools? cached, out string? refusal), refusal);
+        Assert.True(TryResolve(registry, roots[1], out DocsTools? cached, out string? refusal), refusal);
 
         Task<(bool Resolved, DocsTools? Tools)> slow = Task.Run(() => Resolve(registry, roots[0]), TestContext.Current.CancellationToken);
         Assert.True(entered.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
 
-        bool resolved = registry.TryResolve(roots[1], out DocsTools? again, out refusal);
+        bool resolved = TryResolve(registry, roots[1], out DocsTools? again, out refusal);
 
         Assert.True(resolved, refusal);
         Assert.Same(cached, again);
@@ -327,22 +327,22 @@ public sealed class DocsRootRegistryTests
     }
 
     [Fact]
-    public void AnyRepoCallHoldingAnEvictedRootFinishesOnItsToolsAndTheNextCallBuildsNew()
+    public async Task AnyRepoCallHoldingAnEvictedRootFinishesOnItsToolsAndTheNextCallBuildsNew()
     {
         string[] roots = InitializedRoots(5);
         DocsRootRegistry registry = AnyRegistry(Git(roots));
-        Assert.True(registry.TryResolve(roots[0], out DocsTools? held, out string? refusal), refusal);
+        Assert.True(TryResolve(registry, roots[0], out DocsTools? held, out string? refusal), refusal);
 
         foreach (string other in roots[1..])
         {
-            Assert.True(registry.TryResolve(other, out _, out refusal), refusal);
+            Assert.True(TryResolve(registry, other, out _, out refusal), refusal);
         }
 
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
         Assert.NotNull(held);
-        Assert.Contains("mode=any-repo", held.DocsStatus(), StringComparison.Ordinal);
+        Assert.Contains("mode=any-repo", await held.DocsStatusAsync(), StringComparison.Ordinal);
 
-        Assert.True(registry.TryResolve(roots[0], out DocsTools? rebuilt, out refusal), refusal);
+        Assert.True(TryResolve(registry, roots[0], out DocsTools? rebuilt, out refusal), refusal);
         Assert.NotSame(held, rebuilt);
         Assert.Equal(2, _built.Count(root => root == roots[0]));
     }
@@ -357,19 +357,19 @@ public sealed class DocsRootRegistryTests
         };
         DocsRootRegistry registry = AnyRegistry(new ScriptedGit().Add(RepoA, RepoA, Path.Combine(RepoA, ".git")));
 
-        bool failed = registry.TryResolve(RepoA, out DocsTools? none, out string? refusal);
+        bool failed = TryResolve(registry, RepoA, out DocsTools? none, out string? refusal);
 
         Assert.False(failed);
         Assert.Null(none);
         Assert.Contains("the corpus could not be built", refusal, StringComparison.Ordinal);
         Assert.Equal(0, registry.Count);
-        Assert.True(registry.TryResolve(RepoA, out DocsTools? tools, out refusal), refusal);
+        Assert.True(TryResolve(registry, RepoA, out DocsTools? tools, out refusal), refusal);
         Assert.NotNull(tools);
     }
 
     private static (bool Resolved, DocsTools? Tools) Resolve(DocsRootRegistry registry, string projectPath)
     {
-        bool resolved = registry.TryResolve(projectPath, out DocsTools? tools, out string? _);
+        bool resolved = TryResolve(registry, projectPath, out DocsTools? tools, out string? _);
         return (resolved, tools);
     }
 
@@ -420,6 +420,19 @@ public sealed class DocsRootRegistryTests
             new FakePathResolver(_files),
             new FakeProcessEnvironment(Work, operatingSystem: platform));
 
+    private static bool TryResolve(
+        DocsRootRegistry registry,
+        string? projectPath,
+        out DocsTools? tools,
+        out string? refusal)
+    {
+        DocsRootRegistry.DocsRootResolution resolution =
+            registry.TryResolveAsync(projectPath).GetAwaiter().GetResult();
+        tools = resolution.Tools;
+        refusal = resolution.Refusal;
+        return resolution.Resolved;
+    }
+
     private static string Absolute(params string[] segments) =>
         Path.GetFullPath(Path.Combine([Path.DirectorySeparatorChar.ToString(), .. segments]));
 
@@ -439,17 +452,13 @@ public sealed class DocsRootRegistryTests
             lock (_calls) return _calls.GetValueOrDefault(directory);
         }
 
-        public bool TryRoots(string directory, out string? topLevel, out string? commonDirectory, out string? failure)
+        public Task<GitWorktreeRoots> TryRootsAsync(string directory, CancellationToken cancellationToken = default)
         {
             lock (_calls) _calls[directory] = _calls.GetValueOrDefault(directory) + 1;
-            if (_known.TryGetValue(directory, out (string Top, string Common) found))
-            {
-                (topLevel, commonDirectory, failure) = (found.Top, found.Common, null);
-                return true;
-            }
-
-            (topLevel, commonDirectory, failure) = (null, null, "not a git repository");
-            return false;
+            return Task.FromResult(
+                _known.TryGetValue(directory, out (string Top, string Common) found)
+                    ? new GitWorktreeRoots(found.Top, found.Common, null)
+                    : new GitWorktreeRoots(null, null, "not a git repository"));
         }
     }
 }

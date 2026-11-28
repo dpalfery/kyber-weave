@@ -32,19 +32,37 @@ public sealed partial class DocsTools
         it does not own, with the plan not archived, or when the GitHub CLI is missing or
         signed out; on a provider refusal, dispatch the delivery agent instead.
         """)]
-    public string DeliverRun(
+    public async Task<string> DeliverRunAsync(
         [Description("Absolute path of the run's worktree, on the run branch. Required.")] string projectPath,
         [Description("One to three plain sentences for a human reviewer: the problem and the outcome.")] string summary,
         [Description("Extra notes for reviewers, such as follow-ups. Optional.")] string? notes = null,
         [Description("A title to use instead of the composed '<type>(<scope>): <summary> [<harness>]'. Optional.")] string? title = null,
         [Description("Open a new pull request as a draft. Default true; an existing pull request keeps its state.")] bool draft = true,
         [Description("The documentation-impact outcome as docs-dev returned it (its DOCS_REVIEW line and recommendations). Optional.")] string? documentationImpact = null,
-        [Description("The archived plan's file name, only when the branch archived more than one. Optional.")] string? planFile = null)
+        [Description("The archived plan's file name, only when the branch archived more than one. Optional.")] string? planFile = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.Bound.Delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile)) is { } redirected)
+        if (await RedirectAsync(
+                projectPath,
+                tools => tools.Bound.Delivery.DeliverRunAsync(summary, notes, title, draft, documentationImpact, planFile, cancellationToken),
+                cancellationToken).ConfigureAwait(false) is { } redirected)
+        {
             return redirected;
+        }
+
         if (string.IsNullOrWhiteSpace(projectPath))
-            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        return Bound.Delivery.DeliverRun(summary, notes, title, draft, documentationImpact, planFile);
+        {
+            return await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        }
+
+        return await Bound.Delivery.DeliverRunAsync(
+            summary,
+            notes,
+            title,
+            draft,
+            documentationImpact,
+            planFile,
+            cancellationToken).ConfigureAwait(false);
     }
 }

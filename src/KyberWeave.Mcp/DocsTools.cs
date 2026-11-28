@@ -99,17 +99,19 @@ public sealed partial class DocsTools
         A miss says how many documents were searched: the subject is undocumented, so grep
         under docs/ is now fine. Do not use for what the code does right now; read the code instead.
         """)]
-    public string Explore(
+    public async Task<string> ExploreAsync(
         [Description("The question in plain words, or a command, flag, rule id, feature or component name, or document id.")] string query,
         [Description("""
             Continuation token from a prior incomplete answer for the same question. Omit on
             the first call; repeat the same question with this value to read the next span.
             """)]
         string? cursor = null,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.Explore(query, cursor)) is { } redirected) return redirected;
-        return Bound.Query.Explore(query, cursor);
+        if (await RedirectAsync(projectPath, tools => tools.ExploreAsync(query, cursor, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.ExploreAsync(query, cursor, cancellationToken).ConfigureAwait(false);
     }
 
     [McpServerTool(Name = "docs_find_documents_citing_code_symbol", ReadOnly = true, OpenWorld = false)]
@@ -122,12 +124,14 @@ public sealed partial class DocsTools
 
         Empty result: no document claims it, so nothing to update.
         """)]
-    public string ForSymbol(
+    public async Task<string> ForSymbolAsync(
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.ForSymbol(symbol)) is { } redirected) return redirected;
-        return Bound.Query.ForSymbol(symbol);
+        if (await RedirectAsync(projectPath, tools => tools.ForSymbolAsync(symbol, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.ForSymbolAsync(symbol, cancellationToken).ConfigureAwait(false);
     }
 
     [McpServerTool(Name = "docs_find_duplicates_conflicts_ambiguous_terms", ReadOnly = true, OpenWorld = false)]
@@ -141,15 +145,17 @@ public sealed partial class DocsTools
 
         Candidates are review evidence only; nothing is applied. Empty: nothing pending.
         """)]
-    public string AnalysisCandidates(
+    public async Task<string> AnalysisCandidatesAsync(
         [Description("Limits results to one kind of finding: 'duplicate', 'conflict', or 'terminology'. Omit to return every kind.")] string? kind = null,
         [Description("Opaque candidate id taken from the 'next cursor' line of a previous response, to continue after that item. Omit for the first page.")] string? cursor = null,
         [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
         [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.AnalysisCandidates(kind, cursor, limit, charBudget)) is { } redirected) return redirected;
-        return Bound.Query.AnalysisCandidates(kind, cursor, limit, charBudget);
+        if (await RedirectAsync(projectPath, tools => tools.AnalysisCandidatesAsync(kind, cursor, limit, charBudget, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.AnalysisCandidatesAsync(kind, cursor, limit, charBudget, cancellationToken).ConfigureAwait(false);
     }
 
     [McpServerTool(Name = "docs_look_up_glossary_term_definition", ReadOnly = true, OpenWorld = false)]
@@ -163,12 +169,14 @@ public sealed partial class DocsTools
 
         Unknown term: empty result, no sense declared.
         """)]
-    public string Glossary(
+    public async Task<string> GlossaryAsync(
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.Glossary(term)) is { } redirected) return redirected;
-        return Bound.Query.Glossary(term);
+        if (await RedirectAsync(projectPath, tools => tools.GlossaryAsync(term, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.GlossaryAsync(term, cancellationToken).ConfigureAwait(false);
     }
 
     [McpServerTool(Name = "docs_validate_governed_document_schema", ReadOnly = true, OpenWorld = false)]
@@ -182,7 +190,7 @@ public sealed partial class DocsTools
         before trusting the verdict. Default mergeReady false is the planning gate while a plan stays in the
         active plans folder. Returns provenance, pass or fail with counts, then findings.
         """)]
-    public string DocsValidate(
+    public async Task<string> DocsValidateAsync(
         [Description("""
             When true, runs merge-ready checks including open-work rules such as
             KW-DOC-LIFECYCLE-003 and archive closeout. Default false for active plan work.
@@ -198,10 +206,12 @@ public sealed partial class DocsTools
             to 12000. The provenance and verdict lines are always emitted whole.
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.DocsValidate(mergeReady, @base, charBudget)) is { } redirected) return redirected;
-        return Bound.Query.DocsValidate(mergeReady, @base, charBudget);
+        if (await RedirectAsync(projectPath, tools => tools.DocsValidateAsync(mergeReady, @base, charBudget, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.DocsValidateAsync(mergeReady, @base, charBudget, cancellationToken).ConfigureAwait(false);
     }
 
     [McpServerTool(Name = "docs_detect_drift_between_documents_and_code", ReadOnly = true, OpenWorld = false)]
@@ -215,16 +225,18 @@ public sealed partial class DocsTools
         passing silently. Warnings such as KW-DOC-DRIFT-003 do not fail the gate but still
         appear. Returns provenance, pass or fail with counts, then findings.
         """)]
-    public string DocsDrift(
+    public async Task<string> DocsDriftAsync(
         [Description("""
             Total characters of finding text after the verdict line (1000-120000). Defaults
             to 12000. The provenance and verdict lines are always emitted whole.
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.DocsDrift(charBudget)) is { } redirected) return redirected;
-        return Bound.Query.DocsDrift(charBudget);
+        if (await RedirectAsync(projectPath, tools => tools.DocsDriftAsync(charBudget, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.DocsDriftAsync(charBudget, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -242,11 +254,13 @@ public sealed partial class DocsTools
 
         Zero documents is not an error; the line still reports the root.
         """)]
-    public string DocsStatus(
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+    public async Task<string> DocsStatusAsync(
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.DocsStatus()) is { } redirected) return redirected;
-        return Bound.Query.DocsStatus();
+        if (await RedirectAsync(projectPath, tools => tools.DocsStatusAsync(cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.DocsStatusAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -285,7 +299,7 @@ public sealed partial class DocsTools
         the standard, with a one-line note that the topic selected nothing, so the prose is
         there rather than a list of headings to go and read.
         """)]
-    public string AgentCodingStandards(
+    public async Task<string> AgentCodingStandardsAsync(
         [Description("""
             The technology to answer for — 'csharp', 'test' — or the property name the repository
             instructions use for it, where 'csharp-coding-standard' and '<csharp-coding-standard>'
@@ -300,10 +314,12 @@ public sealed partial class DocsTools
             12000. A value outside the range is clamped to the nearer bound, so a budget below
             the floor behaves as the floor rather than as an empty answer.
             """)] int charBudget = DocumentIndex.DefaultCharBudget,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.AgentCodingStandards(technology, topic, charBudget)) is { } redirected) return redirected;
-        return Bound.Query.AgentCodingStandards(technology, topic, charBudget);
+        if (await RedirectAsync(projectPath, tools => tools.AgentCodingStandardsAsync(technology, topic, charBudget, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.AgentCodingStandardsAsync(technology, topic, charBudget, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Loads one KW skill by name: its instructions, its folder and the paths of its reference files.</summary>
@@ -317,12 +333,14 @@ public sealed partial class DocsTools
         them; their contents are not returned. A name that is not a skill is answered with the skills that
         exist, not an error. It may copy a shipped skill into your home folder so its reference files can be read.
         """)]
-    public string LoadSkill(
+    public async Task<string> LoadSkillAsync(
         [Description("The skill's name, as the KW skills list gives it.")] string name,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.LoadSkill(name)) is { } redirected) return redirected;
-        return Bound.Query.LoadSkill(name);
+        if (await RedirectAsync(projectPath, tools => tools.LoadSkillAsync(name, cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false) is { } redirected)
+            return redirected;
+        return await Bound.Query.LoadSkillAsync(name, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -354,7 +372,7 @@ public sealed partial class DocsTools
         prompt is written to one file under the run's scratch folder and this reply carries the path;
         name that path in the dispatch and tell the worker to read it first.
         """)]
-    public string BuildTaskPrompt(
+    public async Task<string> BuildTaskPromptAsync(
         McpServer server,
         [Description("""
             The task id from the plan or specification, written any natural way: T1, t1, task 1, 1.
@@ -364,10 +382,19 @@ public sealed partial class DocsTools
         [Description("The plan or specification the task is in, when the checkout has more than one active plan.")] string? plan = null,
         [Description("A file holding the results earlier tasks reported, when this is a retry.")] string? priorResults = null,
         [Description("How many attempts at this task already failed; the retry's step-up reads it.")] int failedAttempts = 0,
-        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(server);
-        return BuildTaskPromptForClient(server.ClientInfo?.Name, taskId, technology, plan, priorResults, failedAttempts, projectPath);
+        return await BuildTaskPromptForClientAsync(
+            server.ClientInfo?.Name,
+            taskId,
+            technology,
+            plan,
+            priorResults,
+            failedAttempts,
+            projectPath,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -381,24 +408,37 @@ public sealed partial class DocsTools
     /// <param name="priorResults">The file holding earlier tasks' reported results, when this is a retry.</param>
     /// <param name="failedAttempts">How many attempts at this task already failed; the retry's step-up reads it.</param>
     /// <param name="projectPath">Another worktree of this repository to answer for, or null for the server's root.</param>
-    internal string BuildTaskPromptForClient(
+    internal async Task<string> BuildTaskPromptForClientAsync(
         string? clientName,
         string? taskId = null,
         string? technology = null,
         string? plan = null,
         string? priorResults = null,
         int failedAttempts = 0,
-        string? projectPath = null)
+        string? projectPath = null,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.BuildTaskPromptForClient(clientName, taskId, technology, plan, priorResults, failedAttempts)) is { } redirected)
+        if (await RedirectAsync(
+                projectPath,
+                tools => tools.BuildTaskPromptForClientAsync(
+                    clientName,
+                    taskId,
+                    technology,
+                    plan,
+                    priorResults,
+                    failedAttempts,
+                    cancellationToken: cancellationToken),
+                cancellationToken).ConfigureAwait(false) is { } redirected)
+        {
             return redirected;
+        }
 
         string? harness = McpClientHarness.TokenFor(clientName);
 
         DiagnosticReport report = new();
         if (!Bound.HostConfiguration.TryLoad(Bound.RepositoryRoot, report, out KyberWeaveConfig config))
         {
-            return Bound.Query.Provenance()
+            return await Bound.Query.ProvenanceAsync(cancellationToken).ConfigureAwait(false)
                    + "\nprompt: none\nreason: this checkout's configuration could not be loaded. Run 'kyber-weave docs validate .' in it.";
         }
 
@@ -415,13 +455,17 @@ public sealed partial class DocsTools
                 Harness: harness ?? McpClientHarness.UnverifiedToken),
             config);
 
-        return FormatTaskPrompt(prompt, clientName, harness);
+        return await FormatTaskPromptAsync(prompt, clientName, harness, cancellationToken).ConfigureAwait(false);
     }
 
-    private string FormatTaskPrompt(TaskPromptResult prompt, string? clientName, string? harness)
+    private async Task<string> FormatTaskPromptAsync(
+        TaskPromptResult prompt,
+        string? clientName,
+        string? harness,
+        CancellationToken cancellationToken)
     {
         StringBuilder text = new();
-        text.Append(ProvenanceLine()).Append('\n');
+        text.Append(await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)).Append('\n');
         if (!prompt.Built)
         {
             text.Append("prompt: none\nreason: ").Append(prompt.Refusal);
@@ -465,25 +509,42 @@ public sealed partial class DocsTools
     /// Routes a per-call <c>projectPath</c> to the tools bound to that worktree, or refuses it. Null only in bound mode, when
     /// the call is for this server's own root, so the caller answers it; an any-repo server always answers here.
     /// </summary>
-    private string? Redirect(string? projectPath, Func<DocsTools, string> call)
+    private async Task<string?> RedirectAsync(
+        string? projectPath,
+        Func<DocsTools, Task<string>> call,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
-            return _bound is null ? ProvenanceLine() + "\n" + MissingProjectPath : null;
+            return _bound is null
+                ? await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false) + "\n" + MissingProjectPath
+                : null;
 
         if (_roots is null)
-            return ProvenanceLine() + "\nprojectPath was refused: this server answers for one checkout only.";
+        {
+            return await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nprojectPath was refused: this server answers for one checkout only.";
+        }
 
-        if (!_roots.TryResolve(projectPath, out DocsTools? target, out string? refusal))
-            return ProvenanceLine() + "\nprojectPath was refused: " + refusal;
+        DocsRootRegistry.DocsRootResolution resolution =
+            await _roots.TryResolveAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        if (!resolution.Resolved)
+        {
+            return await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nprojectPath was refused: " + resolution.Refusal;
+        }
 
-        if (target is not null) return call(target);
+        if (resolution.Tools is not null) return await call(resolution.Tools).ConfigureAwait(false);
         return _bound is null
-            ? ProvenanceLine() + "\nprojectPath was refused: no tools were built for it."
+            ? await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nprojectPath was refused: no tools were built for it."
             : null;
     }
 
     /// <summary>The provenance line of this server's own root, or the any-repo line when it holds none.</summary>
-    private string ProvenanceLine() => _bound is null ? AnyRepoProvenance : _bound.Query.Provenance();
+    private async Task<string> ProvenanceLineAsync(CancellationToken cancellationToken) =>
+        _bound is null
+            ? AnyRepoProvenance
+            : await _bound.Query.ProvenanceAsync(cancellationToken).ConfigureAwait(false);
 
     /// <summary>The services bound to one root, held together so an any-repo server holds none of them.</summary>
     private sealed record BoundRoot(

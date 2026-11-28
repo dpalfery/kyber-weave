@@ -12,90 +12,101 @@ public sealed class GitWorktreeIdentityTests
 
     private readonly ScriptedProcessRunner _git = new();
 
-    private bool TryRoots(string directory, out string? topLevel, out string? commonDirectory, out string? failure) =>
-        new GitWorktreeIdentity(_git, FakePathResolver.OverEmptyFileSystem(), new FakeProcessEnvironment()).TryRoots(directory, out topLevel, out commonDirectory, out failure);
+    private Task<GitWorktreeRoots> TryRootsAsync(string directory) =>
+        new GitWorktreeIdentity(_git, FakePathResolver.OverEmptyFileSystem(), new FakeProcessEnvironment()).TryRootsAsync(directory);
 
     [Fact]
-    public void GitsTwoLinesAreTheTopLevelAndTheCommonDirectoryAskedForInTheGivenDirectory()
+    public async Task GitsTwoLinesAreTheTopLevelAndTheCommonDirectoryAskedForInTheGivenDirectory()
     {
         _ = _git.Script("git", new ProcessRunResult(0, "/repo\n/repo/.git\n", false), Argv);
 
-        bool named = TryRoots("/repo/sub", out string? top, out string? common, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/repo/sub");
+        bool named = roots.Found;
 
         Assert.True(named);
-        Assert.Equal(Path.GetFullPath("/repo"), top);
-        Assert.Equal(Path.GetFullPath("/repo/.git"), common);
-        Assert.Null(failure);
+        Assert.Equal(Path.GetFullPath("/repo"), roots.TopLevel);
+        Assert.Equal(Path.GetFullPath("/repo/.git"), roots.CommonDirectory);
+        Assert.Null(roots.Failure);
         ProcessRunRequest call = Assert.Single(_git.Calls);
         Assert.Equal("/repo/sub", call.WorkingDirectory);
         Assert.Equal(TimeSpan.FromSeconds(5), call.Timeout);
     }
 
     [Fact]
-    public void AFailedRunReportsOnlyTheFirstLineOfGitsComplaint()
+    public async Task AFailedRunReportsOnlyTheFirstLineOfGitsComplaint()
     {
         _ = _git.Script(
             "git",
             new ProcessRunResult(128, string.Empty, false) { StandardOutput = string.Empty, StandardError = "\nfatal: not a git repository\nhint: more" },
             Argv);
 
-        bool named = TryRoots("/tmp", out string? top, out string? common, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/tmp");
+        bool named = roots.Found;
 
         Assert.False(named);
-        Assert.Null(top);
-        Assert.Null(common);
-        Assert.Equal("fatal: not a git repository", failure);
+        Assert.Null(roots.TopLevel);
+        Assert.Null(roots.CommonDirectory);
+        Assert.Equal("fatal: not a git repository", roots.Failure);
     }
 
     [Fact]
-    public void AFailedRunWithNoComplaintReportsUnavailable()
+    public async Task AFailedRunWithNoComplaintReportsUnavailable()
     {
         _ = _git.Script("git", new ProcessRunResult(1, string.Empty, false), Argv);
 
-        _ = TryRoots("/tmp", out _, out _, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/tmp");
+        string? failure = roots.Failure;
 
         Assert.Equal("unavailable", failure);
     }
 
     [Fact]
-    public void LessThanTwoLinesIsNotAWorkingTree()
+    public async Task LessThanTwoLinesIsNotAWorkingTree()
     {
         _ = _git.Script("git", new ProcessRunResult(0, "/repo\n", false), Argv);
 
-        bool named = TryRoots("/repo", out _, out _, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/repo");
+        bool named = roots.Found;
+        string? failure = roots.Failure;
 
         Assert.False(named);
         Assert.Equal("git reported no working tree", failure);
     }
 
     [Fact]
-    public void ATimedOutRunNamesTheFiveSecondBound()
+    public async Task ATimedOutRunNamesTheFiveSecondBound()
     {
         _ = _git.ScriptTimeout("git", Argv);
 
-        bool named = TryRoots("/repo", out _, out _, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/repo");
+        bool named = roots.Found;
+        string? failure = roots.Failure;
 
         Assert.False(named);
         Assert.Equal("The process did not exit within 5 seconds.", failure);
     }
 
     [Fact]
-    public void AMissingGitIsAFailureWithTheSeamsMessageNotAnException()
+    public async Task AMissingGitIsAFailureWithTheSeamsMessageNotAnException()
     {
         _ = _git.WithMissingProgram("git");
 
-        bool named = TryRoots("/repo", out _, out _, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/repo");
+        bool named = roots.Found;
+        string? failure = roots.Failure;
 
         Assert.False(named);
         Assert.Equal("command not found: git", failure);
     }
 
     [Fact]
-    public void AMissingWorkingDirectoryIsAFailureNotAnException()
+    public async Task AMissingWorkingDirectoryIsAFailureNotAnException()
     {
         _ = _git.WithMissingDirectory("/gone");
 
-        bool named = TryRoots("/gone", out _, out _, out string? failure);
+        GitWorktreeRoots roots = await TryRootsAsync("/gone");
+        bool named = roots.Found;
+        string? failure = roots.Failure;
 
         Assert.False(named);
         Assert.Contains("/gone", failure, StringComparison.Ordinal);

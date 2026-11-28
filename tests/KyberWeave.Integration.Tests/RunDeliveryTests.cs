@@ -828,10 +828,10 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     }
 
     [Fact]
-    public void TheDeliverToolReturnsTheLinkDraftStateAndChecks()
+    public async Task TheDeliverToolReturnsTheLinkDraftStateAndChecks()
     {
         GitRunRepository(archivePending: false);
-        File.WriteAllText(Path.Combine(_work, ".kyber-weave", "kyber-weave.yml"), Config);
+        await File.WriteAllTextAsync(Path.Combine(_work, ".kyber-weave", "kyber-weave.yml"), Config);
         Git(_work, "add", "-A");
         Git(_work, "commit", "-q", "-m", "chore: config");
         ScriptedGh gh = new();
@@ -840,7 +840,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
             deliveryExecutor: gh,
             deliveryHome: _home);
 
-        string response = tools.DeliverRun(_work, "Lists can be exported.");
+        string response = await tools.DeliverRunAsync(_work, "Lists can be exported.");
 
         Assert.True(response.Contains("result: created", StringComparison.Ordinal), response);
         Assert.Contains($"pull request: {PrUrl}", response, StringComparison.Ordinal);

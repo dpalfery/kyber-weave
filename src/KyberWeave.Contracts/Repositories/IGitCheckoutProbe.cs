@@ -18,7 +18,8 @@ public interface IGitCheckoutProbe
 
     /// <summary>The short revision and the dirty marker, each <c>unavailable</c> or <c>unknown</c> when git cannot say.</summary>
     /// <param name="root">The checkout root.</param>
-    GitCheckoutRevision ReadRevision(string root);
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    Task<GitCheckoutRevision> ReadRevisionAsync(string root, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Where a checkout is: its branch and the git directory shared by every worktree of the repository.</summary>

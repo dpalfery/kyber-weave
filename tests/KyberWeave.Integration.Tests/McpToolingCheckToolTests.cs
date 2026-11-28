@@ -70,15 +70,16 @@ public sealed class McpToolingCheckToolTests : IDisposable
         Assert.False(attribute.Destructive);
         Assert.True(attribute.Idempotent);
         Assert.False(attribute.OpenWorld);
-        ParameterInfo projectPath = Assert.Single(method.GetParameters());
+        ParameterInfo projectPath = method.GetParameters()[0];
         Assert.Equal("projectPath", projectPath.Name);
         Assert.False(projectPath.HasDefaultValue);
+        Assert.Equal(typeof(CancellationToken), method.GetParameters()[1].ParameterType);
     }
 
     [Fact]
-    public void AHealthyCheckoutReportsEachCheckOnOneLineAndExitsZero()
+    public async Task AHealthyCheckoutReportsEachCheckOnOneLineAndExitsZero()
     {
-        string[] lines = Lines(Tools().RunToolingCheck(Root));
+        string[] lines = Lines(await Tools().RunToolingCheckAsync(Root));
 
         Assert.StartsWith("provenance:", lines[0], StringComparison.Ordinal);
         Assert.Equal("result: passed", lines[1]);
@@ -90,9 +91,9 @@ public sealed class McpToolingCheckToolTests : IDisposable
     }
 
     [Fact]
-    public void AnIndexThatCannotBeRepairedReportsTheFixLineToolFailureAndExitOne()
+    public async Task AnIndexThatCannotBeRepairedReportsTheFixLineToolFailureAndExitOne()
     {
-        string[] lines = Lines(Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheck(Root));
+        string[] lines = Lines(await Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheckAsync(Root));
 
         Assert.Equal("result: failed", lines[1]);
         int failure = Array.FindIndex(lines, line => line.StartsWith("FAIL codegraph.", StringComparison.Ordinal));
@@ -103,20 +104,20 @@ public sealed class McpToolingCheckToolTests : IDisposable
     }
 
     [Fact]
-    public void AMissingCodeGraphBinaryReportsToolFailureAndExitThree()
+    public async Task AMissingCodeGraphBinaryReportsToolFailureAndExitThree()
     {
-        string[] lines = Lines(Tools(_ => throw DoctorHarness.BinaryNotFound()).RunToolingCheck(Root));
+        string[] lines = Lines(await Tools(_ => throw DoctorHarness.BinaryNotFound()).RunToolingCheckAsync(Root));
 
         Assert.Contains(ReturnStatus.ToolFailureLine, lines);
         Assert.Equal("EXIT: 3", lines[^1]);
     }
 
     [Fact]
-    public void ARepositoryThatOptedOutOfStoppingGetsWarningsExitZeroAndNoToolFailure()
+    public async Task ARepositoryThatOptedOutOfStoppingGetsWarningsExitZeroAndNoToolFailure()
     {
         _fixture.Write(".kyber-weave/kyber-weave.yml", "stop-on-tool-failure: false\n");
 
-        string[] lines = Lines(Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheck(Root));
+        string[] lines = Lines(await Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheckAsync(Root));
 
         Assert.Contains(lines, line => line.StartsWith("PASS codegraph.", StringComparison.Ordinal)
             && line.Contains(" warning: ", StringComparison.Ordinal));
@@ -127,9 +128,9 @@ public sealed class McpToolingCheckToolTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void AMissingProjectPathIsRefusedAndRunsNothing(string projectPath)
+    public async Task AMissingProjectPathIsRefusedAndRunsNothing(string projectPath)
     {
-        string response = Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheck(projectPath);
+        string response = await Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheckAsync(projectPath);
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
         Assert.Contains("projectPath is required", response, StringComparison.Ordinal);
@@ -137,11 +138,11 @@ public sealed class McpToolingCheckToolTests : IDisposable
     }
 
     [Fact]
-    public void AProjectPathOutsideTheRepositoryIsRefusedAndRunsNothing()
+    public async Task AProjectPathOutsideTheRepositoryIsRefusedAndRunsNothing()
     {
         using TempDirectory elsewhere = new();
 
-        string response = Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheck(elsewhere.Path);
+        string response = await Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheckAsync(elsewhere.Path);
 
         Assert.Contains("projectPath was refused", response, StringComparison.Ordinal);
         Assert.DoesNotContain("EXIT:", response, StringComparison.Ordinal);

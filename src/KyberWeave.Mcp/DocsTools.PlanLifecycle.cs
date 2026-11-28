@@ -34,17 +34,28 @@ public sealed partial class DocsTools
         task file cannot be written. On success it lists the ready queue to dispatch from; a
         plan already Ready with a current task file reports done.
         """)]
-    public string FinalizePlan(
+    public async Task<string> FinalizePlanAsync(
         [Description("Absolute path of the run's worktree that holds the plan. Required.")] string projectPath,
         [Description("The plan file, as a path or its file name under the plans folder.")] string planFile,
         [Description("'autonomous' when the conductor accepted the recommendation, 'supervised' when the owner approved.")] string approvalMode,
-        [Description("One line saying what approved it, such as 'AUTONOMOUS_APPROVAL: approve-and-execute' or the owner's answer.")] string approval)
+        [Description("One line saying what approved it, such as 'AUTONOMOUS_APPROVAL: approve-and-execute' or the owner's answer.")] string approval,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.Bound.PlanLifecycle.FinalizePlan(planFile, approvalMode, approval)) is { } redirected)
+        if (await RedirectAsync(
+                projectPath,
+                tools => tools.Bound.PlanLifecycle.FinalizePlanAsync(planFile, approvalMode, approval, cancellationToken),
+                cancellationToken).ConfigureAwait(false) is { } redirected)
+        {
             return redirected;
+        }
+
         if (string.IsNullOrWhiteSpace(projectPath))
-            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        return Bound.PlanLifecycle.FinalizePlan(planFile, approvalMode, approval);
+        {
+            return await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        }
+
+        return await Bound.PlanLifecycle.FinalizePlanAsync(planFile, approvalMode, approval, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -61,14 +72,25 @@ public sealed partial class DocsTools
         with the same findings as docs closeout, changing nothing; those findings go to docs-dev.
         After it archives, run docs_validate_governed_document_schema with mergeReady true.
         """)]
-    public string ArchivePlan(
+    public async Task<string> ArchivePlanAsync(
         [Description("Absolute path of the run's worktree that holds the plan. Required.")] string projectPath,
-        [Description("The plan file, as a path or its file name under the plans folder.")] string planFile)
+        [Description("The plan file, as a path or its file name under the plans folder.")] string planFile,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.Bound.PlanLifecycle.ArchivePlan(planFile)) is { } redirected)
+        if (await RedirectAsync(
+                projectPath,
+                tools => tools.Bound.PlanLifecycle.ArchivePlanAsync(planFile, cancellationToken),
+                cancellationToken).ConfigureAwait(false) is { } redirected)
+        {
             return redirected;
+        }
+
         if (string.IsNullOrWhiteSpace(projectPath))
-            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
-        return Bound.PlanLifecycle.ArchivePlan(planFile);
+        {
+            return await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nresult: refused\nprojectPath is required: pass the absolute path of the run's worktree.";
+        }
+
+        return await Bound.PlanLifecycle.ArchivePlanAsync(planFile, cancellationToken).ConfigureAwait(false);
     }
 }

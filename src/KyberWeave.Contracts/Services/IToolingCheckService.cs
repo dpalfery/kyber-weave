@@ -7,6 +7,7 @@ namespace KyberWeave.Contracts.Services;
 public interface IToolingCheckService
 {
     /// <summary>Runs the ensure-mode doctor against the bound checkout and reports its checks and exit code.</summary>
+    /// <param name="cancellationToken">Cancels the provenance read and the doctor's children.</param>
     /// <returns>The tool's complete response text.</returns>
-    string RunToolingCheck();
+    Task<string> RunToolingCheckAsync(CancellationToken cancellationToken = default);
 }

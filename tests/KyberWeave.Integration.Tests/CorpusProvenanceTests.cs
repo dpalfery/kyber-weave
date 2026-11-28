@@ -59,11 +59,11 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// signal that cannot separate a second worktree from a foreign repository.
     /// </remarks>
     [Fact]
-    public void ProvenanceLineNamesTheBranchAndTheRepositoryGitDirectory()
+    public async Task ProvenanceLineNamesTheBranchAndTheRepositoryGitDirectory()
     {
         DocsTestCommands.Scaffolding.Scaffold(_root.Path);
 
-        string line = Status(_root.Path);
+        string line = await Status(_root.Path);
 
         Assert.Matches(BranchField, line);
         Assert.Matches(RepoField, line);
@@ -78,13 +78,13 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// expectation is independent of the implementation and the test starts no child process.
     /// </remarks>
     [Fact]
-    public void ProvenanceBranchAndRepoCarryTheCheckoutValues()
+    public async Task ProvenanceBranchAndRepoCarryTheCheckoutValues()
     {
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_root.Path);
         DocsTestCommands.Scaffolding.Scaffold(_root.Path);
 
         string branch = BranchFromHead(_root.Path);
-        string line = Status(_root.Path);
+        string line = await Status(_root.Path);
 
         string servedBranch = FieldValue(BranchField, line);
         string servedRepo = FieldValue(RepoField, line);
@@ -101,14 +101,14 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// A repository path with spaces is captured completely in the provenance line without truncation.
     /// </summary>
     [Fact]
-    public void ProvenanceRepoWithSpacesInPathIsCapturedWithoutTruncation()
+    public async Task ProvenanceRepoWithSpacesInPathIsCapturedWithoutTruncation()
     {
         string spacedRoot = Path.Combine(_root.Path, "repo with spaces");
         Directory.CreateDirectory(spacedRoot);
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(spacedRoot);
         DocsTestCommands.Scaffolding.Scaffold(spacedRoot);
 
-        string line = Status(spacedRoot);
+        string line = await Status(spacedRoot);
         string servedRepo = FieldValue(RepoField, line);
 
         Assert.Contains("repo with spaces", servedRepo, StringComparison.Ordinal);
@@ -120,14 +120,14 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// exception, but degrades gracefully to unavailable.
     /// </summary>
     [Fact]
-    public void CorruptDotGitWithIllegalCharacters_DoesNotThrow_DegradesGracefully()
+    public async Task CorruptDotGitWithIllegalCharacters_DoesNotThrow_DegradesGracefully()
     {
         string corruptRoot = Path.Combine(_root.Path, "corrupt-dot-git");
         Directory.CreateDirectory(corruptRoot);
         DocsTestCommands.Scaffolding.Scaffold(corruptRoot);
-        File.WriteAllText(Path.Combine(corruptRoot, ".git"), "gitdir: \0illegal\0path");
+        await File.WriteAllTextAsync(Path.Combine(corruptRoot, ".git"), "gitdir: \0illegal\0path");
 
-        string line = Status(corruptRoot);
+        string line = await Status(corruptRoot);
         string servedBranch = FieldValue(BranchField, line);
         string servedRepo = FieldValue(RepoField, line);
 
@@ -140,7 +140,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// rather than an empty string, so header regex parsing is not corrupted.
     /// </summary>
     [Fact]
-    public void FirstLine_ReturnsUnavailable_WhenWhitespaceOnly()
+    public async Task FirstLine_ReturnsUnavailable_WhenWhitespaceOnly()
     {
         Assert.Equal("unavailable", CorpusProvenance.FirstLine("   \n"));
         Assert.Equal("unavailable", CorpusProvenance.FirstLine("\r\n\t  \r\n"));
@@ -152,17 +152,17 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// the checkout's git directory.
     /// </summary>
     [Fact]
-    public void CorruptCommonDirWithIllegalCharacters_DoesNotThrow_FallsBackToGitDirectory()
+    public async Task CorruptCommonDirWithIllegalCharacters_DoesNotThrow_FallsBackToGitDirectory()
     {
         string corruptRoot = Path.Combine(_root.Path, "corrupt-commondir");
         Directory.CreateDirectory(corruptRoot);
         DocsTestCommands.Scaffolding.Scaffold(corruptRoot);
         string dotGit = Path.Combine(corruptRoot, ".git");
         Directory.CreateDirectory(dotGit);
-        File.WriteAllText(Path.Combine(dotGit, "commondir"), "\0illegal\0path");
-        File.WriteAllText(Path.Combine(dotGit, "HEAD"), "ref: refs/heads/main\n");
+        await File.WriteAllTextAsync(Path.Combine(dotGit, "commondir"), "\0illegal\0path");
+        await File.WriteAllTextAsync(Path.Combine(dotGit, "HEAD"), "ref: refs/heads/main\n");
 
-        string line = Status(corruptRoot);
+        string line = await Status(corruptRoot);
         string servedBranch = FieldValue(BranchField, line);
         string servedRepo = FieldValue(RepoField, line);
 
@@ -191,7 +191,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     }
 
     /// <summary>The provenance block as the docs status tool returns it, which is the caller-visible contract.</summary>
-    private static string Status(string root)
+    private static async Task<string> Status(string root)
     {
         KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
@@ -204,7 +204,7 @@ public sealed class CorpusProvenanceTests : IDisposable
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
-        string status = DocsToolsComposition.Create(host).DocsStatus();
+        string status = await DocsToolsComposition.Create(host).DocsStatusAsync();
         Assert.StartsWith("provenance:", status, StringComparison.Ordinal);
         return status;
     }
