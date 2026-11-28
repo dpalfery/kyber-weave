@@ -33,6 +33,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private const double NormalizedVectorTolerance = 0.0001;
     private const int BusyAttempts = 3;
+    private const int BusyAttemptTimeoutSeconds = 1;
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
 
@@ -538,19 +539,15 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         SqliteConnectionStringBuilder builder = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            // Microsoft.Data.Sqlite retries a busy database for the command timeout, overriding any
+            // busy_timeout pragma, so this is the per-attempt bound: three attempts wait about 3 s in all.
+            DefaultTimeout = BusyAttemptTimeoutSeconds
         };
         SqliteConnection connection = new SqliteConnection(builder.ToString());
         try
         {
             connection.Open();
-            using (SqliteCommand busyTimeout = connection.CreateCommand())
-            {
-                // 250ms per attempt, matching the three bounded attempts below.
-                busyTimeout.CommandText = "PRAGMA busy_timeout = 250;";
-                busyTimeout.ExecuteNonQuery();
-            }
-
             using (SqliteCommand foreignKeys = connection.CreateCommand())
             {
                 foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
@@ -882,8 +879,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         string reason = exception.Message.Trim();
         return reason.Length == 0
-            ? $"sqlite3 exited with code {exception.SqliteErrorCode}."
-            : $"sqlite3 exited with code {exception.SqliteErrorCode}: {reason}";
+            ? $"SQLite error {exception.SqliteErrorCode} on the cache file; check that it and its folder are readable and writable."
+            : $"SQLite error {exception.SqliteErrorCode} on the cache file: {reason}";
     }
 
     private void EnsureAvailable()
@@ -891,7 +888,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable)
         {
             throw new InvalidOperationException(
-                "Analysis persistence is disabled until .kyber-weave/.gitignore contains the exact 'cache/' entry and sqlite3 is available.");
+                "Analysis persistence is disabled until .kyber-weave/.gitignore contains the exact 'cache/' entry and the SQLite library can load.");
         }
     }
 

@@ -1,6 +1,7 @@
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Persistence;
+using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -105,8 +106,12 @@ public sealed class SqliteAnalysisPersistenceIntegrationTests
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         using SqliteConnection holder = HoldExclusiveLock(persistence.DatabasePath);
 
+        Stopwatch elapsed = Stopwatch.StartNew();
         InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
             () => persistence.SaveClaims([Claim("locked")]));
+
+        // Three attempts of about 1 s each, not the driver's 30 s default per attempt.
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(10), $"The locked cache took {elapsed.Elapsed} to give up.");
 
         Assert.Contains("remained locked after 3 bounded attempts", failure.Message, StringComparison.Ordinal);
     }
@@ -117,8 +122,8 @@ public sealed class SqliteAnalysisPersistenceIntegrationTests
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         SqliteConnection holder = HoldExclusiveLock(persistence.DatabasePath);
-        // Each attempt waits 250 ms on the lock; releasing it during the second attempt proves the retry.
-        using Timer release = new(_ => holder.Dispose(), null, TimeSpan.FromMilliseconds(350), Timeout.InfiniteTimeSpan);
+        // Each attempt waits 1 s on the lock; releasing it during the second attempt proves the retry.
+        using Timer release = new(_ => holder.Dispose(), null, TimeSpan.FromMilliseconds(1400), Timeout.InfiniteTimeSpan);
 
         persistence.SaveClaims([Claim("retried")]);
 
