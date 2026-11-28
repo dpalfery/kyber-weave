@@ -19,4 +19,4 @@
 is_global = true
 global_level = 200
 
-# KW-STD-CS-006 catch discipline: catch named types; bare Exception only to log and rethrow.
+# No analyzer is held here any more: every id has reached zero (ADR 0004 amendment, status).
