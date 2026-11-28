@@ -24,13 +24,6 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
 {
     public const int SchemaVersion = 1;
 
-    /// <summary>
-    /// Stamps a new cache with <see cref="SchemaVersion"/>. A pragma value cannot be a bound parameter and CA2100
-    /// needs constant command text, so the number is repeated here: change both together.
-    /// AnalysisPersistenceTests fails when the stamp and the constant differ.
-    /// </summary>
-    private const string SchemaVersionPragma = "PRAGMA user_version = 1;";
-
     private const double NormalizedVectorTolerance = 0.0001;
     private const int BusyAttempts = 3;
     private const int BusyAttemptTimeoutSeconds = 1;
@@ -340,7 +333,9 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
                 using (SqliteCommand schemaVersion = connection.CreateCommand())
                 {
                     schemaVersion.Transaction = transaction;
-                    schemaVersion.CommandText = SchemaVersionPragma;
+                    // The stamp repeats SchemaVersion: a pragma value cannot be a bound parameter, and the command text
+                    // stays a literal. Change both together; AnalysisPersistenceTests fails when they differ.
+                    schemaVersion.CommandText = "PRAGMA user_version = 1;";
                     schemaVersion.ExecuteNonQuery();
                 }
 
