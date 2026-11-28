@@ -62,6 +62,23 @@ public sealed class CopilotHookAdapterTests
             SeenPostCaller = caller;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
@@ -475,6 +492,43 @@ public sealed class CopilotHookAdapterTests
             Pending.Clear();
             return notes;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecideBackgroundReturnAsync(
+            string harness,
+            string sessionId,
+            string agentId,
+            string response,
+            KyberWeaveConfig config,
+            HookContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecideBackgroundReturn(harness, sessionId, agentId, response, config, context));
+        /// <inheritdoc/>
+        public Task<int> RecoverLostReturnAsync(
+            string harness,
+            string? sessionId,
+            IReadOnlyList<string> agentNames,
+            HookContext context,
+            string? agentId = null,
+            string? stopEvent = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RecoverLostReturn(harness, sessionId, agentNames, context, agentId, stopEvent));
     }
 
     private static string RunCli(IHookDecisionEngine engine, string stdin)

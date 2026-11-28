@@ -45,6 +45,27 @@ public interface IBackgroundDispatchEngine
         HookContext context);
 
     /// <summary>
+    /// Records one finished turn of a remembered background agent as the return of its dispatch and runs the return
+    /// rules on it, without blocking a thread.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="sessionId">The harness session the agent runs in.</param>
+    /// <param name="agentId">The harness's id for the agent.</param>
+    /// <param name="response">The agent's final text for the turn.</param>
+    /// <param name="config">The loaded host configuration.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
+    /// <returns>What the rules decided for the return.</returns>
+    Task<HookOutcome> DecideBackgroundReturnAsync(
+        string harness,
+        string sessionId,
+        string agentId,
+        string response,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Hands over, once, the Arbiter notes on background returns that <paramref name="caller"/> dispatched in this
     /// session and has not been shown through a dispatch hook yet.
     /// </summary>

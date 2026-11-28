@@ -47,6 +47,23 @@ public sealed class ClaudeHandbackTests
             SeenPostOutput = toolOutput;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
@@ -216,6 +233,33 @@ public sealed class ClaudeHandbackTests
         }
 
         public IReadOnlyList<string> TakePendingNotes(string sessionId, string caller, HookContext context) => [];
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecideBackgroundReturnAsync(
+            string harness,
+            string sessionId,
+            string agentId,
+            string response,
+            KyberWeaveConfig config,
+            HookContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecideBackgroundReturn(harness, sessionId, agentId, response, config, context));
     }
 
     [Fact]

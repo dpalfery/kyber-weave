@@ -70,6 +70,23 @@ public sealed class FactoryHookAdapterTests
 
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private sealed class ContextualEngine : IContextualHookDecisionEngine
@@ -143,6 +160,53 @@ public sealed class FactoryHookAdapterTests
             SeenPostSessionId = sessionId;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
     }
 
     /// <summary>Records what a stop event asks recovery to close, and decides nothing else.</summary>
@@ -194,6 +258,63 @@ public sealed class FactoryHookAdapterTests
             RecoveredNames = agentNames;
             return 0;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
+        /// <inheritdoc/>
+        public Task<int> RecoverLostReturnAsync(
+            string harness,
+            string? sessionId,
+            IReadOnlyList<string> agentNames,
+            HookContext context,
+            string? agentId = null,
+            string? stopEvent = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RecoverLostReturn(harness, sessionId, agentNames, context, agentId, stopEvent));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>

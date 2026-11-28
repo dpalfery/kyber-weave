@@ -38,4 +38,26 @@ public interface ILostReturnRecovery
         HookContext context,
         string? agentId = null,
         string? stopEvent = null);
+
+    /// <summary>
+    /// Closes the one dispatch <paramref name="agentNames"/> left open in <paramref name="sessionId"/>, without
+    /// blocking a thread.
+    /// </summary>
+    /// <param name="harness">The harness token that delivered the stop event.</param>
+    /// <param name="sessionId">The harness session the agent ran in, when the payload names one.</param>
+    /// <param name="agentNames">Every name the stop event gives the agent; empty when it gives none.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="agentId">The harness's id for the agent, when the stop event carries one.</param>
+    /// <param name="stopEvent">The event that ended the agent, as the closing row's <c>recovered</c> value; null names
+    /// the harness's own stop event.</param>
+    /// <param name="cancellationToken">Cancels the recovery.</param>
+    /// <returns>How many dispatches were closed: 0 or 1.</returns>
+    Task<int> RecoverLostReturnAsync(
+        string harness,
+        string? sessionId,
+        IReadOnlyList<string> agentNames,
+        HookContext context,
+        string? agentId = null,
+        string? stopEvent = null,
+        CancellationToken cancellationToken = default);
 }

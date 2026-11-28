@@ -37,4 +37,18 @@ internal sealed class PassthroughRunContexts : IHookRunContextResolver
 
     /// <inheritdoc />
     public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => context;
+
+    /// <inheritdoc />
+    public Task<HookRunContext> ResolveAsync(
+        HookRunContextRequest request,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Resolve(request));
+
+    /// <inheritdoc />
+    public Task<HookRunContext> SelectPlanAsync(
+        HookRunContext context,
+        string? planFile,
+        string? text,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(SelectPlan(context, planFile, text));
 }
