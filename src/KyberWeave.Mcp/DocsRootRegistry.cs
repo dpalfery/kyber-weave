@@ -171,7 +171,7 @@ public sealed class DocsRootRegistry
         bool codeGraphRefreshEnabled,
         DocsRootRegistry? registry,
         IServiceProvider? services = null,
-        IProcessExecutor? deliveryExecutor = null,
+        IProcessRunner? deliveryExecutor = null,
         string? deliveryHome = null,
         IProcessRunner? toolingExecutor = null,
         string? toolingMcpExecutable = null)

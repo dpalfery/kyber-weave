@@ -147,7 +147,7 @@ internal static class ApplicationCoreRegistration
     {
         services.TryAddSingleton(sp => new RunDeliveryPorts(
             sp.GetRequiredService<IRepositoryFileStore>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IRunStateStore>(),
             sp.GetRequiredService<IReviewCycleStore>(),
             sp.GetRequiredService<IProcessEnvironment>(),

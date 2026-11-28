@@ -216,7 +216,7 @@ internal static class DocsToolsComposition
         ICodeGraphFreshnessGate? freshness = null,
         DocsRootRegistry? roots = null,
         IServiceProvider? services = null,
-        IProcessExecutor? deliveryExecutor = null,
+        IProcessRunner? deliveryExecutor = null,
         string? deliveryHome = null,
         IProcessRunner? toolingExecutor = null,
         string? toolingMcpExecutable = null)

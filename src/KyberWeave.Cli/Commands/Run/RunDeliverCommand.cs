@@ -13,14 +13,14 @@ namespace KyberWeave.Cli.Commands.Run;
 /// Pushes a finished run's branch and creates or updates its draft pull request on GitHub, with the description
 /// assembled from what the run recorded. The same step the docs server's deliver tool runs (ADR 0081).
 /// </summary>
-public sealed class RunDeliverCommand(IRunDeliveryRunner delivery, IConfigLoadService configs, IPathResolver paths, IProcessEnvironment environment, IAnsiConsole console) : Command<RunDeliverSettings>
+public sealed class RunDeliverCommand(IRunDeliveryRunner delivery, IConfigLoadService configs, IPathResolver paths, IProcessEnvironment environment, IAnsiConsole console) : AsyncCommand<RunDeliverSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
         "Push the run branch and open or update its draft pull request, described from what the run recorded.";
 
-    /// <summary>Exits 0 when the pull request was created or updated; exits 1 naming what is wrong otherwise.</summary>
-    public override int Execute(CommandContext context, RunDeliverSettings settings, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public override async Task<int> ExecuteAsync(CommandContext context, RunDeliverSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -31,9 +31,9 @@ public sealed class RunDeliverCommand(IRunDeliveryRunner delivery, IConfigLoadSe
             return 1;
         }
 
-        DeliveryOutcome outcome = delivery.Run(paths.GetFullPath(settings.Path, environment.CurrentDirectory), config.WithOntology(ontology),
+        DeliveryOutcome outcome = await delivery.RunAsync(paths.GetFullPath(settings.Path, environment.CurrentDirectory), config.WithOntology(ontology),
             new DeliveryRequest(settings.Summary ?? string.Empty, settings.Notes, settings.Title, !settings.NoDraft,
-                settings.DocumentationImpact, settings.Plan));
+                settings.DocumentationImpact, settings.Plan), cancellationToken).ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("delivered", outcome.Delivered);
         if (outcome.Delivered)
