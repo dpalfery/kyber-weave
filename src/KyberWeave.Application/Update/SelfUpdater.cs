@@ -153,8 +153,9 @@ internal sealed class SelfUpdater : IDisposable
         {
             return new SelfUpdateOutcome(1, ex.Message);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            // Only an HttpClient timeout lands here; a cancel the user asked for propagates as itself.
             return new SelfUpdateOutcome(
                 1,
                 "the GitHub request timed out. Check the network connection and retry.");

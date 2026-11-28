@@ -87,7 +87,10 @@ internal sealed class ArbiterHookRefresher(
                     refreshed++;
                 }
             }
-            catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or HttpRequestException or TimeoutException or OperationCanceledException or InvalidDataException)
+            catch (Exception ex) when (FileFailure.Is(ex)
+                || ex is InvalidOperationException or HttpRequestException or TimeoutException or InvalidDataException
+                // A request timeout fails this project only; a cancel the user asked for stops the whole refresh.
+                || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
             {
                 log?.Invoke($"warning: arbiter hook refresh for '{root}' failed: {ex.Message}");
                 failed++;
