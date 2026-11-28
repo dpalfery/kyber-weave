@@ -56,6 +56,56 @@ public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphI
     }
 
     /// <inheritdoc />
+    public async Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+        string path,
+        TimeSpan wait,
+        CancellationToken cancellationToken = default)
+    {
+        long started = time.GetTimestamp();
+        while (true)
+        {
+            FileStream? held = null;
+            try
+            {
+                held = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                CodeGraphIndexLockAttempt attempt = new(held, Failure: null);
+                held = null;
+                return attempt;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // A missing lock directory is not contention, and retrying it until the deadline would only delay
+                // the same answer.
+                return new CodeGraphIndexLockAttempt(null, $"the index lock directory for '{path}' does not exist");
+            }
+            catch (PathTooLongException)
+            {
+                return new CodeGraphIndexLockAttempt(null, $"the index lock path '{path}' is too long");
+            }
+            catch (IOException ex) when (IsSharingViolation(ex) && time.GetElapsedTime(started) < wait)
+            {
+                await Task.Delay(LockPollInterval, time, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException ex) when (IsSharingViolation(ex))
+            {
+                return new CodeGraphIndexLockAttempt(null, Failure: null);
+            }
+            catch (IOException ex)
+            {
+                return new CodeGraphIndexLockAttempt(null, $"the index lock '{path}' could not be opened: {ex.Message}");
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException or ArgumentException)
+            {
+                return new CodeGraphIndexLockAttempt(null, $"the index lock '{path}' could not be opened");
+            }
+            finally
+            {
+                DisposeHeld(held);
+            }
+        }
+    }
+
+    /// <inheritdoc />
     /// <remarks>The probe file is the only file this code ever removes.</remarks>
     public bool IsWritable(string directory)
     {
@@ -95,6 +145,8 @@ public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphI
             return false;
         }
     }
+
+    private static void DisposeHeld(FileStream? held) => held?.Dispose();
 
     /// <summary>
     ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.

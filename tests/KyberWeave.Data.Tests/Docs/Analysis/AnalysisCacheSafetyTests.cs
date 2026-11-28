@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Fakes;
@@ -91,7 +92,54 @@ public sealed class AnalysisCacheSafetyTests
         Assert.True(Safety(git).IsSafe("repo"));
     }
 
+    [Fact]
+    public async Task IsSafeAsyncReadsGitWithoutBlocking()
+    {
+        WriteIgnore("cache/");
+        ScriptedProcessRunner git = new();
+        _ = git.Script(
+            "git",
+            new ProcessRunResult(0, string.Empty, TimedOut: false) { StandardOutput = string.Empty, StandardError = string.Empty },
+            "ls-files", "--cached", "--", ".kyber-weave/cache");
+
+        Assert.True(await SafetyAsync(git).IsSafeAsync(Root));
+        Assert.Single(git.Calls);
+    }
+
+    [Fact]
+    public async Task IsSafeAsyncIsUnsafeWhenTheTrackerNamesTheCache()
+    {
+        WriteIgnore("cache/");
+        ScriptedProcessRunner git = new();
+        _ = git.Script(
+            "git",
+            new ProcessRunResult(0, string.Empty, TimedOut: false)
+            {
+                StandardOutput = ".kyber-weave/cache/docs-analysis.sqlite3\n",
+                StandardError = string.Empty
+            },
+            "ls-files", "--cached", "--", ".kyber-weave/cache");
+
+        Assert.False(await SafetyAsync(git).IsSafeAsync(Root));
+    }
+
+    [Fact]
+    public async Task IsSafeAsyncLeavesTheCacheUnprovenWhenGitCannotAnswer()
+    {
+        WriteIgnore("cache/");
+        ScriptedProcessRunner git = new();
+        _ = git.Throws(
+            "git",
+            new TimeoutException(),
+            "ls-files", "--cached", "--", ".kyber-weave/cache");
+
+        Assert.False(await SafetyAsync(git).IsSafeAsync(Root));
+    }
+
     private AnalysisCacheSafety Safety(ScriptedProcessExecutor git) =>
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory), git);
+
+    private AnalysisCacheSafety SafetyAsync(ScriptedProcessRunner git) =>
         new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory), git);
 
     private void WriteIgnore(string text)

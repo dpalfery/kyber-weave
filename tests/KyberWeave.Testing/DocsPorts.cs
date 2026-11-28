@@ -23,6 +23,8 @@ internal static class DocsPorts
     internal static readonly IRepositoryFileStore Files = new PhysicalRepositoryFileStore();
     internal static readonly IBoundedProcessExecutor Process = new KernelBoundedProcessExecutor();
 
+    internal static readonly IProcessRunner Runner = new KernelProcessRunner();
+
     internal static readonly IExclusiveFileWriter Exclusive = new ExclusiveFileWriter();
 
     internal static readonly IPathResolver Paths = new PhysicalPathResolver(Files);
@@ -41,12 +43,12 @@ internal static class DocsPorts
     /// <summary>The CodeGraph index of a temporary checkout, read through the real <c>sqlite3</c> and git.</summary>
     /// <param name="repositoryRoot">The checkout root.</param>
     internal static CodeGraphResolverAdapter CodeGraph(string repositoryRoot) =>
-        (CodeGraphResolverAdapter)new CodeGraphPortsFactory(Disk, Paths, Environment, Process, Staleness).ForRepository(repositoryRoot).Resolver;
+        (CodeGraphResolverAdapter)new CodeGraphPortsFactory(Disk, Paths, Environment, Runner, Staleness).ForRepository(repositoryRoot).Resolver;
 
     /// <summary>The CodeGraph index at <paramref name="databasePath"/>, read through the real <c>sqlite3</c>.</summary>
     /// <param name="databasePath">The index file.</param>
     internal static CodeGraphResolverAdapter CodeGraphAt(string databasePath) =>
-        new(databasePath, Disk, Paths, Environment, Process, Staleness);
+        new(databasePath, Disk, Paths, Environment, Runner, Staleness);
 
     private static readonly CodeGraphIndexStaleness Staleness = new(Disk, new ProcessProgramRunner());
 

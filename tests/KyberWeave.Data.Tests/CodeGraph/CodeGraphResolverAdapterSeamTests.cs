@@ -113,6 +113,42 @@ public sealed class CodeGraphResolverAdapterSeamTests
         Assert.Equal(2, sqlite.CallsTo("sqlite3").Count());
     }
 
+    [Fact]
+    public async Task CreateAsyncReadsTheIndexWithoutBlocking()
+    {
+        Index();
+        ScriptedProcessRunner sqlite = new();
+        _ = sqlite.Script("sqlite3", OutputRun(
+            Line("node", "n1", "class", "Widget", "Shop.Widget", "src/Widget.cs", "csharp", "3", "9"),
+            Line("edge", "n1", "n1", "calls", "", "", "", "", "")));
+
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
+
+        Assert.True(graph.IsAvailable);
+        Assert.Equal("Widget", Assert.Single(graph.ResolveSymbol("Shop.Widget")).Name);
+        Assert.Single(sqlite.Calls);
+    }
+
+    [Fact]
+    public async Task ThePortsFactoryReadsTheIndexWithoutBlocking()
+    {
+        Index();
+        ScriptedProcessRunner sqlite = new();
+        _ = sqlite.Script("sqlite3", OutputRun(Line("node", "n1", "class", "Widget", "Shop.Widget", "src/Widget.cs", "csharp", "3", "9")));
+        FakePathResolver paths = new(_files);
+        CodeGraphPortsFactory factory = new(
+            _files,
+            paths,
+            new FakeProcessEnvironment(currentDirectory: WorkingDirectory),
+            sqlite,
+            new CodeGraphIndexStaleness(_files, sqlite));
+
+        CodeGraphPorts ports = await factory.ForRepositoryAsync(Root, CancellationToken.None);
+
+        Assert.True(((CodeGraphResolverAdapter)ports.Resolver).IsAvailable);
+        Assert.Equal("Widget", Assert.Single(ports.Resolver.ResolveSymbol("Shop.Widget")).Name);
+    }
+
     private void Index()
     {
         _files.CreateDirectory(Path.Combine(Root, ".codegraph"));
@@ -131,7 +167,27 @@ public sealed class CodeGraphResolverAdapterSeamTests
             new CodeGraphIndexStaleness(_files, new ScriptedProcessRunner()));
     }
 
+    private async Task<CodeGraphResolverAdapter> OpenAsync(ScriptedProcessRunner sqlite, string path)
+    {
+        FakePathResolver paths = new(_files);
+        return await CodeGraphResolverAdapter.CreateAsync(
+            path,
+            _files,
+            paths,
+            new FakeProcessEnvironment(currentDirectory: WorkingDirectory),
+            sqlite,
+            new CodeGraphIndexStaleness(_files, sqlite),
+            CancellationToken.None);
+    }
+
     private static ProcessResult Output(params string[] lines) => new(0, string.Join('\n', lines), string.Empty);
+
+    private static ProcessRunResult OutputRun(params string[] lines) =>
+        new(0, string.Join('\n', lines), TimedOut: false)
+        {
+            StandardOutput = string.Join('\n', lines),
+            StandardError = string.Empty
+        };
 
     private static string Line(params string[] fields) => string.Join(Sep, fields);
 }

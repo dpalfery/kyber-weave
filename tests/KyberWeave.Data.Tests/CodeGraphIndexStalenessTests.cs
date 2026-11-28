@@ -164,4 +164,28 @@ public sealed class CodeGraphIndexStalenessTests
             Assert.NotNull(call.Timeout);
         });
     }
+
+    [Fact]
+    public async Task DescribeAsyncReadsGitWithoutBlockingAndReportsTheLag()
+    {
+        WriteSource("src/A.cs");
+        _time.Advance(TimeSpan.FromMinutes(5));
+        WriteSource("src/A.cs");
+        GitAnswers(Head, "src/A.cs\n");
+
+        string? asynchronous = await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None);
+
+        Assert.Equal(
+            "the index was built at 22222222 and HEAD is 11111111, and 1 source file(s) changed since (for example src/A.cs)",
+            asynchronous);
+        Assert.All(_git.Calls, call => Assert.Equal(Root, call.WorkingDirectory));
+    }
+
+    [Fact]
+    public async Task DescribeAsyncSaysNothingWhenGitCannotAnswer()
+    {
+        _git.Throws("git", new Win32Exception(2, "not found"));
+
+        Assert.Null(await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None));
+    }
 }
