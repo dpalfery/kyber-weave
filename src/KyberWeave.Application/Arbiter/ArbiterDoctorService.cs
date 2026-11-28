@@ -69,7 +69,7 @@ public sealed class ArbiterDoctorService(
         BeginChecks(config, configPath, home, report);
         await CheckKeyAsync(config, report, lines, cancellationToken).ConfigureAwait(false);
         await CheckLogIgnoredAsync(root, report, lines, cancellationToken).ConfigureAwait(false);
-        CheckBinary(report, lines);
+        await CheckBinaryAsync(report, lines, cancellationToken).ConfigureAwait(false);
         CheckGuard(config, root, report, lines);
         CheckProjectHooks(gatingReport, report, lines);
         CheckModelTargets(config, home, globalTargets, report, lines);
@@ -503,9 +503,12 @@ public sealed class ArbiterDoctorService(
         }
     }
 
-    private void CheckBinary(DiagnosticReport report, List<ArbiterDoctorLine> lines)
+    private async Task CheckBinaryAsync(
+        DiagnosticReport report,
+        List<ArbiterDoctorLine> lines,
+        CancellationToken cancellationToken)
     {
-        ToolProbeResult result = probe.Probe();
+        ToolProbeResult result = await probe.ProbeAsync(cancellationToken).ConfigureAwait(false);
         string cliVersion = probe.CliVersion;
 
         if (result is { IsAvailable: true, Version: not null }

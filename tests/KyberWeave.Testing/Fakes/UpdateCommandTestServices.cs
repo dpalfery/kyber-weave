@@ -60,7 +60,11 @@ internal static class UpdateCommandTestServices
     {
         public int RunProcess(string fileName, IReadOnlyList<string> arguments) => inner.RunProcess(fileName, arguments);
 
-        public ProcessResult RunCapture(string fileName, IReadOnlyList<string> arguments) => inner.RunCapture(fileName, arguments);
+        public Task<ProcessResult> RunCaptureAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            CancellationToken cancellationToken) =>
+            inner.RunCaptureAsync(fileName, arguments, cancellationToken);
 
         public int StartFinishingProcess(string fileName, IReadOnlyList<string> arguments, bool discardOutput) =>
             finishingProcess is null
@@ -75,8 +79,13 @@ internal static class UpdateCommandTestServices
         public void CopyFile(string sourcePath, string destinationPath, bool overwrite) =>
             inner.CopyFile(sourcePath, destinationPath, overwrite);
 
-        public void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs) =>
-            inner.ReplaceBinary(extractedBinaryPath, destinationPath, windows, macOs);
+        public Task ReplaceBinaryAsync(
+            string extractedBinaryPath,
+            string destinationPath,
+            bool windows,
+            bool macOs,
+            CancellationToken cancellationToken = default) =>
+            inner.ReplaceBinaryAsync(extractedBinaryPath, destinationPath, windows, macOs, cancellationToken);
     }
 }
 

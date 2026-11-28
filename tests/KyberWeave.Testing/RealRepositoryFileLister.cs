@@ -11,5 +11,5 @@ namespace KyberWeave.Tests;
 public static class RealRepositoryFileLister
 {
     /// <summary>The lister over the real process runner and the real file system.</summary>
-    public static FileRepositoryFileLister Create() => new(new ProcessProgramRunner(), new PhysicalFileSystem());
+    public static FileRepositoryFileLister Create() => new(new KernelProcessRunner(), new PhysicalFileSystem());
 }

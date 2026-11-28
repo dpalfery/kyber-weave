@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using KyberWeave.Contracts.Repositories;
@@ -119,6 +120,18 @@ public sealed class ScriptedProcessRunner : IProcessRunner
         ArgumentNullException.ThrowIfNull(path);
         _onPath[program] = path;
         return this;
+    }
+
+    /// <summary>A synchronous view over the scripted answers, for a synchronous adapter under test.</summary>
+    /// <param name="startInfo">The configured program.</param>
+    /// <param name="standardInput">The text written to standard input.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+    {
+        ProcessRunResult result = RunAsync(
+            ProcessRunRequest.FromStartInfo(startInfo, standardInput, timeout: null),
+            CancellationToken.None).GetAwaiter().GetResult();
+        return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
     /// <inheritdoc />

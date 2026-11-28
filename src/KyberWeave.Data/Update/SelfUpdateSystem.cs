@@ -9,7 +9,7 @@ namespace KyberWeave.Data.Update;
 /// <summary>The processes, files and archives the self-update touches: starts children, probes the install directory and replaces binaries.</summary>
 /// <remarks>
 /// It holds the bounds and the choice of which seam runs each step, and calls no resource itself. Files go through
-/// <see cref="IWritableFileSystem"/>, bounded captures through <see cref="IBoundedProcessExecutor"/> and entry paths
+/// <see cref="IWritableFileSystem"/>, bounded captures through <see cref="IProcessRunner"/> and entry paths
 /// through <see cref="IPathResolver"/>. The two things those seams
 /// cannot express are named adapters: a child that shares this console (<see cref="IConsoleProcessLauncher"/>, which
 /// also runs the hand-off rehearsal so the hand-off's own start path is the one rehearsed) and permission bits
@@ -41,7 +41,7 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
     private const string ProbeFileName = ".kyber-weave-update-probe";
 
     private readonly IWritableFileSystem _files;
-    private readonly IBoundedProcessExecutor _processes;
+    private readonly IProcessRunner _processes;
     private readonly IConsoleProcessLauncher _console;
     private readonly ReleaseArchiveExtractor _extractor;
     private readonly BinaryReplacer _replacer;
@@ -55,7 +55,7 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
     public SelfUpdateSystem(
         IWritableFileSystem files,
         IPathResolver paths,
-        IBoundedProcessExecutor processes,
+        IProcessRunner processes,
         IConsoleProcessLauncher console,
         IUpdateFileModes modes)
     {
@@ -90,7 +90,10 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
     }
 
     /// <inheritdoc />
-    public ProcessResult RunCapture(string fileName, IReadOnlyList<string> arguments)
+    public async Task<ProcessResult> RunCaptureAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
     {
         ProcessStartInfo start = new(fileName)
         {
@@ -102,7 +105,7 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
         foreach (string argument in arguments)
             start.ArgumentList.Add(argument);
 
-        return _processes.Run(start, string.Empty, CaptureVerbTimeout);
+        return await _processes.RunAsync(start, string.Empty, CaptureVerbTimeout, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -153,6 +156,11 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
         _replacer.Copy(sourcePath, destinationPath, overwrite);
 
     /// <inheritdoc />
-    public void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs) =>
-        _replacer.Replace(extractedBinaryPath, destinationPath, windows, macOs);
+    public Task ReplaceBinaryAsync(
+        string extractedBinaryPath,
+        string destinationPath,
+        bool windows,
+        bool macOs,
+        CancellationToken cancellationToken = default) =>
+        _replacer.ReplaceAsync(extractedBinaryPath, destinationPath, windows, macOs, cancellationToken);
 }

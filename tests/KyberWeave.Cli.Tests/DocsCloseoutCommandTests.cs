@@ -75,7 +75,7 @@ public sealed class DocsCloseoutCommandTests
     private static IServiceProvider Services(DocFixture fixture) =>
         DocsMemoryServicesD.Services(fixture, services =>
         {
-            services.AddSingleton<IBoundedProcessExecutor>(NotAGitRepository());
+            services.AddSingleton<IProcessRunner>(NotAGitRepository());
             services.AddSingleton<IExclusiveFileWriter>(new InMemoryExclusiveFileWriter(fixture.Memory!));
         });
 

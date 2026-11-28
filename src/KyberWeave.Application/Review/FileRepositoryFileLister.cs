@@ -11,41 +11,18 @@ public sealed class FileRepositoryFileLister : IRepositoryFileLister
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
-    private readonly IProgramRunner _programs;
-    private readonly IProcessRunner? _programsAsync;
+    private readonly IProcessRunner _programs;
     private readonly IFileSystem _files;
-
-    /// <summary>Creates a repository file lister over the given process and file-system ports.</summary>
-    /// <param name="programs">Starts git.</param>
-    /// <param name="files">Answers every existence, listing and link question.</param>
-    public FileRepositoryFileLister(IProgramRunner programs, IFileSystem files)
-    {
-        ArgumentNullException.ThrowIfNull(programs);
-        ArgumentNullException.ThrowIfNull(files);
-        _programs = programs;
-        _programsAsync = programs as IProcessRunner;
-        _files = files;
-    }
 
     /// <summary>Creates a repository file lister over an async-capable process runner and file-system port.</summary>
     /// <param name="programs">Starts git without blocking a thread.</param>
     /// <param name="files">Answers every existence, listing and link question.</param>
     public FileRepositoryFileLister(IProcessRunner programs, IFileSystem files)
-        : this((IProgramRunner)programs, files)
     {
-    }
-
-    /// <inheritdoc />
-    public IReadOnlyList<string> List(string repositoryRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-
-        if (!_files.DirectoryExists(repositoryRoot))
-            throw new DirectoryNotFoundException($"Repository root '{repositoryRoot}' does not exist.");
-
-        return ListFiles(repositoryRoot)
-            .Where(file => IsRegularFile(repositoryRoot, file))
-            .ToArray();
+        ArgumentNullException.ThrowIfNull(programs);
+        ArgumentNullException.ThrowIfNull(files);
+        _programs = programs;
+        _files = files;
     }
 
     /// <inheritdoc />
@@ -64,16 +41,6 @@ public sealed class FileRepositoryFileLister : IRepositoryFileLister
             .ToArray();
     }
 
-    /// <summary>Repository-relative files, from git when the directory is a work tree, otherwise from a walk.</summary>
-    private IReadOnlyList<string> ListFiles(string repositoryRoot)
-    {
-        IReadOnlyList<string>? fromGit = ListGitFiles(repositoryRoot);
-        if (fromGit is not null)
-            return FilterGitFiles(fromGit);
-
-        return WalkFiles(repositoryRoot);
-    }
-
     /// <summary>Repository-relative files, from git without blocking when possible, otherwise from a walk.</summary>
     private async Task<IReadOnlyList<string>> ListFilesAsync(
         string repositoryRoot,
@@ -90,26 +57,6 @@ public sealed class FileRepositoryFileLister : IRepositoryFileLister
         fromGit.Where(file => !ProjectRootDetection.IsUnderExcludedDirectory(file)).ToArray();
 
     /// <summary>
-    /// Lists tracked and untracked-but-not-ignored files. Returns <see langword="null"/> when git is missing
-    /// or the directory is not a work tree, so the caller walks the file system instead.
-    /// </summary>
-    private IReadOnlyList<string>? ListGitFiles(string repositoryRoot)
-    {
-        ProcessResult result;
-        try
-        {
-            result = _programs.Run(
-                "git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], repositoryRoot, GitTimeout);
-        }
-        catch (Win32Exception)
-        {
-            return null;
-        }
-
-        return ParseGitFiles(result);
-    }
-
-    /// <summary>
     /// Lists tracked and untracked-but-not-ignored files without blocking a thread. Returns <see langword="null"/>
     /// when git is missing, no async runner was supplied, or the directory is not a work tree.
     /// </summary>
@@ -117,13 +64,10 @@ public sealed class FileRepositoryFileLister : IRepositoryFileLister
         string repositoryRoot,
         CancellationToken cancellationToken)
     {
-        if (_programsAsync is not { } programsAsync)
-            return null;
-
         ProcessResult result;
         try
         {
-            result = await programsAsync.RunAsync(
+            result = await _programs.RunAsync(
                 "git",
                 ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                 repositoryRoot,

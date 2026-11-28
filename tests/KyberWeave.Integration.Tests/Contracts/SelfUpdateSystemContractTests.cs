@@ -80,7 +80,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
     }
 
     [Fact]
-    public void AReplacedBinaryIsExecutableAndLeavesNoStagingFileOnTheRealDisk()
+    public async Task AReplacedBinaryIsExecutableAndLeavesNoStagingFileOnTheRealDisk()
     {
         if (OperatingSystem.IsWindows())
             return;
@@ -92,7 +92,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
         _files.WriteAllText(destination, "old");
         _files.WriteAllText(extracted, "new");
 
-        _system.ReplaceBinary(extracted, destination, windows: false, macOs: false);
+        await _system.ReplaceBinaryAsync(extracted, destination, windows: false, macOs: false, CancellationToken.None);
 
         Assert.Equal("new", _files.ReadAllText(destination));
         Assert.True(File.GetUnixFileMode(destination).HasFlag(UnixFileMode.UserExecute));

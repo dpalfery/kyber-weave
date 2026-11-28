@@ -68,7 +68,7 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Action<string> _log;
     private readonly Func<string, IReadOnlyList<string>, int> _runProcess;
     private readonly Func<string, bool> _canWriteDirectory;
-    private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
+    private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessResult>> _captureProcess;
     private readonly ISelfUpdateSystem _system;
     private readonly CopilotPromptRefresher? _copilotPrompt;
     private readonly IArbiterRefreshTargets? _arbiterTargets;
@@ -106,7 +106,7 @@ internal sealed class SelfUpdater : IDisposable
         Action<string>? log = null,
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
         Func<string, bool>? canWriteDirectory = null,
-        Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
+        Func<string, IReadOnlyList<string>, CancellationToken, Task<ProcessResult>>? captureProcess = null,
         IArbiterHookRefresher? arbiterHookRefresher = null,
         Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
         IArbiterRefreshTargets? arbiterTargets = null,
@@ -129,7 +129,7 @@ internal sealed class SelfUpdater : IDisposable
         _arbiterTargets = arbiterTargets;
         _copilotPrompt = copilotPrompt;
         _runProcess = runProcess ?? _system.RunProcess;
-        _captureProcess = captureProcess ?? _system.RunCapture;
+        _captureProcess = captureProcess ?? _system.RunCaptureAsync;
         _arbiterHookRefresher = arbiterHookRefresher;
         _finishingProcess = finishingProcess;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
@@ -209,7 +209,7 @@ internal sealed class SelfUpdater : IDisposable
         {
             // Nothing to download, but a new kyberdash can still be running an old engine, a tray, or an
             // OpenCode plugin file. Reconciling here is what clears a stale engine with one command (C3).
-            ReconcileKyberDash(options, version, windows, false);
+            await ReconcileKyberDashAsync(options, version, windows, false, cancellationToken).ConfigureAwait(false);
             await RefreshArbiterHooksAsync(options, version, windows, cancellationToken).ConfigureAwait(false);
             RefreshCopilotPrompt();
             return new SelfUpdateOutcome(0, $"already on {version}");
@@ -294,7 +294,7 @@ internal sealed class SelfUpdater : IDisposable
                 try
                 {
                     foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
-                        CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
+                        await CommitBinaryAsync(item.BaseName, tag, windows, item.ExtractedPath, item.Destination, cancellationToken).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -393,7 +393,7 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
-        ReconcileKyberDash(options, version, windows, true);
+        await ReconcileKyberDashAsync(options, version, windows, true, cancellationToken).ConfigureAwait(false);
         await RefreshArbiterHooksAsync(options, version, windows, cancellationToken).ConfigureAwait(false);
         RefreshCopilotPrompt();
         return new SelfUpdateOutcome(0, string.Empty);
@@ -603,20 +603,25 @@ internal sealed class SelfUpdater : IDisposable
     /// failure is named and says the binaries are already updated; one after the tray was quit also says the tray and
     /// engine are stopped and names the command that starts them.
     /// </remarks>
-    private void RestartTrayWithOwnedEngine(bool windows, string version, bool releaseChanged, bool trayOlder)
+    private async Task RestartTrayWithOwnedEngineAsync(
+        bool windows,
+        string version,
+        bool releaseChanged,
+        bool trayOlder,
+        CancellationToken cancellationToken)
     {
         string kyberdash = InstalledKyberDash(windows);
         bool restartForRelease = releaseChanged || trayOlder;
         string[] verify = ["engine", "verify", "--version", version, "--wait", "0"];
 
         _log("checking the KyberDash engine…");
-        ProcessResult probe = CaptureVerb(kyberdash, verify, version, false);
+        ProcessResult probe = await CaptureVerbAsync(kyberdash, verify, version, false, cancellationToken).ConfigureAwait(false);
         if (PredatesTheVerbs(probe))
         {
             _log("this KyberDash predates the tray restart; checking the engine the earlier way");
-            EnsureEngine(windows);
+            await EnsureEngineAsync(windows, cancellationToken).ConfigureAwait(false);
             if (restartForRelease)
-                UpdateTray(windows, version);
+                await UpdateTrayAsync(windows, version, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -628,7 +633,12 @@ internal sealed class SelfUpdater : IDisposable
                     _log($"{FirstLine(probe.StandardOutput, "the KyberDash engine is running")}; nothing to restart");
                     return;
                 case 1:
-                    ProcessResult running = CaptureVerb(kyberdash, ["menubar", "--running"], version, false);
+                    ProcessResult running = await CaptureVerbAsync(
+                        kyberdash,
+                        ["menubar", "--running"],
+                        version,
+                        false,
+                        cancellationToken).ConfigureAwait(false);
                     if (running.ExitCode == 0)
                     {
                         _log("the KyberDash tray is running without an engine; restarting it");
@@ -653,19 +663,20 @@ internal sealed class SelfUpdater : IDisposable
             }
         }
 
-        RunVerb(kyberdash, ["menubar", "--quit"], version, false, "quitting the KyberDash tray");
-        RunVerb(kyberdash, ["engine", "stop"], version, true, "stopping the KyberDash engine");
+        await RunVerbAsync(kyberdash, ["menubar", "--quit"], version, false, "quitting the KyberDash tray", cancellationToken).ConfigureAwait(false);
+        await RunVerbAsync(kyberdash, ["engine", "stop"], version, true, "stopping the KyberDash engine", cancellationToken).ConfigureAwait(false);
         if (restartForRelease)
-            RunTrayUpdate(kyberdash, version);
+            await RunTrayUpdateAsync(kyberdash, version, cancellationToken).ConfigureAwait(false);
         else
-            RunVerb(kyberdash, ["menubar", "--launch"], version, true, "launching the KyberDash tray");
-        RunVerb(
+            await RunVerbAsync(kyberdash, ["menubar", "--launch"], version, true, "launching the KyberDash tray", cancellationToken).ConfigureAwait(false);
+        await RunVerbAsync(
             kyberdash,
             ["engine", "verify", "--version", version, "--wait", "60"],
             version,
             true,
-            "verifying the KyberDash engine");
-        RunVerb(kyberdash, ["menubar", "--running"], version, true, "checking the KyberDash tray");
+            "verifying the KyberDash engine",
+            cancellationToken).ConfigureAwait(false);
+        await RunVerbAsync(kyberdash, ["menubar", "--running"], version, true, "checking the KyberDash tray", cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The line an older kyberdash prints for <c>engine verify</c>, which it does not have.</summary>
@@ -685,11 +696,16 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>Runs one KyberDash verb through the capture seam, and turns a start failure or a timeout into a named failure.</summary>
-    private ProcessResult CaptureVerb(string kyberdash, IReadOnlyList<string> args, string version, bool quitDone)
+    private async Task<ProcessResult> CaptureVerbAsync(
+        string kyberdash,
+        IReadOnlyList<string> args,
+        string version,
+        bool quitDone,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return _captureProcess(kyberdash, args);
+            return await _captureProcess(kyberdash, args, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException ex)
         {
@@ -703,10 +719,16 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>Runs one restart verb, requires exit 0 and logs the step with the verb's first output line.</summary>
-    private void RunVerb(string kyberdash, IReadOnlyList<string> args, string version, bool quitDone, string step)
+    private async Task RunVerbAsync(
+        string kyberdash,
+        IReadOnlyList<string> args,
+        string version,
+        bool quitDone,
+        string step,
+        CancellationToken cancellationToken)
     {
         _log($"{step}…");
-        ProcessResult result = CaptureVerb(kyberdash, args, version, quitDone);
+        ProcessResult result = await CaptureVerbAsync(kyberdash, args, version, quitDone, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
             throw StepFailed(kyberdash, args, version, quitDone, $"exited {result.ExitCode}{Reason(result)}");
 
@@ -718,11 +740,11 @@ internal sealed class SelfUpdater : IDisposable
     /// Runs <c>menubar --update</c> after the tray was quit, through the capture seam so a failure names the verb's
     /// first output line like every other restart step.
     /// </summary>
-    private void RunTrayUpdate(string kyberdash, string version)
+    private async Task RunTrayUpdateAsync(string kyberdash, string version, CancellationToken cancellationToken)
     {
         string[] args = ["menubar", "--update", "--version", version];
         _log("updating the KyberDash tray…");
-        ProcessResult result = CaptureVerb(kyberdash, args, version, true);
+        ProcessResult result = await CaptureVerbAsync(kyberdash, args, version, true, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
             throw StepFailed(kyberdash, args, version, true, $"exited {result.ExitCode}{Reason(result)}");
 
@@ -766,7 +788,12 @@ internal sealed class SelfUpdater : IDisposable
     /// binaries are already committed and are the new release. A failed plugin step is only a warning, because the
     /// plugin is an optional surface and the owner can rerun it with the printed command.
     /// </remarks>
-    private void ReconcileKyberDash(SelfUpdateOptions options, string version, bool windows, bool releaseChanged)
+    private async Task ReconcileKyberDashAsync(
+        SelfUpdateOptions options,
+        string version,
+        bool windows,
+        bool releaseChanged,
+        CancellationToken cancellationToken)
     {
         if (options.NoKyberDash)
         {
@@ -783,19 +810,24 @@ internal sealed class SelfUpdater : IDisposable
         {
             if (IsTrayManaged(options, version, windows))
             {
-                RestartTrayWithOwnedEngine(windows, version, releaseChanged, IsTrayOlder(version, releaseChanged));
+                await RestartTrayWithOwnedEngineAsync(
+                    windows,
+                    version,
+                    releaseChanged,
+                    IsTrayOlder(version, releaseChanged),
+                    cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 // No tray to own the engine: the engine alone is checked, and ShouldUpdateTray logs why the tray is left.
-                EnsureEngine(windows);
+                await EnsureEngineAsync(windows, cancellationToken).ConfigureAwait(false);
                 if (ShouldUpdateTray(options, version, windows, releaseChanged))
-                    UpdateTray(windows, version);
+                    await UpdateTrayAsync(windows, version, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        UpdateCapturePlugin(windows);
-        UpdateFactoryCapturePlugin(windows);
+        await UpdateCapturePluginAsync(windows, cancellationToken).ConfigureAwait(false);
+        await UpdateFactoryCapturePluginAsync(windows, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -967,7 +999,7 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>Asks the installed kyberdash to replace a running engine of another version. Starts nothing when none runs.</summary>
-    private void EnsureEngine(bool windows)
+    private async Task EnsureEngineAsync(bool windows, CancellationToken cancellationToken)
     {
         string kyberdash = InstalledKyberDash(windows);
         if (!_files.FileExists(kyberdash))
@@ -980,7 +1012,7 @@ internal sealed class SelfUpdater : IDisposable
         ProcessResult result;
         try
         {
-            result = _captureProcess(kyberdash, ["engine", "ensure", "--if-running"]);
+            result = await _captureProcess(kyberdash, ["engine", "ensure", "--if-running"], cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException ex)
         {
@@ -1017,9 +1049,9 @@ internal sealed class SelfUpdater : IDisposable
     ///     Installs or upgrades the OpenCode capture plugin, but only when it is already installed (D13), so an update
     ///     never adds a surface the owner did not choose. Relays the verb's OpenCode guidance lines, which KyberDash words.
     /// </summary>
-    private void UpdateCapturePlugin(bool windows)
+    private async Task UpdateCapturePluginAsync(bool windows, CancellationToken cancellationToken)
     {
-        UpdateCapturePlugin(HarnessRegistry.OpenCodeToken, "OpenCode", windows);
+        await UpdateCapturePluginAsync(HarnessRegistry.OpenCodeToken, "OpenCode", windows, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1030,16 +1062,20 @@ internal sealed class SelfUpdater : IDisposable
     ///     The Factory plugin is optional, so a refused install is a warning and the update keeps its exit code: the
     ///     owner can rerun the printed command.
     /// </remarks>
-    private void UpdateFactoryCapturePlugin(bool windows)
+    private async Task UpdateFactoryCapturePluginAsync(bool windows, CancellationToken cancellationToken)
     {
-        UpdateCapturePlugin(HarnessRegistry.FactoryToken, "Factory", windows);
+        await UpdateCapturePluginAsync(HarnessRegistry.FactoryToken, "Factory", windows, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     ///     Runs the capture-plugin verb for one harness. The verb names the harness it installs the plugin for, and
     ///     KyberDash words every line it prints, so the verdict and the guidance are relayed unchanged.
     /// </summary>
-    private void UpdateCapturePlugin(string harness, string name, bool windows)
+    private async Task UpdateCapturePluginAsync(
+        string harness,
+        string name,
+        bool windows,
+        CancellationToken cancellationToken)
     {
         string kyberdash = InstalledKyberDash(windows);
         if (!_files.FileExists(kyberdash))
@@ -1052,9 +1088,10 @@ internal sealed class SelfUpdater : IDisposable
         ProcessResult result;
         try
         {
-            result = _captureProcess(
+            result = await _captureProcess(
                 kyberdash,
-                ["kyber", "capture", "plugin", "install", "--harness", harness, "--preserve", "--if-installed"]);
+                ["kyber", "capture", "plugin", "install", "--harness", harness, "--preserve", "--if-installed"],
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
                                        or UnauthorizedAccessException or TimeoutException)
@@ -1131,7 +1168,7 @@ internal sealed class SelfUpdater : IDisposable
         return first.Length == 0 ? string.Empty : $": {first}";
     }
 
-    private void UpdateTray(bool windows, string version)
+    private async Task UpdateTrayAsync(bool windows, string version, CancellationToken cancellationToken)
     {
         string kyberdash = Path.Combine(
             _host.InstallDirectory,
@@ -1281,14 +1318,16 @@ internal sealed class SelfUpdater : IDisposable
         return extractDir;
     }
 
-    private void CommitBinary(
+    private async Task CommitBinaryAsync(
         string baseName,
         string tag,
         bool windows,
         string extractedPath,
-        string destination)
+        string destination,
+        CancellationToken cancellationToken)
     {
-        _system.ReplaceBinary(extractedPath, destination, windows, _host.IsMacOs);
+        await _system.ReplaceBinaryAsync(extractedPath, destination, windows, _host.IsMacOs, cancellationToken)
+            .ConfigureAwait(false);
         _log($"installed {baseName} {ReleaseVersion.Normalize(tag)} → {destination}");
     }
 

@@ -55,108 +55,108 @@ public sealed class CodeGraphIndexStalenessTests
     }
 
     [Fact]
-    public void NoIndexedCode_SaysNothingAndNeverAsksGit()
+    public async Task NoIndexedCode_SaysNothingAndNeverAsksGit()
     {
-        string? description = Rule.Describe(Root, Built, new Dictionary<string, (long, int)> { ["docs/a.md"] = (0, 0) });
+        string? description = await Rule.DescribeAsync(Root, Built, new Dictionary<string, (long, int)> { ["docs/a.md"] = (0, 0) }, CancellationToken.None);
 
         Assert.Null(description);
         Assert.Empty(_git.Calls);
     }
 
     [Fact]
-    public void GitCannotAnswer_SaysNothing()
+    public async Task GitCannotAnswer_SaysNothing()
     {
         _git.Script("git", new ProcessRunResult(128, "fatal", TimedOut: false) { StandardOutput = string.Empty, StandardError = "fatal" }, "rev-parse", "HEAD");
 
-        Assert.Null(Rule.Describe(Root, Built, Indexed("src/A.cs")));
+        Assert.Null(await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None));
     }
 
     [Fact]
-    public void GitMissing_SaysNothing()
+    public async Task GitMissing_SaysNothing()
     {
         _git.Throws("git", new Win32Exception(2, "not found"));
 
-        Assert.Null(Rule.Describe(Root, Built, Indexed("src/A.cs")));
+        Assert.Null(await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None));
     }
 
     [Fact]
-    public void GitTimesOut_SaysNothing()
+    public async Task GitTimesOut_SaysNothing()
     {
         _git.ScriptTimeout("git", "rev-parse", "HEAD");
 
-        Assert.Null(Rule.Describe(Root, Built, Indexed("src/A.cs")));
+        Assert.Null(await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None));
     }
 
     [Fact]
-    public void BaselineCommitMissingFromCheckout_ReportsIt()
+    public async Task BaselineCommitMissingFromCheckout_ReportsIt()
     {
         GitAnswers(Head, differing: null);
 
-        string? description = Rule.Describe(Root, Built, Indexed("src/A.cs"));
+        string? description = await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None);
 
         Assert.Equal("the index was built at commit 22222222, which this checkout does not contain", description);
     }
 
     [Fact]
-    public void FileWrittenAfterTheIndexSawIt_IsCounted()
+    public async Task FileWrittenAfterTheIndexSawIt_IsCounted()
     {
         WriteSource("src/A.cs");
         _time.Advance(TimeSpan.FromMinutes(5));
         WriteSource("src/A.cs");
         GitAnswers(Head, "src/A.cs\n");
 
-        string? description = Rule.Describe(Root, Built, Indexed("src/A.cs"));
+        string? description = await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None);
 
         Assert.Equal("the index was built at 22222222 and HEAD is 11111111, and 1 source file(s) changed since (for example src/A.cs)", description);
     }
 
     [Fact]
-    public void FileAlreadyDirtyWhenIndexed_IsNotCounted()
+    public async Task FileAlreadyDirtyWhenIndexed_IsNotCounted()
     {
         WriteSource("src/A.cs");
         GitAnswers(Head, "src/A.cs\n");
 
-        Assert.Null(Rule.Describe(Root, Built, Indexed("src/A.cs")));
+        Assert.Null(await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None));
     }
 
     [Fact]
-    public void FileDeletedSinceTheIndex_IsCounted()
+    public async Task FileDeletedSinceTheIndex_IsCounted()
     {
         GitAnswers(Head, "src/A.cs\n");
 
-        string? description = Rule.Describe(Root, Built, Indexed("src/A.cs"));
+        string? description = await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None);
 
         Assert.Contains("1 source file(s) changed since", description, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void NewUntrackedFileUnderIndexedCode_IsCountedAndOneElsewhereIsNot()
+    public async Task NewUntrackedFileUnderIndexedCode_IsCountedAndOneElsewhereIsNot()
     {
         _files.CreateDirectory(Path.Combine(Root, "vendor"));
         WriteSource("src/New.cs");
         WriteSource("vendor/Lib.cs");
         GitAnswers(Built, string.Empty, untracked: "src/New.cs\nvendor/Lib.cs\n");
 
-        string? description = Rule.Describe(Root, Built, Indexed("src/A.cs"));
+        string? description = await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None);
 
         Assert.Equal("the index was built at the current commit 22222222, and 1 source file(s) changed since (for example src/New.cs)", description);
     }
 
     [Fact]
-    public void ChangedFilesOfAKindThatYieldedNoSymbols_AreIgnored()
+    public async Task ChangedFilesOfAKindThatYieldedNoSymbols_AreIgnored()
     {
         WriteSource("src/readme.md");
         GitAnswers(Head, "src/readme.md\n");
 
-        Assert.Null(Rule.Describe(Root, Built, Indexed("src/A.cs")));
+        Assert.Null(await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None));
     }
 
     [Fact]
-    public void GitIsRunInTheCheckoutWithABound()
+    public async Task GitIsRunInTheCheckoutWithABound()
     {
         GitAnswers(Head, string.Empty);
 
-        _ = Rule.Describe(Root, Built, Indexed("src/A.cs"));
+        _ = await Rule.DescribeAsync(Root, Built, Indexed("src/A.cs"), CancellationToken.None);
 
         Assert.All(_git.Calls, call =>
         {

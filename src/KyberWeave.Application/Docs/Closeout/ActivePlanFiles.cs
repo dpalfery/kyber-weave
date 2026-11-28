@@ -20,16 +20,14 @@ internal sealed class ActivePlanFiles
     private readonly string _repoRoot;
     private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
-    private readonly IBoundedProcessExecutor _process;
-    private readonly IProcessRunner? _processAsync;
+    private readonly IProcessRunner _process;
 
-    internal ActivePlanFiles(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
+    internal ActivePlanFiles(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files, IProcessRunner process)
     {
         _repoRoot = repoRoot;
         _config = config;
         _files = files;
         _process = process;
-        _processAsync = process as IProcessRunner;
     }
 
     /// <summary>The plan index's repository-relative path, or null when the configuration registers none.</summary>
@@ -80,13 +78,6 @@ internal sealed class ActivePlanFiles
     internal bool IsGitCheckout() =>
         _files.DirectoryExists(Path.Combine(_repoRoot, ".git")) || _files.FileExists(Path.Combine(_repoRoot, ".git"));
 
-    /// <summary>The staged paths that are not one of <paramref name="paths"/>; null when git could not say.</summary>
-    internal IReadOnlyList<string>? StagedOutside(IEnumerable<string> paths)
-    {
-        ProcessResult result = Git(["diff", "--cached", "--name-only", "-z"]);
-        return ParseStagedOutside(paths, result);
-    }
-
     /// <summary>The staged paths that are not one of <paramref name="paths"/>, read without blocking a thread; null when git could not say.</summary>
     internal async Task<IReadOnlyList<string>?> StagedOutsideAsync(
         IEnumerable<string> paths,
@@ -104,16 +95,6 @@ internal sealed class ActivePlanFiles
 
         HashSet<string> own = new(paths.Select(path => path.Replace('\\', '/')), StringComparer.Ordinal);
         return [.. result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries).Where(path => !own.Contains(path))];
-    }
-
-    /// <summary>Stages the paths a command touched, so a commit that only takes tracked files cannot leave a new one behind.</summary>
-    internal void Stage(IEnumerable<string> paths, DiagnosticReport report, string plan, string stepCode)
-    {
-        if (!IsGitCheckout())
-            return;
-
-        ProcessResult result = Git([.. StageArguments, .. paths]);
-        RecordStageResult(result, report, plan, stepCode);
     }
 
     /// <summary>Stages the paths a command touched without blocking a thread, so a commit that only takes tracked files cannot leave a new one behind.</summary>
@@ -135,23 +116,6 @@ internal sealed class ActivePlanFiles
         report.Add(result.ExitCode == 0
             ? new Diagnostic(stepCode, Severity.Info, "Staged the moved and edited files.", plan, plan)
             : new Diagnostic(stepCode, Severity.Warning, $"git add failed ({result.StandardError.Trim()}); stage the files before committing.", plan, plan));
-
-    /// <summary>
-    /// Commits exactly <paramref name="paths"/> on the current branch, never pushing. Does nothing when they hold no
-    /// change; reports a warning and leaves them staged when git refuses.
-    /// </summary>
-    internal void CommitOnly(IReadOnlyList<string> paths, string message, DiagnosticReport report, string plan, string stepCode)
-    {
-        if (!IsGitCheckout())
-            return;
-
-        ProcessResult pending = Git(["status", "--porcelain", "--", .. paths]);
-        if (!HasPendingChanges(pending, report, plan, stepCode))
-            return;
-
-        ProcessResult commit = Git(["commit", "-m", message, "--", .. paths]);
-        RecordCommitResult(commit, paths, message, report, plan, stepCode);
-    }
 
     /// <summary>
     /// Commits exactly <paramref name="paths"/> on the current branch without blocking a thread, never pushing. Does
@@ -217,28 +181,12 @@ internal sealed class ActivePlanFiles
         return startInfo;
     }
 
-    private ProcessResult Git(IEnumerable<string> arguments)
-    {
-        ProcessStartInfo startInfo = GitStartInfo(arguments);
-        try
-        {
-            return _process.Run(startInfo, string.Empty, GitTimeout);
-        }
-        catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)
-        {
-            return new ProcessResult(-1, string.Empty, $"git could not be run: {ex.Message}");
-        }
-    }
-
     private async Task<ProcessResult> GitAsync(IEnumerable<string> arguments, CancellationToken cancellationToken)
     {
-        if (_processAsync is not { } processAsync)
-            return new ProcessResult(-1, string.Empty, "git could not be run: an async process runner is required.");
-
         ProcessStartInfo startInfo = GitStartInfo(arguments);
         try
         {
-            return await processAsync.RunAsync(startInfo, string.Empty, GitTimeout, cancellationToken)
+            return await _process.RunAsync(startInfo, string.Empty, GitTimeout, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)

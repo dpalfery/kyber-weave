@@ -35,7 +35,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
     private readonly IConsole _console;
     private readonly IPathResolver _paths;
     private readonly IProcessRunner _processes;
-    private readonly IProcessExecutor? _executor;
+    private readonly IProcessRunner? _executor;
     private readonly string _mcpExecutable;
 
     /// <summary>Creates the command over the doctor and the process it reads its mode from.</summary>
@@ -52,7 +52,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
         IConsole console,
         IPathResolver paths,
         IProcessRunner processes,
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         string? mcpExecutable = null)
     {
         ArgumentNullException.ThrowIfNull(doctor);
@@ -132,7 +132,7 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
             return 2;
         }
 
-        IProcessRunner executor = _executor as IProcessRunner ?? new BoundedExecutor(_processes, options.IndexTimeout);
+        IProcessRunner executor = _executor ?? new BoundedExecutor(_processes, options.IndexTimeout);
         // The hook's own mode skips the MCP and Copilot probes and installs nothing, so it is routed apart from the doctor run.
         DoctorReport report = settings.PostCheckout
             ? await _doctor.RunPostCheckoutAsync(root, options, executor, cancellationToken: cancellationToken).ConfigureAwait(false)
@@ -144,7 +144,6 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
         DoctorReportRenderer.Write(_console.Out, report, settings.Json);
         return report.ExitCode;
     }
-
     /// <summary>Bounds every child at the index timeout unless the request names its own.</summary>
     private sealed class BoundedExecutor : IProcessRunner
     {
@@ -158,9 +157,6 @@ public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
             _runner = runner;
             _timeout = timeout;
         }
-
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            ((IBoundedProcessExecutor)_runner).Run(startInfo, standardInput, _timeout);
 
         public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
         {

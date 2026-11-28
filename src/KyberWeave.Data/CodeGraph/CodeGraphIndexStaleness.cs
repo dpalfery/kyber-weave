@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
@@ -31,27 +32,17 @@ public sealed class CodeGraphIndexStaleness
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(20);
 
     private readonly IFileSystem _disk;
-    private readonly IProgramRunner _git;
-    private readonly IProcessRunner? _gitAsync;
-
-    /// <summary>One line describing the lag, or null when the index is current or git cannot say.</summary>
-    /// <param name="disk">The file system the changed files' modification times are read from.</param>
-    /// <param name="git">Runs <c>git</c> in the checkout.</param>
-    public CodeGraphIndexStaleness(IFileSystem disk, IProgramRunner git)
-    {
-        ArgumentNullException.ThrowIfNull(disk);
-        ArgumentNullException.ThrowIfNull(git);
-        _disk = disk;
-        _git = git;
-        _gitAsync = git as IProcessRunner;
-    }
+    private readonly IProcessRunner _git;
 
     /// <summary>One line describing the lag, or null when the index is current or git cannot say.</summary>
     /// <param name="disk">The file system the changed files' modification times are read from.</param>
     /// <param name="git">Runs <c>git</c> in the checkout without blocking a thread.</param>
     public CodeGraphIndexStaleness(IFileSystem disk, IProcessRunner git)
-        : this(disk, (IProgramRunner)git)
     {
+        ArgumentNullException.ThrowIfNull(disk);
+        ArgumentNullException.ThrowIfNull(git);
+        _disk = disk;
+        _git = git;
     }
 
     /// <summary>One line describing the lag, or null when the index is current or git cannot say.</summary>
@@ -162,22 +153,20 @@ public sealed class CodeGraphIndexStaleness
         string? indexedCommit,
         CancellationToken cancellationToken)
     {
-        // Without an async runner, git cannot say, which the rule reports as nothing to describe, like the sync twin.
-        if (_gitAsync is not { } gitAsync) return new GitFacts(null, null, string.Empty);
-        string? head = await GitAsync(gitAsync, repositoryRoot, ["rev-parse", "HEAD"], cancellationToken).ConfigureAwait(false);
+        string? head = await GitAsync(_git, repositoryRoot, ["rev-parse", "HEAD"], cancellationToken).ConfigureAwait(false);
         if (head is null) return new GitFacts(null, null, string.Empty);
 
         head = head.Trim();
         string baseline = string.IsNullOrWhiteSpace(indexedCommit) ? head : indexedCommit.Trim();
         string? differing = await GitAsync(
-            gitAsync,
+            _git,
             repositoryRoot,
             ["diff", "--name-only", "--no-renames", baseline],
             cancellationToken).ConfigureAwait(false);
         if (differing is null) return new GitFacts(head, null, string.Empty);
 
         string untracked = await GitAsync(
-            gitAsync,
+            _git,
             repositoryRoot,
             ["ls-files", "--others", "--exclude-standard"],
             cancellationToken).ConfigureAwait(false) ?? string.Empty;
@@ -239,7 +228,18 @@ public sealed class CodeGraphIndexStaleness
     {
         try
         {
-            ProcessResult result = _git.Run("git", arguments, root, GitTimeout);
+            ProcessStartInfo startInfo = new("git")
+            {
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = root
+            };
+            foreach (string argument in arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
         catch (Exception exception) when (exception is Win32Exception

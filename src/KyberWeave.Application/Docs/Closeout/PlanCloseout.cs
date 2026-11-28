@@ -75,7 +75,7 @@ public sealed partial class PlanCloseout
         KyberWeaveConfig config,
         Func<IDocumentSource> loaderFactory,
         IRepositoryFileStore files,
-        IBoundedProcessExecutor process,
+        IProcessRunner process,
         IExclusiveFileWriter exclusive,
         IPathResolver paths,
         IProcessEnvironment environment)
@@ -96,23 +96,6 @@ public sealed partial class PlanCloseout
         _store = files;
         _exclusive = exclusive;
         _files = new ActivePlanFiles(_repoRoot, config, files, process);
-    }
-
-    /// <summary>Checks the plan's closeout evidence and, with <paramref name="archive"/>, archives it.</summary>
-    /// <param name="planPath">The plan, relative to the repository root.</param>
-    /// <param name="date">The archive date.</param>
-    /// <param name="archive">True to move the plan; false to check and report what would happen.</param>
-    public PlanCloseoutOutcome Run(string planPath, DateOnly date, bool archive)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
-
-        DiagnosticReport report = new();
-        if (TryMoveToArchive(planPath, date, archive, report, out string plan, out List<string> touched) is { } early)
-            return early;
-
-        _files.Stage(touched, report, plan, Step);
-        Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
-        return new PlanCloseoutOutcome(report, true);
     }
 
     /// <summary>Checks the plan's closeout evidence and, with <paramref name="archive"/>, archives it without blocking a thread.</summary>

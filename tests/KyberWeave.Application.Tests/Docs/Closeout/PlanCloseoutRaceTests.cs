@@ -47,12 +47,12 @@ public sealed class PlanCloseoutRaceTests
         Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
 
     [Fact]
-    public void AnArchiveEntryThatAppearsJustBeforeTheDryRunWriteIsRefusedNotOverwrittenAndNotDeleted()
+    public async Task AnArchiveEntryThatAppearsJustBeforeTheDryRunWriteIsRefusedNotOverwrittenAndNotDeleted()
     {
         using DocFixture fixture = Repository();
 
-        PlanCloseoutOutcome outcome = Closer(fixture, beforeWriteTarget: target => fixture.Memory!.WriteAllText(target, EarlierArchive))
-            .Run(Plan, ArchiveDate, archive: false);
+        PlanCloseoutOutcome outcome = await Closer(fixture, beforeWriteTarget: target => fixture.Memory!.WriteAllText(target, EarlierArchive))
+            .RunAsync(Plan, ArchiveDate, archive: false, CancellationToken.None);
 
         Assert.False(outcome.Archived);
         Assert.Equal(PlanCloseout.ArchiveTargetExists, SingleError(outcome).Code);
@@ -62,19 +62,19 @@ public sealed class PlanCloseoutRaceTests
     }
 
     [Fact]
-    public void AnArchiveEntryThatAppearsJustBeforeTheRealMoveIsRefusedAndNothingMoves()
+    public async Task AnArchiveEntryThatAppearsJustBeforeTheRealMoveIsRefusedAndNothingMoves()
     {
         using DocFixture fixture = Repository();
         int creates = 0;
 
         // The first create is the evidence check's copy, which the run removes again; the second is the real move.
-        PlanCloseoutOutcome outcome = Closer(fixture, beforeWriteTarget: target =>
+        PlanCloseoutOutcome outcome = await Closer(fixture, beforeWriteTarget: target =>
             {
                 creates++;
                 if (creates == 2)
                     fixture.Memory!.WriteAllText(target, EarlierArchive);
             })
-            .Run(Plan, ArchiveDate, archive: true);
+            .RunAsync(Plan, ArchiveDate, archive: true, CancellationToken.None);
 
         Assert.Equal(2, creates);
         Assert.False(outcome.Archived);
@@ -88,11 +88,11 @@ public sealed class PlanCloseoutRaceTests
     }
 
     [Fact]
-    public void APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsCreated()
+    public async Task APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsCreated()
     {
         using DocFixture fixture = Repository();
 
-        PlanCloseoutOutcome outcome = Closer(fixture, afterActivePlanCheck: path => fixture.Memory!.DeleteFile(path)).Run(Plan, ArchiveDate, archive: true);
+        PlanCloseoutOutcome outcome = await Closer(fixture, afterActivePlanCheck: path => fixture.Memory!.DeleteFile(path)).RunAsync(Plan, ArchiveDate, archive: true, CancellationToken.None);
 
         Assert.False(outcome.Archived);
         Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Code == PlanCloseout.NotAnActivePlan);

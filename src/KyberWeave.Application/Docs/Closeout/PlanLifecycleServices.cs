@@ -9,7 +9,7 @@ namespace KyberWeave.Core.Docs.Closeout;
 /// <summary>Runs <see cref="PlanCloseout"/> over the ports the container holds.</summary>
 public sealed class PlanCloseoutService(
     IRepositoryFileStore files,
-    IBoundedProcessExecutor process,
+    IProcessRunner process,
     IExclusiveFileWriter exclusive,
     IDocumentSourceFactory documents,
     IPathResolver paths,
@@ -36,7 +36,7 @@ public sealed class PlanCloseoutService(
 /// <summary>Runs <see cref="PlanFinalize"/> over the ports the container holds.</summary>
 public sealed class PlanFinalizeService(
     IRepositoryFileStore files,
-    IBoundedProcessExecutor process,
+    IProcessRunner process,
     IDocsSchemaGate gate,
     IDocumentSourceFactory documents,
     IPlanTaskAgentPickerFactory pickers,

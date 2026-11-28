@@ -1,12 +1,11 @@
 using System.Diagnostics;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
-/// Scripted <see cref="IProcessExecutor"/> for doctor tests: each call is answered by a delegate that sees the
+/// Scripted <see cref="IProcessRunner"/> for doctor tests: each call is answered by a delegate that sees the
 /// executable and its argument list, and every call is recorded. Nothing is spawned.
 /// </summary>
 /// <remarks>
@@ -40,20 +39,6 @@ public sealed class ScriptedProcessExecutor : IProcessRunner
     /// <summary>The calls whose executable is <paramref name="fileName"/>.</summary>
     public IEnumerable<ProcessStartInfo> CallsTo(string fileName) =>
         _calls.Where(call => call.FileName == fileName);
-
-    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
-    {
-        ArgumentNullException.ThrowIfNull(startInfo);
-        _calls.Add(startInfo);
-        _inputs.Add(standardInput);
-        return _respond(startInfo);
-    }
-
-    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput, TimeSpan timeout)
-    {
-        _timeouts.Add(timeout);
-        return Run(startInfo, standardInput);
-    }
 
     public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
     {

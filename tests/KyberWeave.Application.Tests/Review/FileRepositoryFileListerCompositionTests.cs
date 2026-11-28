@@ -12,14 +12,14 @@ namespace KyberWeave.Application.Tests.Review;
 public sealed class FileRepositoryFileListerCompositionTests
 {
     [Fact]
-    public void TheApplicationCompositionResolvesTheFileListerOverTheProcessAndFileSystemSeams()
+    public async Task TheApplicationCompositionResolvesTheFileListerOverTheProcessAndFileSystemSeams()
     {
         using ServiceProvider provider = new ServiceCollection().AddWeaveApplication().BuildServiceProvider();
 
         IRepositoryFileLister lister = provider.GetRequiredService<IRepositoryFileLister>();
 
         Assert.IsType<FileRepositoryFileLister>(lister);
-        _ = Assert.Throws<DirectoryNotFoundException>(
-            () => lister.List(Path.Combine(AppContext.BaseDirectory, "no-such-root")));
+        _ = await Assert.ThrowsAsync<DirectoryNotFoundException>(
+            () => lister.ListAsync(Path.Combine(AppContext.BaseDirectory, "no-such-root"), CancellationToken.None));
     }
 }

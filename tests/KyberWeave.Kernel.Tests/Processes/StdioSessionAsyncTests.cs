@@ -4,29 +4,23 @@ using Xunit;
 
 namespace KyberWeave.Tests.Processes;
 
-/// <summary>
-/// The asynchronous session reads must keep the synchronous member's results, exceptions and one-read-in-flight
-/// invariant. Each case runs both members against the same kind of real child.
-/// </summary>
+/// <summary>The asynchronous session reads must return lines, fail at once when exhausted, and keep one read in flight.</summary>
 public sealed class StdioSessionAsyncTests
 {
     [Fact]
-    public async Task ReadLineAsyncReturnsTheSameLineAsReadLine()
+    public async Task ReadLineAsyncReturnsTheLineTheChildWrote()
     {
         SkipUnlessPosix();
         using StdioSession session = new("/bin/cat", [], TimeSpan.FromSeconds(10), TimeProvider.System);
 
         session.SendLine("first");
-        string sync = ReadLineSynchronously(session);
-        session.SendLine("second");
-        string async = await session.ReadLineAsync();
+        string line = await session.ReadLineAsync();
 
-        Assert.Equal("first", sync);
-        Assert.Equal("second", async);
+        Assert.Equal("first", line);
     }
 
     [Fact]
-    public async Task ReadLineAsyncReturnsBothLinesDeliveredInOneReadLikeReadLine()
+    public async Task ReadLineAsyncReturnsBothLinesDeliveredInOneRead()
     {
         SkipUnlessPosix();
         using StdioSession session = new("/bin/cat", [], TimeSpan.FromSeconds(10), TimeProvider.System);
@@ -34,7 +28,7 @@ public sealed class StdioSessionAsyncTests
         session.SendLine("first");
         session.SendLine("second");
 
-        Assert.Equal("first", ReadLineSynchronously(session));
+        Assert.Equal("first", await session.ReadLineAsync());
         Assert.Equal("second", await session.ReadLineAsync());
     }
 
@@ -52,18 +46,14 @@ public sealed class StdioSessionAsyncTests
     }
 
     [Fact]
-    public async Task ReadLineAsyncReportsTheSameTimeoutAsReadLine()
+    public async Task ReadLineAsyncReportsATimeout()
     {
         SkipUnlessPosix();
-        // Each session's budget starts when it is created, so the second one is created only after the first
-        // read has used up its own budget; created together, the second would already be exhausted.
-        using StdioSession syncSession = new("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System);
-        TimeoutException sync = Assert.Throws<TimeoutException>(() => ReadLineSynchronously(syncSession));
+        using StdioSession session = new("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System);
 
-        using StdioSession asyncSession = new("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System);
-        TimeoutException async = await Assert.ThrowsAsync<TimeoutException>(() => asyncSession.ReadLineAsync());
+        TimeoutException failure = await Assert.ThrowsAsync<TimeoutException>(() => session.ReadLineAsync());
 
-        Assert.Equal(sync.Message, async.Message);
+        Assert.Contains("did not answer", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -77,53 +67,39 @@ public sealed class StdioSessionAsyncTests
     }
 
     [Fact]
-    public async Task ReadLineAsyncReportsTheSameEndOfStreamAsReadLine()
+    public async Task ReadLineAsyncReportsEndOfStream()
     {
         SkipUnlessPosix();
-        using StdioSession syncSession = new("/bin/sh", ["-c", "exit 0"], TimeSpan.FromSeconds(10), TimeProvider.System);
-        using StdioSession asyncSession = new("/bin/sh", ["-c", "exit 0"], TimeSpan.FromSeconds(10), TimeProvider.System);
+        using StdioSession session = new("/bin/sh", ["-c", "exit 0"], TimeSpan.FromSeconds(10), TimeProvider.System);
 
-        EndOfStreamException sync = Assert.Throws<EndOfStreamException>(() => ReadLineSynchronously(syncSession));
-        EndOfStreamException async = await Assert.ThrowsAsync<EndOfStreamException>(() => asyncSession.ReadLineAsync());
+        EndOfStreamException failure = await Assert.ThrowsAsync<EndOfStreamException>(() => session.ReadLineAsync());
 
-        Assert.Equal(sync.Message, async.Message);
+        Assert.Contains("closed its standard output", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ReadLineAsyncReportsTheSameLineCapFailureAsReadLine()
+    public async Task ReadLineAsyncReportsTheLineCapFailure()
     {
         SkipUnlessPosix();
         string[] arguments = ["-c", "head -c 2000000 /dev/zero | tr '\\0' 'a'"];
-        using StdioSession syncSession = new("/bin/sh", arguments, TimeSpan.FromSeconds(30), TimeProvider.System);
-        using StdioSession asyncSession = new("/bin/sh", arguments, TimeSpan.FromSeconds(30), TimeProvider.System);
+        using StdioSession session = new("/bin/sh", arguments, TimeSpan.FromSeconds(30), TimeProvider.System);
 
-        InvalidDataException sync = Assert.Throws<InvalidDataException>(() => ReadLineSynchronously(syncSession));
-        InvalidDataException async = await Assert.ThrowsAsync<InvalidDataException>(() => asyncSession.ReadLineAsync());
+        InvalidDataException failure = await Assert.ThrowsAsync<InvalidDataException>(() => session.ReadLineAsync());
 
-        Assert.Equal(sync.Message, async.Message);
+        Assert.Contains("characters without ending the line", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task WaitForFirstErrorLineAsyncReturnsTheSameLineAsTheSyncWait()
+    public async Task WaitForFirstErrorLineAsyncReturnsTheFirstErrorLine()
     {
         SkipUnlessPosix();
         string[] arguments = ["-c", "printf 'boom\\n' >&2"];
-        using StdioSession syncSession = new("/bin/sh", arguments, TimeSpan.FromSeconds(10), TimeProvider.System);
-        using StdioSession asyncSession = new("/bin/sh", arguments, TimeSpan.FromSeconds(10), TimeProvider.System);
+        using StdioSession session = new("/bin/sh", arguments, TimeSpan.FromSeconds(10), TimeProvider.System);
 
-        string? sync = WaitForFirstErrorLineSynchronously(syncSession, TimeSpan.FromSeconds(10));
-        string? async = await asyncSession.WaitForFirstErrorLineAsync(TimeSpan.FromSeconds(10));
+        string? line = await session.WaitForFirstErrorLineAsync(TimeSpan.FromSeconds(10));
 
-        Assert.Equal(sync, async);
-        Assert.Equal("boom", async);
+        Assert.Equal("boom", line);
     }
-
-    // The sync member is the behaviour under comparison. The helpers keep the calls out of async methods,
-    // where the analyzer would otherwise demand the async twin for the synchronous half.
-    private static string ReadLineSynchronously(StdioSession session) => session.ReadLine();
-
-    private static string? WaitForFirstErrorLineSynchronously(StdioSession session, TimeSpan wait) =>
-        session.WaitForFirstErrorLine(wait);
 
     /// <summary>The children are absolute POSIX paths; other platforms have no equivalent in this test.</summary>
     private static void SkipUnlessPosix()

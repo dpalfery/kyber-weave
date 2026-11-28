@@ -50,7 +50,7 @@ public sealed class ProjectRootDetectorTests
         bool pair = false,
         string[]? fallback = null) =>
         ProjectRootDetection.Detect(
-            _lister.List(repositoryRoot),
+            _lister.ListAsync(repositoryRoot, CancellationToken.None).GetAwaiter().GetResult(),
             markers,
             nesting,
             pair,

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
@@ -6,9 +7,15 @@ namespace KyberWeave.Data.Review;
 
 /// <summary>Lists the files a working tree changed, by running git with argv and never a shell.</summary>
 /// <param name="programs">Starts git.</param>
-public sealed class GitChangeReader(IProgramRunner programs) : IGitChangeReader
+/// <param name="syncRun">The synchronous runner a test supplies; null uses the kernel's synchronous runner.</param>
+public sealed class GitChangeReader(
+    IProcessRunner programs,
+    Func<ProcessStartInfo, string, ProcessResult>? syncRun = null) : IGitChangeReader
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>The process seam the reader was built over, retained for async consumers.</summary>
+    internal IProcessRunner Processes => programs;
 
     /// <summary>
     /// Lists the paths changed since <paramref name="baseRef"/> that still exist, together with untracked files.
@@ -232,7 +239,22 @@ public sealed class GitChangeReader(IProgramRunner programs) : IGitChangeReader
 
     private string RunGit(string workingDirectory, params string[] arguments)
     {
-        ProcessResult result = programs.Run("git", arguments, workingDirectory, GitTimeout);
+        ProcessStartInfo startInfo = new("git")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = workingDirectory
+        };
+        foreach (string argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        // The change reader is a synchronous adapter over git for the review services; its callers stay synchronous
+        // until the review entry points move. Production uses the kernel's synchronous runner; a test supplies its own.
+        ProcessResult result = syncRun is { } run
+            ? run(startInfo, string.Empty)
+            : ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(

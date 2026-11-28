@@ -72,12 +72,12 @@ public sealed class PlanFinalizeRestoreTests
         fixture.FullPath(relative);
 
     [Fact]
-    public void APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsWritten()
+    public async Task APlanThatVanishesAfterTheActiveCheckIsRefusedAsMissingAndNothingIsWritten()
     {
         using DocFixture fixture = RepositoryInMemory();
 
-        PlanFinalizeOutcome outcome = Finalizer(fixture, path => fixture.Memory!.DeleteFile(path))
-            .Run(PlanTaskFileProbe.PlanPath, PlanApprovalMode.Autonomous, Approval, DateOnly.Parse(Date, CultureInfo.InvariantCulture));
+        PlanFinalizeOutcome outcome = await Finalizer(fixture, path => fixture.Memory!.DeleteFile(path))
+            .RunAsync(PlanTaskFileProbe.PlanPath, PlanApprovalMode.Autonomous, Approval, DateOnly.Parse(Date, CultureInfo.InvariantCulture), CancellationToken.None);
 
         Assert.False(outcome.Finalized);
         Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);
@@ -89,17 +89,17 @@ public sealed class PlanFinalizeRestoreTests
 
     /// <summary>A folder in the plan's place passes the active check, then throws on read: a finding, not a crash.</summary>
     [Fact]
-    public void APlanThatCannotBeReadAfterTheActiveCheckIsAFindingNotACrash()
+    public async Task APlanThatCannotBeReadAfterTheActiveCheckIsAFindingNotACrash()
     {
         using DocFixture fixture = RepositoryInMemory();
         string index = Read(fixture, PlanTaskFileProbe.PlanIndexPath);
 
-        PlanFinalizeOutcome outcome = Finalizer(fixture, path =>
+        PlanFinalizeOutcome outcome = await Finalizer(fixture, path =>
             {
                 fixture.Memory!.DeleteFile(path);
                 fixture.Memory!.CreateDirectory(path);
             })
-            .Run(PlanTaskFileProbe.PlanPath, PlanApprovalMode.Autonomous, Approval, DateOnly.Parse(Date, CultureInfo.InvariantCulture));
+            .RunAsync(PlanTaskFileProbe.PlanPath, PlanApprovalMode.Autonomous, Approval, DateOnly.Parse(Date, CultureInfo.InvariantCulture), CancellationToken.None);
 
         Assert.False(outcome.Finalized);
         Diagnostic refusal = Assert.Single(outcome.Report.Items, item => item.Severity == Severity.Error);

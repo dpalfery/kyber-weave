@@ -115,26 +115,6 @@ public sealed class StdioSession : IDisposable
     private string? _firstErrorLineSeen;
 
     /// <summary>
-    ///     <see cref="FirstErrorLine"/>, after waiting up to <paramref name="wait"/> for stderr to finish. A child
-    ///     that exits closes stdout and stderr together, so a caller that saw stdout end can otherwise read this
-    ///     before the error line has been drained.
-    /// </summary>
-    /// <param name="wait">The longest to wait for stderr to close.</param>
-    public string? WaitForFirstErrorLine(TimeSpan wait)
-    {
-        try
-        {
-            _firstErrorLine.Wait(wait);
-        }
-        catch (AggregateException)
-        {
-            // A faulted drain has no line to show, which FirstErrorLine reports as null.
-        }
-
-        return FirstErrorLine;
-    }
-
-    /// <summary>
     ///     <see cref="FirstErrorLine" />, after waiting up to <paramref name="wait" /> for stderr to finish, without
     ///     blocking the calling thread.
     /// </summary>
@@ -167,47 +147,6 @@ public sealed class StdioSession : IDisposable
         ArgumentNullException.ThrowIfNull(line);
         _process.StandardInput.WriteLine(line);
         _process.StandardInput.Flush();
-    }
-
-    /// <summary>Reads the child's next standard output line, waiting no longer than the session has left.</summary>
-    /// <returns>The line, without its terminator.</returns>
-    /// <exception cref="TimeoutException">
-    ///     The budget ran out before a line arrived. The session is then unusable: dispose it.
-    /// </exception>
-    /// <exception cref="EndOfStreamException">The child closed its standard output.</exception>
-    /// <exception cref="InvalidDataException">
-    ///     The child wrote more than the session's line cap without a terminator. The session is then unusable:
-    ///     dispose it.
-    /// </exception>
-    public string ReadLine()
-    {
-        ThrowIfDisposed();
-        if (_pendingRead is not null)
-            throw new InvalidOperationException("A previous read timed out or was cancelled; the session must be disposed, not read again.");
-
-        TimeSpan remaining = _budget - _time.GetElapsedTime(_started);
-        if (remaining <= TimeSpan.Zero)
-            throw new TimeoutException("The session budget was exhausted before the child answered.");
-
-        Task<string?> read = ReadLineBoundedAsync(CancellationToken.None);
-        try
-        {
-            // WaitAsync rather than Wait: Wait wraps a faulted reader in AggregateException, and the caller needs
-            // the reader's own exception — a line over the cap — to classify it. The wait is clamped because
-            // WaitAsync rejects a timeout past the runtime's maximum timer duration, and the budget is a caller's
-            // value with no upper bound of its own.
-            TimeSpan wait = remaining > MaxWait ? MaxWait : remaining;
-            read.WaitAsync(wait, _time).GetAwaiter().GetResult();
-        }
-        catch (TimeoutException)
-        {
-            // The read is still outstanding on the stream. Keep it as pending so no second read starts
-            // while the first one is in flight.
-            _pendingRead = read;
-            throw new TimeoutException("The child did not answer within the session budget.");
-        }
-
-        return read.GetAwaiter().GetResult() ?? throw new EndOfStreamException("The child closed its standard output.");
     }
 
     /// <summary>

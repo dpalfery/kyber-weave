@@ -479,13 +479,13 @@ public sealed class SquadReleaseClientTests
     }
 
     [Fact]
-    public void McpProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion()
+    public async Task McpProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion()
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new ProcessResult(0, "kyber-weave-mcp 1.2.3\n", string.Empty));
         McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
-        ToolProbeResult result = probe.Probe();
+        ToolProbeResult result = await probe.ProbeAsync();
 
         Assert.True(result.IsAvailable);
         Assert.Equal(Version, result.Version);
@@ -498,13 +498,13 @@ public sealed class SquadReleaseClientTests
     [InlineData("kyber-weave-mcp v1.2.3")]
     [InlineData("kyber-weave-mcp 1.2.3 extra")]
     [InlineData("kyber-weave 1.2.3")]
-    public void McpProcessProbeWhenOutputIsNotTheExactToolEnvelopeAndSemanticVersionRejectsIt(
+    public async Task McpProcessProbeWhenOutputIsNotTheExactToolEnvelopeAndSemanticVersionRejectsIt(
         string standardOutput)
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
         McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
-        ToolProbeResult result = probe.Probe();
+        ToolProbeResult result = await probe.ProbeAsync();
 
         Assert.True(result.IsAvailable);
         Assert.Null(result.Version);
@@ -513,13 +513,13 @@ public sealed class SquadReleaseClientTests
     }
 
     [Fact]
-    public void ProcessProbesWhenToolIsMissingReportUnavailableWithoutDisclosingStartupDetails()
+    public async Task ProcessProbesWhenToolIsMissingReportUnavailableWithoutDisclosingStartupDetails()
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new Win32Exception($"PATH={Secret}; Authorization=Bearer {Secret}"));
         McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
-        ToolProbeResult result = probe.Probe();
+        ToolProbeResult result = await probe.ProbeAsync();
 
         Assert.False(result.IsAvailable);
         Assert.Null(result.Version);
@@ -528,7 +528,7 @@ public sealed class SquadReleaseClientTests
     }
 
     [Fact]
-    public void ProcessProbesWhenToolFailsDoNotExposeStandardStreamsEnvironmentOrAuthorization()
+    public async Task ProcessProbesWhenToolFailsDoNotExposeStandardStreamsEnvironmentOrAuthorization()
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new ProcessResult(
@@ -537,7 +537,7 @@ public sealed class SquadReleaseClientTests
                 $"Authorization: Bearer {Secret}"));
         McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
-        ToolProbeResult result = probe.Probe();
+        ToolProbeResult result = await probe.ProbeAsync();
 
         Assert.True(result.IsAvailable);
         Assert.Null(result.Version);
@@ -785,7 +785,7 @@ public sealed class SquadReleaseClientTests
         }
     }
 
-    private sealed class RecordingProcessExecutor : IProcessExecutor
+    private sealed class RecordingProcessExecutor : IProcessRunner
     {
         private readonly ProcessResult _result;
         private readonly Exception? _exception;
@@ -798,14 +798,34 @@ public sealed class SquadReleaseClientTests
 
         public string? StandardInput { get; private set; }
 
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
         {
+            ProcessStartInfo startInfo = new(request.Program)
+            {
+                WorkingDirectory = request.WorkingDirectory ?? string.Empty,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            foreach (string argument in request.Arguments)
+                startInfo.ArgumentList.Add(argument);
+
             StartInfo = startInfo;
-            StandardInput = standardInput;
+            StandardInput = request.StandardInput;
             if (_exception is not null)
                 throw _exception;
 
-            return _result;
+            return Task.FromResult(new ProcessRunResult(_result.ExitCode, _result.StandardOutput, TimedOut: false)
+            {
+                StandardOutput = _result.StandardOutput,
+                StandardError = _result.StandardError
+            });
         }
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

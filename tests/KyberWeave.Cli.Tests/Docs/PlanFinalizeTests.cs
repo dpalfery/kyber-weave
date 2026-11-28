@@ -45,7 +45,7 @@ public sealed class PlanFinalizeTests
     /// <summary>The host's services over the in-memory checkout; git answers as it does in a folder that is no repository.</summary>
     private static IServiceProvider Services(DocFixture fixture) =>
         DocsMemoryServicesD.Services(fixture, services =>
-            services.AddSingleton<IBoundedProcessExecutor>(NotAGitRepository()));
+            services.AddSingleton<IProcessRunner>(NotAGitRepository()));
 
     private static ScriptedProcessExecutor NotAGitRepository() =>
         new(_ => new ProcessResult(128, string.Empty, "fatal: not a git repository"));

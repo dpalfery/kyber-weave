@@ -6,7 +6,7 @@ using KyberWeave.Core.Processes;
 namespace KyberWeave.Data.Hooks;
 
 /// <summary>Runs programs through the kernel's deadlock-safe process runner and answers process and path questions.</summary>
-internal sealed class KernelProcessRunner : IProcessRunner
+public sealed class KernelProcessRunner : IProcessRunner
 {
     private const int MissingExecutableErrorCode = 2;
 

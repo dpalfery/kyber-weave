@@ -193,14 +193,14 @@ internal sealed class SquadDoctorCommand : AsyncCommand<SquadDoctorSettings>
         ReportRendererCoverage();
 
         // 3. MCP Probe
-        if (ReportMcpProbe())
+        if (await ReportMcpProbeAsync(cancellationToken).ConfigureAwait(false))
         {
             hasIssues = true;
         }
 
         // 3b. Arbiter Probe — only when the host enabled the Arbiter. A missing binary or
         // a version that differs from the CLI's is KW-ARB-BIN-001.
-        if (ReportArbiterBinary(workingDirectory))
+        if (await ReportArbiterBinaryAsync(workingDirectory, cancellationToken).ConfigureAwait(false))
         {
             hasIssues = true;
         }
@@ -311,10 +311,10 @@ internal sealed class SquadDoctorCommand : AsyncCommand<SquadDoctorSettings>
 
     /// <summary>Probes the kyber-weave-mcp executable and reports its version or why it is unavailable.</summary>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
-    private bool ReportMcpProbe()
+    private async Task<bool> ReportMcpProbeAsync(CancellationToken cancellationToken)
     {
         McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor, _environment);
-        ToolProbeResult mcpResult = mcpProbe.Probe();
+        ToolProbeResult mcpResult = await mcpProbe.ProbeAsync(cancellationToken).ConfigureAwait(false);
         if (mcpResult is { IsAvailable: true, Version: not null })
         {
             _console.Ansi.MarkupLine(
@@ -384,7 +384,7 @@ internal sealed class SquadDoctorCommand : AsyncCommand<SquadDoctorSettings>
     /// product-default disabled Arbiter.
     /// </remarks>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
-    private bool ReportArbiterBinary(string workingDirectory)
+    private async Task<bool> ReportArbiterBinaryAsync(string workingDirectory, CancellationToken cancellationToken)
     {
         if (!IsArbiterEnabled(workingDirectory))
         {
@@ -394,7 +394,7 @@ internal sealed class SquadDoctorCommand : AsyncCommand<SquadDoctorSettings>
         }
 
         ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_options.Executor, _environment);
-        ToolProbeResult arbiterResult = arbiterProbe.Probe();
+        ToolProbeResult arbiterResult = await arbiterProbe.ProbeAsync(cancellationToken).ConfigureAwait(false);
         string cliVersion = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
 
         if (arbiterResult is { IsAvailable: true, Version: not null }
@@ -1270,4 +1270,4 @@ internal sealed class SquadDoctorDiagnostics
 /// <summary>How <c>squad doctor</c> probes tools and which directory it diagnoses.</summary>
 /// <param name="Executor">Runs the tool probes; null uses the shared process executor.</param>
 /// <param name="WorkingDirectory">The directory diagnosed when none is named; null is the current directory.</param>
-internal sealed record SquadDoctorOptions(IProcessExecutor? Executor = null, string? WorkingDirectory = null);
+internal sealed record SquadDoctorOptions(IProcessRunner? Executor = null, string? WorkingDirectory = null);

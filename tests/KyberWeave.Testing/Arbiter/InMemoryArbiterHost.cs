@@ -64,7 +64,7 @@ internal sealed partial class InMemoryArbiterHost : IDisposable
         _ = services.AddSingleton<IIdGenerator>(Ids);
         _ = services.AddSingleton<IArbiterLogStore>(State.Log);
         _ = services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
-        _ = services.AddSingleton<IProcessExecutor>(Processes);
+        _ = services.AddSingleton<IProcessRunner>(Processes);
         _ = services.AddSingleton<IProcessRunner>(Runner);
         _ = services.AddSingleton<ICredentialStore>(Credentials);
         _ = services.AddSingleton<IGitRepositoryFacts>(Git);

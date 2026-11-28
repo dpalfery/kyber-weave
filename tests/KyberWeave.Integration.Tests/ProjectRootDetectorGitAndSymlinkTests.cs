@@ -25,7 +25,7 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
 
     private static ProjectRootSet Detect(string repositoryRoot, string[] markers, ProjectRootNesting nesting) =>
         ProjectRootDetection.Detect(
-            RealRepositoryFileLister.Create().List(repositoryRoot),
+            RealRepositoryFileLister.Create().ListAsync(repositoryRoot, CancellationToken.None).GetAwaiter().GetResult(),
             markers,
             nesting,
             false,

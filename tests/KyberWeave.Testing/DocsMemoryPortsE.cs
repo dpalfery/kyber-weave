@@ -83,15 +83,15 @@ internal sealed class MemoryScaffoldedRepository
         Memory.WriteAllText(full, content);
     }
 
-    private sealed class GitNotInstalled : IProgramRunner
+    private sealed class GitNotInstalled : IProcessRunner
     {
-        public Core.Processes.ProcessResult Run(
-            string program,
-            IReadOnlyList<string> arguments,
-            string workingDirectory,
-            TimeSpan? timeout = null,
-            long? maxOutputBytes = null,
+        public Task<ProcessRunResult> RunAsync(
+            ProcessRunRequest request,
             CancellationToken cancellationToken = default) =>
-            throw new Win32Exception($"{program} is not installed in the in-memory repository.");
+            throw new Win32Exception($"{request.Program} is not installed in the in-memory repository.");
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

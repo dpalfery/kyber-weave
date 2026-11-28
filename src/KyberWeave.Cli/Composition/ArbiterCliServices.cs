@@ -23,8 +23,8 @@ internal static class ArbiterCliServices
         services.TryAddSingleton<IArbiterKeyInput, ConsoleArbiterKeyInput>();
         services.TryAddSingleton<ArbiterRepoRoot>();
         services.TryAddSingleton<PlanArguments>();
-        services.TryAddSingleton<IProcessExecutor>(_ => ProcessExecutor.Instance);
-        services.TryAddSingleton(sp => new ArbiterProcessProbe(sp.GetRequiredService<IProcessExecutor>(), sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<IProcessRunner>(_ => new KyberWeave.Data.Hooks.KernelProcessRunner());
+        services.TryAddSingleton(sp => new ArbiterProcessProbe(sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IArbiterBinaryProbe>(sp => sp.GetRequiredService<ArbiterProcessProbe>());
         return services;
     }

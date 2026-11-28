@@ -15,7 +15,10 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// without git on <c>PATH</c>, every fact is absent and nothing throws — the Arbiter rules on
 /// fewer facts rather than failing the dispatch.
 /// </remarks>
-public sealed class GitFacts(IProcessRunner process, IFileSystem files) : IGitRepositoryFacts
+public sealed class GitFacts(
+    IProcessRunner process,
+    IFileSystem files,
+    Func<ProcessStartInfo, string, ProcessResult>? syncRun = null) : IGitRepositoryFacts
 {
 
     /// <summary>Resolves the repository root for a working directory.</summary>
@@ -924,9 +927,11 @@ public sealed class GitFacts(IProcessRunner process, IFileSystem files) : IGitRe
             foreach (string argument in args)
                 startInfo.ArgumentList.Add(argument);
 
-            // The facts interface is synchronous and every caller is a synchronous rule evaluation; the sync
-            // role view stays until the final async slice, so no task is blocked on here.
-            ProcessResult result = process.Run(startInfo, standardInput);
+            // The facts interface is synchronous and every caller is a synchronous rule evaluation, so production
+            // uses the kernel's synchronous runner directly rather than blocking on the async twin.
+            ProcessResult result = syncRun is { } run
+                ? run(startInfo, standardInput)
+                : ProcessRunner.Run(startInfo, standardInput);
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)

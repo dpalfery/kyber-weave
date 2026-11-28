@@ -25,27 +25,29 @@ public sealed class SqliteAnalysisPersistenceSeamTests
     private string CacheDirectory => Path.Combine(Root, ".kyber-weave", "cache");
 
     [Fact]
-    public void ACheckoutThatDoesNotIgnoreTheCacheStaysClosedAndWritesNothing()
+    public async Task ACheckoutThatDoesNotIgnoreTheCacheStaysClosedAndWritesNothing()
     {
         _files.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
         _files.WriteAllText(Path.Combine(Root, ".kyber-weave", ".gitignore"), "logs/");
         ScriptedProcessExecutor processes = Scripted(_ => Ok("0\n"));
+        SqliteAnalysisPersistenceFactory factory = Factory(processes);
 
-        SqliteAnalysisPersistence persistence = Open(processes);
+        IAnalysisPersistence persistence = await factory.OpenAsync(Root);
 
         Assert.False(persistence.IsAvailable);
         Assert.False(_files.DirectoryExists(CacheDirectory));
     }
 
     [Fact]
-    public void ACacheFolderThatIsALinkIsRefused()
+    public async Task ACacheFolderThatIsALinkIsRefused()
     {
         MakeSafe();
         _files.CreateDirectory(Path.Combine(_files.Root, "elsewhere"));
         _files.CreateDirectoryLink(CacheDirectory, Path.Combine(_files.Root, "elsewhere"));
         ScriptedProcessExecutor processes = Scripted(_ => Ok("0\n"));
+        SqliteAnalysisPersistenceFactory factory = Factory(processes);
 
-        _ = Assert.Throws<InvalidOperationException>(() => Open(processes));
+        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.OpenAsync(Root));
     }
 
     [Fact]
@@ -78,11 +80,11 @@ public sealed class SqliteAnalysisPersistenceSeamTests
         _files.WriteAllText(Path.Combine(Root, ".kyber-weave", ".gitignore"), "cache/");
     }
 
-    private SqliteAnalysisPersistence Open(ScriptedProcessExecutor processes)
+    private SqliteAnalysisPersistenceFactory Factory(ScriptedProcessExecutor processes)
     {
         FakePathResolver paths = new(_files);
         FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory);
-        return new SqliteAnalysisPersistence(
-            Root, _files, paths, environment, processes, new AnalysisCacheSafety(_files, paths, environment, processes));
+        return new SqliteAnalysisPersistenceFactory(
+            _files, paths, environment, processes, new AnalysisCacheSafety(_files, paths, environment, processes));
     }
 }
