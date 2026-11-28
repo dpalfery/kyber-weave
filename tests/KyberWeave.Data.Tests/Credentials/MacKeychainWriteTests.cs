@@ -18,13 +18,13 @@ public sealed class MacKeychainWriteTests
     [InlineData("key with space")]
     [InlineData("key\"with\"quotes")]
     [InlineData("key\\with\\backslash")]
-    public void Fix2_MacWrite_SpecialKeysStayQuotedOnStdinOnly(string key)
+    public async Task Fix2_MacWrite_SpecialKeysStayQuotedOnStdinOnly(string key)
     {
         FakeCredentialProcessRunner runner = new();
         runner.NextResult = new ProcessResult(0, string.Empty, string.Empty);
         MacKeychainCredentialStore store = new(runner);
 
-        store.Write("https://api.typesafe.ai", key);
+        await store.WriteAsync("https://api.typesafe.ai", key);
 
         CapturedCredentialCall call = Assert.Single(runner.Calls);
         Assert.Equal(["-i"], call.Argv);
@@ -34,13 +34,13 @@ public sealed class MacKeychainWriteTests
     }
 
     [Fact]
-    public void Fix2_MacWrite_NewlineKey_RejectedWithClearError()
+    public async Task Fix2_MacWrite_NewlineKey_RejectedWithClearError()
     {
         FakeCredentialProcessRunner runner = new();
         MacKeychainCredentialStore store = new(runner);
 
-        ArgumentException failure = Assert.Throws<ArgumentException>(
-            () => store.Write("https://api.typesafe.ai", "abc\ndef"));
+        ArgumentException failure = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.WriteAsync("https://api.typesafe.ai", "abc\ndef").AsTask());
 
         Assert.DoesNotContain("abc\ndef", failure.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Calls);

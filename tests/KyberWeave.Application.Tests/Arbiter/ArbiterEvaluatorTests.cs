@@ -176,7 +176,7 @@ public sealed class ArbiterEvaluatorTests
         DateTimeOffset fixedNow = now ?? new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
         return new ArbiterEvaluator(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             _state.LedgerStore,
             _state.DecisionLog,
             gitFacts ?? new PassThroughGitFacts(),
@@ -342,10 +342,10 @@ public sealed class ArbiterEvaluatorTests
         int resolverCalls = 0;
         ArbiterEvaluator evaluator = new(
             new NoneProvider(),
-            _ =>
+            (_, _) =>
             {
                 resolverCalls++;
-                return null;
+                return Task.FromResult<string?>(null);
             },
             _state.LedgerStore,
             _state.DecisionLog,

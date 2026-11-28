@@ -204,7 +204,9 @@ public sealed class DocsTasksCommand(
             return null;
         }
 
-        return arbiterDryRun.CreateProvider(config, null, new DiagnosticReport(), out _);
+        return (await arbiterDryRun
+            .CreateProviderAsync(config, null, new DiagnosticReport(), cancellationToken)
+            .ConfigureAwait(false))?.Provider;
     }
 
     private async Task CheckPacketsAsync(

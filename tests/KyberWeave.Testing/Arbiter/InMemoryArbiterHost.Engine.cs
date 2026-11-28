@@ -134,12 +134,17 @@ internal sealed partial class InMemoryArbiterHost
         ArbiterHookDecisionEngine engine,
         string? repoRoot = null,
         Func<string, KyberWeaveConfig>? loadConfig = null,
-        Func<KyberWeaveConfig, bool>? keyResolved = null) =>
-        Tools(new ArbiterServeContext(repoRoot ?? RepoRoot, engine, TextWriter.Null, loadConfig ?? LoadHostConfig, keyResolved ?? (_ => true)));
+        Func<KyberWeaveConfig, CancellationToken, Task<bool>>? keyResolved = null) =>
+        Tools(new ArbiterServeContext(
+            repoRoot ?? RepoRoot,
+            engine,
+            TextWriter.Null,
+            loadConfig ?? LoadHostConfig,
+            keyResolved ?? ((_, _) => Task.FromResult(true))));
 
     /// <summary>Builds the comment command over the container, with the provider a test answers instead of a configured one.</summary>
     /// <param name="providerFactory">Builds the provider for a repository root.</param>
-    internal ArbiterCommentCommand CommentCommand(Func<string, DiagnosticReport, IArbiterProvider?> providerFactory)
+    internal ArbiterCommentCommand CommentCommand(Func<string, DiagnosticReport, CancellationToken, Task<IArbiterProvider?>> providerFactory)
     {
         ArbiterCommentCommand command = Command<ArbiterCommentCommand>();
         command.ProviderFactory = providerFactory;

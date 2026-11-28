@@ -29,109 +29,6 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public string? Read(string origin)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-        RejectLineBreak(origin, nameof(origin));
-        ProcessStartInfo startInfo = new("secret-tool")
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        startInfo.ArgumentList.Add("lookup");
-        startInfo.ArgumentList.Add("service");
-        startInfo.ArgumentList.Add(Service);
-        startInfo.ArgumentList.Add("account");
-        startInfo.ArgumentList.Add(origin);
-
-        ProcessResult result = RunSecretTool(startInfo, string.Empty);
-        if (result.ExitCode != 0)
-        {
-            // secret-tool uses exit 1 both for "no matching item" and for a failed
-            // lookup (no D-Bus, locked keyring, EPERM). Only the no-match case is an
-            // absent key; every other failure must surface, or a reviewer silently
-            // loses its key and the Arbiter fails open.
-            if (IsMissingSecret(result))
-            {
-                return null;
-            }
-
-            throw new SecretServiceUnavailableException(
-                $"The Secret Service read failed with exit code {result.ExitCode}: " +
-                $"{OneLine(result.StandardError)}");
-        }
-
-        string output = result.StandardOutput.TrimEnd('\r', '\n');
-        return string.IsNullOrEmpty(output) ? null : output;
-    }
-
-    /// <inheritdoc />
-    public void Write(string origin, string key)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-        ArgumentException.ThrowIfNullOrEmpty(key);
-        RejectLineBreak(origin, nameof(origin));
-        RejectLineBreak(key, nameof(key));
-        ProcessStartInfo startInfo = new("secret-tool")
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        startInfo.ArgumentList.Add("store");
-        startInfo.ArgumentList.Add(Label);
-        startInfo.ArgumentList.Add("service");
-        startInfo.ArgumentList.Add(Service);
-        startInfo.ArgumentList.Add("account");
-        startInfo.ArgumentList.Add(origin);
-
-        // The secret travels on stdin only: argv carries the lookup attributes, where
-        // any local user could read them, so the key must never be among them.
-        ProcessResult result = RunSecretTool(startInfo, key);
-        if (result.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"The Secret Service write failed with exit code {result.ExitCode}.");
-        }
-    }
-
-    /// <inheritdoc />
-    public void Delete(string origin)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-        RejectLineBreak(origin, nameof(origin));
-        ProcessStartInfo startInfo = new("secret-tool")
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        startInfo.ArgumentList.Add("clear");
-        startInfo.ArgumentList.Add("service");
-        startInfo.ArgumentList.Add(Service);
-        startInfo.ArgumentList.Add("account");
-        startInfo.ArgumentList.Add(origin);
-
-        ProcessResult result = RunSecretTool(startInfo, string.Empty);
-        if (result.ExitCode != 0)
-        {
-            // Clearing an absent secret is already the desired end state, so the
-            // no-match case succeeds; any other failure surfaces like a read.
-            if (IsMissingSecret(result))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"The Secret Service delete failed with exit code {result.ExitCode}.");
-        }
-    }
-
-    /// <inheritdoc />
     public async ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
@@ -236,7 +133,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
 
     /// <summary>
     /// Whether <paramref name="result"/> reports no matching secret: exit 1 with a
-    /// "no match" or "no such secret" diagnostic, the same absence <see cref="Read"/>
+    /// "no match" or "no such secret" diagnostic, the same absence <see cref="ReadAsync"/>
     /// treats as a missing key.
     /// </summary>
     private static bool IsMissingSecret(ProcessResult result)
@@ -257,20 +154,6 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
         {
             throw new ArgumentException("A credential origin or key cannot contain a line break.", parameterName);
-        }
-    }
-
-    private ProcessResult RunSecretTool(ProcessStartInfo startInfo, string standardInput)
-    {
-        try
-        {
-            return _runner.Run(startInfo, standardInput);
-        }
-        catch (Win32Exception exception)
-        {
-            // Process.Start raises Win32Exception when secret-tool is not on PATH. Mapping it
-            // here keeps the raw OS text out of every surface and states the remedy instead.
-            throw new SecretServiceUnavailableException(exception);
         }
     }
 

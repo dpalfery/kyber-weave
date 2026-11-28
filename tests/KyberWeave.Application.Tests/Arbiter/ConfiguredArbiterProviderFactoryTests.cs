@@ -34,32 +34,32 @@ public sealed class ConfiguredArbiterProviderFactoryTests
         new(kind, endpoint, ArbiterProviderTestSupport.Model, 5000);
 
     [Fact]
-    public void ProviderNone_AnswersNullAndCreatesNoTransport()
+    public async Task ProviderNone_AnswersNullAndCreatesNoTransport()
     {
-        Assert.Null(Factory(environmentKey: "k").TryCreate(Config(Remote, ArbiterProviderKind.None), "/kw/home"));
+        Assert.Null(await Factory(environmentKey: "k").TryCreateAsync(Config(Remote, ArbiterProviderKind.None), "/kw/home"));
         Assert.Equal(0, _handlers.Created);
     }
 
     [Fact]
-    public void ARemoteEndpointWithNoKey_AnswersNullAndCreatesNoTransport()
+    public async Task ARemoteEndpointWithNoKey_AnswersNullAndCreatesNoTransport()
     {
-        Assert.Null(Factory().TryCreate(Config(Remote), "/kw/home"));
+        Assert.Null(await Factory().TryCreateAsync(Config(Remote), "/kw/home"));
         Assert.Equal(0, _handlers.Created);
     }
 
     [Fact]
-    public void ACredentialStoreThatCannotBeBuilt_AnswersNullForARemoteEndpointWithNoEnvironmentKey()
+    public async Task ACredentialStoreThatCannotBeBuilt_AnswersNullForARemoteEndpointWithNoEnvironmentKey()
     {
         ConfiguredArbiterProviderFactory factory = Factory(store: () => throw new InvalidOperationException("no store"));
 
-        Assert.Null(factory.TryCreate(Config(Remote), "/kw/home"));
+        Assert.Null(await factory.TryCreateAsync(Config(Remote), "/kw/home"));
     }
 
     [Fact]
-    public void ALoopbackEndpoint_NeedsNoKeyAndRunsOverTheTransportTheSeamSupplies()
+    public async Task ALoopbackEndpoint_NeedsNoKeyAndRunsOverTheTransportTheSeamSupplies()
     {
-        IArbiterProvider? provider = Factory(store: () => throw new InvalidOperationException("no store"))
-            .TryCreate(Config("http://127.0.0.1:11434"), "/kw/home");
+        IArbiterProvider? provider = await Factory(store: () => throw new InvalidOperationException("no store"))
+            .TryCreateAsync(Config("http://127.0.0.1:11434"), "/kw/home");
 
         Assert.NotNull(provider);
         Assert.Equal(1, _handlers.Created);

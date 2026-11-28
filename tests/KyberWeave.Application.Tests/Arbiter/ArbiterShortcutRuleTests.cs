@@ -101,7 +101,7 @@ public sealed class ArbiterShortcutRuleTests
     private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? gitFacts = null) =>
         new(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             _arbiter.LedgerStore,
             _arbiter.DecisionLog,
             gitFacts ?? new PassThroughGitFacts(),

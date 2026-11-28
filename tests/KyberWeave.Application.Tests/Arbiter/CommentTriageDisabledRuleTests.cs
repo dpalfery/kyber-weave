@@ -205,7 +205,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n");
-        ArbiterCommentCommand disabledCommand = _host.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick));
+        ArbiterCommentCommand disabledCommand = _host.CommentCommand((_, _, _) => Task.FromResult<IArbiterProvider?>(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick)));
         CommandExecution disabled = await CaptureAsync(token => disabledCommand.ExecuteAsync(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." },
@@ -216,7 +216,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         Assert.Contains("status not-evaluated", disabled.Output, StringComparison.Ordinal);
 
         _host.Files.DeleteFile(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
-        ArbiterCommentCommand answeredCommand = _host.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Real));
+        ArbiterCommentCommand answeredCommand = _host.CommentCommand((_, _, _) => Task.FromResult<IArbiterProvider?>(FakeArbiterProvider.AnsweringRule(CommentRule, Real)));
         CommandExecution answered = await CaptureAsync(token => answeredCommand.ExecuteAsync(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." },

@@ -31,7 +31,7 @@ internal static class ArbiterTestServices
     /// <summary>Builds the comment command over the container, with the provider a test answers instead of a configured one.</summary>
     /// <param name="providerFactory">Builds the provider for a repository root.</param>
     internal static ArbiterCommentCommand CommentCommand(
-        Func<string, KyberWeave.Core.Diagnostics.DiagnosticReport, KyberWeave.Core.Arbiter.Providers.IArbiterProvider?> providerFactory)
+        Func<string, KyberWeave.Core.Diagnostics.DiagnosticReport, CancellationToken, Task<KyberWeave.Core.Arbiter.Providers.IArbiterProvider?>> providerFactory)
     {
         ArbiterCommentCommand command = Command<ArbiterCommentCommand>();
         command.ProviderFactory = providerFactory;

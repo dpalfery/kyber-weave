@@ -58,8 +58,8 @@ public sealed class ArbiterEvalCommand(
         }
 
         string repositoryRoot = await locator.ResolveRepositoryRootAsync(settings.Path, cancellationToken).ConfigureAwait(false);
-        using IArbiterEvaluatorSession? session = dryRun.CreateEvaluator(
-            config, repositoryRoot, settings.Provider, report);
+        using IArbiterEvaluatorSession? session = await dryRun.CreateEvaluatorAsync(
+            config, repositoryRoot, settings.Provider, report, cancellationToken).ConfigureAwait(false);
         if (session is null)
         {
             CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");

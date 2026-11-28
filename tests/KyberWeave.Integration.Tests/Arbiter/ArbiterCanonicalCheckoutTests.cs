@@ -256,7 +256,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         string arbiterDirectory = Path.Combine(_parent.Path, "arbiter");
         ArbiterEvaluator evaluator = new(
             new NoneProvider(),
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             RealArbiterState.Ledger(arbiterDirectory),
             RealArbiterState.Decisions(arbiterDirectory),
             ArbiterTestServices.HookGitFacts(_repo, _home.Path, arbiterDirectory),

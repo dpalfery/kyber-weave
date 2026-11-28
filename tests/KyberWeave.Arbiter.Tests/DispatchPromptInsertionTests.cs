@@ -1078,7 +1078,7 @@ public sealed class DispatchPromptInsertionTests
     }
 
     [Fact]
-    public void TheDoctorReportsAHarnessWhoseDeploymentLacksTheDispatchHook()
+    public async Task TheDoctorReportsAHarnessWhoseDeploymentLacksTheDispatchHook()
     {
         using InMemoryArbiterHost host = InMemoryArbiterHost.Create(services =>
             services.AddSingleton<IFileSystemPathSemantics>(provider =>
@@ -1106,7 +1106,7 @@ public sealed class DispatchPromptInsertionTests
         files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         files.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
 
-        ArbiterDoctorReport report = host.Get<IArbiterDoctorService>().Inspect(repo, null, new KyberWeave.Core.Diagnostics.DiagnosticReport());
+        ArbiterDoctorReport report = await host.Get<IArbiterDoctorService>().InspectAsync(repo, null, new KyberWeave.Core.Diagnostics.DiagnosticReport());
 
         HarnessGatingRow copilot = Assert.Single(report.Gating.Rows, row => row.Token == "copilot");
         Assert.True(copilot.Ungated);

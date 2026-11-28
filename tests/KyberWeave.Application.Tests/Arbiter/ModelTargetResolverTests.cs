@@ -134,7 +134,7 @@ public sealed class ModelTargetResolverTests
 
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
-        _ => null,
+        (_, _) => Task.FromResult<string?>(null),
         _state.Ledger(ArbiterDirectory),
         _state.Decisions(ArbiterDirectory),
         new NoGitFacts(),

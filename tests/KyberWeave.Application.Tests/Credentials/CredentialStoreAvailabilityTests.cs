@@ -13,69 +13,69 @@ public sealed class CredentialStoreAvailabilityTests
     private const string ProbeOrigin = "https://kyber-weave-contract-probe.invalid";
 
     [Fact]
-    public void ReportsAStoreThatAnswersAnAbsentOriginAsAvailable()
+    public async Task ReportsAStoreThatAnswersAnAbsentOriginAsAvailable()
     {
-        Assert.Null(CredentialStoreAvailability.Probe(new FakeCredentialStore(), ProbeOrigin));
+        Assert.Null(await CredentialStoreAvailability.ProbeAsync(new FakeCredentialStore(), ProbeOrigin));
     }
 
     [Fact]
-    public void ReportsAStoreThatAnswersAnAbsentOriginWithAValueAsAvailable()
+    public async Task ReportsAStoreThatAnswersAnAbsentOriginWithAValueAsAvailable()
     {
         FakeCredentialStore store = new();
         store.Seed(ProbeOrigin, "sk-should-not-be-there");
 
-        Assert.Null(CredentialStoreAvailability.Probe(store, ProbeOrigin));
+        Assert.Null(await CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin));
     }
 
     [Fact]
-    public void ReportsAMissingSecretToolAsUnavailable()
+    public async Task ReportsAMissingSecretToolAsUnavailable()
     {
         FakeCredentialStore store = new() { ReadFailure = new SecretServiceUnavailableException() };
 
-        Assert.NotNull(CredentialStoreAvailability.Probe(store, ProbeOrigin));
+        Assert.NotNull(await CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin));
     }
 
     [Fact]
-    public void ReportsALockedKeychainAsUnavailable()
+    public async Task ReportsALockedKeychainAsUnavailable()
     {
         FakeCredentialStore store = new() { ReadFailure = new KeychainUnavailableException("The keychain is locked.") };
 
-        Assert.NotNull(CredentialStoreAvailability.Probe(store, ProbeOrigin));
+        Assert.NotNull(await CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin));
     }
 
     [Fact]
-    public void ReportsAPlatformWithoutAStoreAsUnavailable()
+    public async Task ReportsAPlatformWithoutAStoreAsUnavailable()
     {
         FakeCredentialStore store = new() { ReadFailure = new PlatformNotSupportedException() };
 
-        Assert.NotNull(CredentialStoreAvailability.Probe(store, ProbeOrigin));
+        Assert.NotNull(await CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin));
     }
 
     [Fact]
-    public void ReportsAToolThatCannotStartAsUnavailable()
+    public async Task ReportsAToolThatCannotStartAsUnavailable()
     {
         FakeCredentialStore store = new() { ReadFailure = new System.ComponentModel.Win32Exception("No such file or directory") };
 
-        Assert.NotNull(CredentialStoreAvailability.Probe(store, ProbeOrigin));
+        Assert.NotNull(await CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin));
     }
 
     [Fact]
-    public void RaisesAnUnexpectedFailureInsteadOfSkippingIt()
+    public async Task RaisesAnUnexpectedFailureInsteadOfSkippingIt()
     {
         FakeCredentialStore store = new()
         {
             ReadFailure = new InvalidOperationException("The store answered the probe with the wrong key."),
         };
 
-        _ = Assert.Throws<InvalidOperationException>(() => CredentialStoreAvailability.Probe(store, ProbeOrigin));
+        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin));
     }
 
     [Fact]
-    public void NeverWritesAProbeKey()
+    public async Task NeverWritesAProbeKey()
     {
         FakeCredentialStore store = new();
 
-        _ = CredentialStoreAvailability.Probe(store, ProbeOrigin);
+        _ = await CredentialStoreAvailability.ProbeAsync(store, ProbeOrigin);
 
         Assert.Empty(store.Writes);
     }

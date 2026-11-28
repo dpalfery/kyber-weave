@@ -97,15 +97,6 @@ internal sealed class ImmediateClock(DateTimeOffset now) : TimeProvider
 internal sealed class FixedCredentialStore(string? key) : ICredentialStore
 {
     /// <inheritdoc />
-    public string? Read(string origin) => key;
-
-    /// <inheritdoc />
-    public void Write(string origin, string key1) => throw new NotSupportedException();
-
-    /// <inheritdoc />
-    public void Delete(string origin) => throw new NotSupportedException();
-
-    /// <inheritdoc />
     public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default) =>
         new(key);
 

@@ -38,8 +38,8 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Reports whether the Arbiter is ready for this repository: the root it answers for, the rule-set hash and rule count, the provider, and whether its key resolves. Use when checking configuration before relying on arbiter_evaluate_agent_dispatch_or_return, or when a dispatch failed closed on a configuration or key error. The key value is never reported, only whether one was found.
         """)]
-    public string Status()
-        => service.Status();
+    public Task<string> StatusAsync(CancellationToken cancellationToken = default)
+        => service.StatusAsync(cancellationToken);
 
     /// <summary>
     /// Lists the sections of one repository document a task needs. Returns JSON with <c>sections</c>, <c>failedSafe</c>

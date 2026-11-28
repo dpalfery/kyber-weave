@@ -173,18 +173,18 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     /// escaping as an unhandled exception that carries its own stack.
     /// </summary>
     [Fact]
-    public void Status_ATrrowingKeyResolver_ReportsAMessageAndNoStack()
+    public async Task Status_ATrrowingKeyResolver_ReportsAMessageAndNoStack()
     {
         bool called = false;
         ArbiterTools tools = CreateTools(
             provider: "    kind: systemone\n    endpoint: https://api.typesafe.ai/v1\n    model: jev-1.13.0\n",
-            keyResolved: _ =>
+            keyResolved: (_, _) =>
             {
                 called = true;
                 throw new InvalidOperationException("the credential store\nis unavailable");
             });
 
-        string response = tools.Status();
+        string response = await tools.StatusAsync();
 
         Assert.True(called, "The remote provider must reach the key resolver.");
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
@@ -194,12 +194,12 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     }
 
     [Fact]
-    public void Status_ARemoteProviderWithAResolvedKey_ReportsFound()
+    public async Task Status_ARemoteProviderWithAResolvedKey_ReportsFound()
     {
         ArbiterTools tools = CreateTools(
             provider: "    kind: systemone\n    endpoint: https://api.typesafe.ai/v1\n    model: jev-1.13.0\n");
 
-        Assert.Contains("key: found", tools.Status(), StringComparison.Ordinal);
+        Assert.Contains("key: found", await tools.StatusAsync(), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -323,7 +323,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
     private ArbiterTools CreateTools(
         string provider = "    kind: none\n",
-        Func<KyberWeaveConfig, bool>? keyResolved = null)
+        Func<KyberWeaveConfig, CancellationToken, Task<bool>>? keyResolved = null)
     {
         _ = _host.WriteRepoConfig(
             "arbiter:\n" +

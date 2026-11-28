@@ -14,7 +14,7 @@ public sealed class SystemOneProviderFactory(IArbiterHttpHandlers handlers, Time
         Uri endpoint,
         string model,
         int timeoutMs,
-        Func<Uri, string?>? keyResolver) =>
+        Func<Uri, CancellationToken, Task<string?>>? keyResolver) =>
         SystemOneClient.CreateForProduct(handler, endpoint, model, timeoutMs, clock, keyResolver);
 
     /// <inheritdoc />
@@ -26,6 +26,6 @@ public sealed class SystemOneProviderFactory(IArbiterHttpHandlers handlers, Time
         Uri endpoint,
         string model,
         int timeoutMs,
-        Func<Uri, string?>? keyResolver) =>
+        Func<Uri, CancellationToken, Task<string?>>? keyResolver) =>
         CreateSystemOne(handlers.Create(), endpoint, model, timeoutMs, keyResolver);
 }

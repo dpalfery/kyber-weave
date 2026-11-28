@@ -28,7 +28,7 @@ public interface IArbiterEvaluatorFactory
 {
     /// <summary>Creates an evaluator whose ledger and decision log live under <paramref name="arbiterDirectory"/>.</summary>
     /// <param name="provider">The step-1 provider.</param>
-    /// <param name="keyResolver">Resolves the provider key for an endpoint; the key is never logged.</param>
+    /// <param name="keyResolver">Resolves the provider key for an endpoint without blocking; the key is never logged.</param>
     /// <param name="arbiterDirectory">The arbiter state directory.</param>
     /// <param name="gitFacts">Git-derived facts.</param>
     /// <param name="planReader">Plan-derived facts.</param>
@@ -40,7 +40,7 @@ public interface IArbiterEvaluatorFactory
     /// </param>
     IArbiterEvaluator Create(
         IArbiterProvider provider,
-        Func<Uri, string?> keyResolver,
+        Func<Uri, CancellationToken, Task<string?>> keyResolver,
         string arbiterDirectory,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,

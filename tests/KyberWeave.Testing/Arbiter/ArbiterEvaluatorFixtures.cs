@@ -108,7 +108,7 @@ internal static class ArbiterEvaluatorFixtures
         PlanFacts? planReader = null) =>
         new(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             RealArbiterState.Ledger(DirectoryFor(root)),
             RealArbiterState.Decisions(DirectoryFor(root)),
             new PassThroughGitFacts(),

@@ -44,7 +44,7 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
     private ArbiterCommentCommand Command(IArbiterProvider provider)
     {
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        command.ProviderFactory = (_, _) => provider;
+        command.ProviderFactory = (_, _, _) => Task.FromResult<IArbiterProvider?>(provider);
         return command;
     }
 

@@ -20,13 +20,13 @@ public static class CredentialStoreAvailability
     /// <param name="origin">An origin no test writes to.</param>
     /// <returns>Null when the store can be reached; otherwise why this host cannot use it.</returns>
     /// <exception cref="InvalidOperationException">The store failed for a reason that does not mean it is unavailable.</exception>
-    public static string? Probe(ICredentialStore store, string origin)
+    public static async Task<string?> ProbeAsync(ICredentialStore store, string origin)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         try
         {
-            _ = store.Read(origin);
+            _ = await store.ReadAsync(origin).ConfigureAwait(false);
             return null;
         }
         catch (KeychainUnavailableException exception)

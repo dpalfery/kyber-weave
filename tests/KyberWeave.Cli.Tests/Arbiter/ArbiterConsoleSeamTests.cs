@@ -256,16 +256,6 @@ public sealed class ArbiterConsoleSeamTests
     /// <summary>Resolves no key: the provider in these tests is <c>none</c>, which needs none.</summary>
     private sealed class NoKeyService : IArbiterKeyService
     {
-        public string? ResolveKey(KyberWeaveConfig config, string endpoint) => null;
-
-        public string? ResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
-
-        public string? TryResolveKey(KyberWeaveConfig config, string endpoint) => null;
-
-        public string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
-
-        public Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config) => _ => null;
-
         public Task<string?> ResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken) =>
             Task.FromResult<string?>(null);
 

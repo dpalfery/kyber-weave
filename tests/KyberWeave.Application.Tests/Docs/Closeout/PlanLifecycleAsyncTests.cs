@@ -148,9 +148,6 @@ public sealed class PlanLifecycleAsyncTests
 
     private sealed class AsyncOnlyPickerFactory(AsyncOnlyPicker picker) : IPlanTaskAgentPickerFactory
     {
-        public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config) =>
-            throw new InvalidOperationException("RunAsync must call ForConfigAsync, never ForConfig.");
-
         public Task<IPlanTaskAgentPicker?> ForConfigAsync(
             KyberWeaveConfig config,
             CancellationToken cancellationToken = default) =>
@@ -183,15 +180,6 @@ public sealed class PlanLifecycleAsyncTests
     {
         public bool CalledAsync { get; private set; }
 
-        public PlanFinalizeOutcome Run(
-            string repoRoot,
-            KyberWeaveConfig config,
-            string planPath,
-            PlanApprovalMode mode,
-            string? approval,
-            DateOnly approvalDate) =>
-            throw new InvalidOperationException("PlanLifecycleService must call RunAsync, never Run.");
-
         public Task<PlanFinalizeOutcome> RunAsync(
             string repoRoot,
             KyberWeaveConfig config,
@@ -209,14 +197,6 @@ public sealed class PlanLifecycleAsyncTests
     private sealed class AsyncOnlyCloseoutService : IPlanCloseoutService
     {
         public bool CalledAsync { get; private set; }
-
-        public PlanCloseoutOutcome Run(
-            string repoRoot,
-            KyberWeaveConfig config,
-            string planPath,
-            DateOnly archiveDate,
-            bool archive) =>
-            throw new InvalidOperationException("PlanLifecycleService must call RunAsync, never Run.");
 
         public Task<PlanCloseoutOutcome> RunAsync(
             string repoRoot,
