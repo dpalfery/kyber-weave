@@ -758,4 +758,486 @@ public sealed class HookRunContextResolver(
     /// <summary>The value when it carries text, or null when it is null, empty or whitespace.</summary>
     private static string? TextOrNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <inheritdoc />
+    public async Task<HookRunContext> ResolveAsync(
+        HookRunContextRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        List<string> notes = [];
+
+        (string root, string? common) = await AnchorAsync(request, notes, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<string> worktrees = await WorktreesAsync(root, common, notes, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<RunRecord> liveRuns = await LiveRunsAsync(
+            request.HomeDirectory, common, worktrees, notes, cancellationToken).ConfigureAwait(false);
+
+        (string worktree, HookRunContextSource source, RunRecord? activeRun) = await CandidateAsync(
+            request, root, common, worktrees, liveRuns, notes, cancellationToken).ConfigureAwait(false);
+        return Hydrate(root, common, activeRun, worktree, worktrees, source, PlanFileOf(request.Prompt), notes);
+    }
+
+    /// <inheritdoc />
+    public async Task<HookRunContext> SelectPlanAsync(
+        HookRunContext context,
+        string? planFile,
+        string? text,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+        List<string> notes = [.. context.Notes];
+        string? plan = planFile;
+        if (plan is null)
+        {
+            plan = PlanFileOf(text);
+        }
+
+        string worktree = await planRoots.ResolvePlanRootAsync(
+            context.RepositoryRoot, plan, text, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (!IsValidated(worktree, context.RepositoryRoot, context.Worktrees))
+        {
+            notes.Add($"worktree '{worktree}' is not a worktree of this repository; reading the plan from '{context.Worktree}'.");
+            worktree = context.Worktree;
+        }
+
+        return Hydrate(
+            context.RepositoryRoot,
+            context.CommonDirectory,
+            context.ActiveRun,
+            worktree,
+            context.Worktrees,
+            context.Source,
+            plan,
+            notes);
+    }
+
+    private async Task<(string Root, string? Common)> AnchorAsync(
+        HookRunContextRequest request,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        string? first = null;
+        foreach ((string? candidate, string name) in new[]
+                 {
+                     (request.WorkspaceRoot, "the payload's workspace root"),
+                     (request.EventCwd, "the payload's cwd"),
+                     (request.ProcessDirectory, "the process directory"),
+                     (environment.CurrentDirectory, "the process directory"),
+                 })
+        {
+            if (candidate is not { } present || string.IsNullOrWhiteSpace(present))
+            {
+                continue;
+            }
+
+            if (!TryFullPath(present, BaseFor(present), out string full, notes, name))
+            {
+                continue;
+            }
+
+            first ??= full;
+            if (!DirectoryExists(full))
+            {
+                notes.Add($"{name} '{full}' is not a directory on disk.");
+                continue;
+            }
+
+            string? common = await CommonDirectoryOfAsync(full, cancellationToken).ConfigureAwait(false);
+            if (common is null)
+            {
+                notes.Add($"{name} '{full}' names no repository; paths are read from it and the rules decide on the absence.");
+            }
+
+            return (full, common);
+        }
+
+        string fallback = first ?? FullPathOrRaw(environment.CurrentDirectory);
+        notes.Add($"no candidate is a directory on disk; reading paths from '{fallback}' and letting the rules decide on the absence.");
+        return (fallback, null);
+    }
+
+    private async Task<IReadOnlyList<string>> WorktreesAsync(
+        string root,
+        string? common,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        List<string> worktrees = [root];
+        if (common is null)
+        {
+            return worktrees;
+        }
+
+        IReadOnlyList<string> listed;
+        try
+        {
+            listed = await git.ListWorktreesAsync(root, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            notes.Add($"the repository's worktrees could not be listed ({exception.Message}); trusting only '{root}'.");
+            return worktrees;
+        }
+
+        foreach (string candidate in listed)
+        {
+            if (!TryFullPath(candidate, root, out string full, notes, "a listed worktree"))
+            {
+                continue;
+            }
+
+            if (worktrees.Any(existing => IsSame(existing, full)))
+            {
+                continue;
+            }
+
+            string? candidateCommon = await CommonDirectoryOfAsync(full, cancellationToken).ConfigureAwait(false);
+            if (candidateCommon is null || !IsSame(candidateCommon, common))
+            {
+                notes.Add($"worktree '{full}' belongs to another repository; it was not trusted.");
+                continue;
+            }
+
+            if (!DirectoryExists(full))
+            {
+                notes.Add($"worktree '{full}' is no longer on disk; it was not trusted.");
+                continue;
+            }
+
+            worktrees.Add(full);
+        }
+
+        return worktrees;
+    }
+
+    private async Task<IReadOnlyList<RunRecord>> LiveRunsAsync(
+        string home,
+        string? common,
+        IReadOnlyList<string> worktrees,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        if (common is null || string.IsNullOrWhiteSpace(home))
+        {
+            return [];
+        }
+
+        IReadOnlyList<RunRecord>? records;
+        try
+        {
+            records = runStates.ReadRecords(home);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            notes.Add($"the run records could not be read ({exception.Message}).");
+            return [];
+        }
+
+        if (records is null)
+        {
+            notes.Add($"the run records under '{home}' could not be read.");
+            return [];
+        }
+
+        List<RunRecord> live = [];
+        foreach (RunRecord record in records)
+        {
+            if (!IsSame(record.Repository, common))
+            {
+                continue;
+            }
+
+            if (!IsValidated(record.Worktree, worktrees[0], worktrees))
+            {
+                notes.Add($"run record for branch '{record.Branch}' names worktree '{record.Worktree}', which is not a worktree of this repository; it was not used.");
+                continue;
+            }
+
+            if (!DirectoryExists(record.Worktree))
+            {
+                notes.Add($"run record for branch '{record.Branch}' names worktree '{record.Worktree}', which is no longer on disk; it was not used.");
+                continue;
+            }
+
+            string? checkedOut = await BranchOfAsync(record.Worktree, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(checkedOut, record.Branch, StringComparison.Ordinal))
+            {
+                notes.Add($"run record for branch '{record.Branch}' names worktree '{record.Worktree}', where '{checkedOut ?? "<detached or unreadable>"}' is checked out; it is not this run and was not used.");
+                continue;
+            }
+
+            live.Add(record);
+        }
+
+        return [.. live.OrderByDescending(record => record.StartedAt ?? DateTimeOffset.MinValue)];
+    }
+
+    private async Task<(string Worktree, HookRunContextSource Source, RunRecord? Run)> CandidateAsync(
+        HookRunContextRequest request,
+        string root,
+        string? common,
+        IReadOnlyList<string> worktrees,
+        IReadOnlyList<RunRecord> liveRuns,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        string? plan = PlanFileOf(request.Prompt);
+        string? canonical = CanonicalOf(common, worktrees);
+
+        if (TextOrNull(request.AgentWorktree) is { } agentCandidate)
+        {
+            if (await TryCandidateAsync(
+                    agentCandidate, "the agent's working directory", root, common, worktrees, notes, cancellationToken)
+                .ConfigureAwait(false) is { } agentWorktree)
+            {
+                return (agentWorktree, HookRunContextSource.EventWorktree,
+                    await EventRunAsync(agentWorktree, liveRuns, notes, cancellationToken).ConfigureAwait(false));
+            }
+        }
+
+        if (plan is not null || NamesAWorktree(request.Prompt))
+        {
+            string chosen = await planRoots.ResolvePlanRootAsync(
+                root, plan, request.Prompt, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (!IsSame(chosen, root) && IsValidated(chosen, root, worktrees))
+            {
+                notes.Add($"the event names the plan's worktree '{chosen}'.");
+                return (chosen, HookRunContextSource.EventWorktree,
+                    await EventRunAsync(chosen, liveRuns, notes, cancellationToken).ConfigureAwait(false));
+            }
+        }
+
+        string? cwd = null;
+        if (TextOrNull(request.EventCwd) is { } eventCwd
+            && await TryCandidateAsync(
+                    eventCwd, "the payload's cwd", root, common, worktrees, notes, cancellationToken)
+                .ConfigureAwait(false) is { } cwdWorktree)
+        {
+            cwd = cwdWorktree;
+        }
+
+        bool cwdIsCanonical = cwd is not null && canonical is not null && IsSame(cwd, canonical);
+        if (cwd is not null && !cwdIsCanonical)
+        {
+            if (!string.IsNullOrWhiteSpace(request.LeadingCdTarget))
+            {
+                notes.Add($"the command's leading cd to '{request.LeadingCdTarget}' was ignored: the payload's cwd '{cwd}' already places the call.");
+            }
+
+            if (liveRuns.Count == 0)
+            {
+                return (cwd, HookRunContextSource.PayloadCwd, null);
+            }
+
+            if (await RunOfAsync(cwd, liveRuns, notes, cancellationToken).ConfigureAwait(false) is { } cwdRun)
+            {
+                notes.Add($"the payload's cwd '{cwd}' belongs to the live run for branch '{cwdRun.Branch}'.");
+                return (cwd, HookRunContextSource.PayloadCwd, cwdRun);
+            }
+
+            return Ambiguous(canonical ?? root, liveRuns, $"the payload's cwd '{cwd}' belongs to no single live run", notes);
+        }
+
+        if (await LeadingCdCandidateAsync(
+                request, root, common, worktrees, liveRuns, canonical, notes, cancellationToken)
+            .ConfigureAwait(false) is { } fromLeadingCd)
+        {
+            return fromLeadingCd;
+        }
+
+        if (liveRuns.Count == 1)
+        {
+            RunRecord single = liveRuns[0];
+            notes.Add($"the live run for branch '{single.Branch}' works in '{single.Worktree}'.");
+            return (single.Worktree, HookRunContextSource.ActiveRun, single);
+        }
+
+        if (liveRuns.Count > 1)
+        {
+            return Ambiguous(canonical ?? root, liveRuns, "no signal chooses one of them", notes);
+        }
+
+        if (cwd is not null)
+        {
+            return (cwd, HookRunContextSource.PayloadCwd, null);
+        }
+
+        notes.Add($"the payload names no worktree of this repository; reading paths from '{root}'.");
+        return (root, worktrees.Count > 0 && IsSame(root, worktrees[0])
+            ? HookRunContextSource.PayloadCwd
+            : HookRunContextSource.None, null);
+    }
+
+    private async Task<(string Worktree, HookRunContextSource Source, RunRecord? Run)?> LeadingCdCandidateAsync(
+        HookRunContextRequest request,
+        string root,
+        string? common,
+        IReadOnlyList<string> worktrees,
+        IReadOnlyList<RunRecord> liveRuns,
+        string? canonical,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        if (TextOrNull(request.LeadingCdTarget) is not { } leadingCdTarget
+            || await TryCandidateAsync(
+                    leadingCdTarget, "the command's leading cd", root, common, worktrees, notes, cancellationToken)
+                .ConfigureAwait(false) is not { } cdWorktree
+            || (canonical is not null && IsSame(cdWorktree, canonical)))
+        {
+            return null;
+        }
+
+        if (await RunOfAsync(cdWorktree, liveRuns, notes, cancellationToken).ConfigureAwait(false) is { } cdRun)
+        {
+            notes.Add($"the command's leading cd enters '{cdWorktree}', where the live run for branch '{cdRun.Branch}' works.");
+            return (cdWorktree, HookRunContextSource.EventWorktree, cdRun);
+        }
+
+        notes.Add($"the command's leading cd enters '{cdWorktree}', which belongs to no single live run; it was not used.");
+        return null;
+    }
+
+    private async Task<RunRecord?> EventRunAsync(
+        string worktree,
+        IReadOnlyList<RunRecord> liveRuns,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        if (liveRuns.Count == 0)
+        {
+            return null;
+        }
+
+        if (await RunOfAsync(worktree, liveRuns, notes, cancellationToken).ConfigureAwait(false) is { } mapped)
+        {
+            return mapped;
+        }
+
+        if (liveRuns.Count == 1)
+        {
+            return liveRuns[0];
+        }
+
+        notes.Add($"worktree '{worktree}' belongs to no single one of the {liveRuns.Count} live runs; no run is active.");
+        return null;
+    }
+
+    private async Task<RunRecord?> RunOfAsync(
+        string worktree,
+        IReadOnlyList<RunRecord> liveRuns,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        RunRecord? containing = liveRuns
+            .Where(run => IsSame(run.Worktree, worktree) || IsWithin(run.Worktree, worktree))
+            .OrderByDescending(run => run.Worktree.Length)
+            .FirstOrDefault();
+        if (containing is not null)
+        {
+            return containing;
+        }
+
+        string? branch = await BranchOfAsync(worktree, cancellationToken).ConfigureAwait(false);
+        if (branch is null)
+        {
+            notes.Add($"worktree '{worktree}' has no branch git can read, so no run's branch can be its ancestor.");
+            return null;
+        }
+
+        List<RunRecord> ancestors = [];
+        foreach (RunRecord run in liveRuns)
+        {
+            bool? ancestor = await AncestorOfAsync(worktree, run.Branch, branch, cancellationToken).ConfigureAwait(false);
+            if (ancestor is null)
+            {
+                notes.Add($"git could not tell whether '{run.Branch}' is an ancestor of '{branch}' in '{worktree}'.");
+                return null;
+            }
+
+            if (ancestor.Value)
+            {
+                ancestors.Add(run);
+            }
+        }
+
+        return ancestors.Count == 1 ? ancestors[0] : null;
+    }
+
+    private async Task<string?> TryCandidateAsync(
+        string candidate,
+        string name,
+        string root,
+        string? common,
+        IReadOnlyList<string> worktrees,
+        List<string> notes,
+        CancellationToken cancellationToken)
+    {
+        if (!TryFullPath(candidate, BaseFor(candidate), out string full, notes, name))
+        {
+            return null;
+        }
+
+        string? containing = Containing(worktrees.Skip(1), full) ?? Containing(worktrees.Take(1), full);
+        if (containing is not null)
+        {
+            string? candidateCommon = await CommonDirectoryOfAsync(full, cancellationToken).ConfigureAwait(false);
+            if (common is not null && candidateCommon is null)
+            {
+                notes.Add($"{name} '{full}': git could not name its repository, so it was refused rather than trusted.");
+                return null;
+            }
+
+            if (common is null || (candidateCommon is not null && IsSame(candidateCommon, common)))
+            {
+                return containing;
+            }
+
+            notes.Add($"{name} '{full}' belongs to another repository; it was refused.");
+            return null;
+        }
+
+        notes.Add($"{name} '{full}' is outside this repository and its worktrees; it was refused.");
+        return null;
+    }
+
+    private async Task<string?> CommonDirectoryOfAsync(string directory, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await git.GetCommonDirectoryAsync(directory, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> BranchOfAsync(string worktree, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await branches.ReadAsync(worktree, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool?> AncestorOfAsync(
+        string worktree,
+        string ancestor,
+        string descendant,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await branches.IsAncestorAsync(worktree, ancestor, descendant, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return null;
+        }
+    }
 }

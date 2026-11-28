@@ -214,6 +214,299 @@ internal sealed class HookGitFacts(
     }
 
     /// <summary>
+    /// Enriches the fact bag from git without blocking a thread; the synchronous <see cref="Enrich"/> remains for the
+    /// evaluator that has not moved onto the async path yet.
+    /// </summary>
+    public async ValueTask<ArbiterFactSet> EnrichAsync(
+        ArbiterFactSet facts,
+        TriggerClassification classification,
+        ArbiterEvent ev,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(classification);
+        ArgumentNullException.ThrowIfNull(ev);
+
+        bool isPreWithReturn = ev.IsDispatch
+            && string.Equals(ev.Phase, "pre", StringComparison.OrdinalIgnoreCase)
+            && IsDispatchTriggerWithReturn(classification.Trigger);
+        bool needsSinceDispatch = facts.Contains("git.changed-paths.since-dispatch");
+        bool needsReviewChangedPaths = facts.Contains("review.changed-paths");
+        bool needsChangeSet = NeedsChangeSet(facts);
+        string cwd = !string.IsNullOrWhiteSpace(ev.Cwd) ? ev.Cwd : workingDirectory;
+        facts = WithSurroundings(facts, cwd);
+        facts = await WithRunStartedAsync(facts, ev, cwd, cancellationToken).ConfigureAwait(false);
+
+        if (!isPreWithReturn && !needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
+        {
+            return facts;
+        }
+
+        if (isPreWithReturn)
+        {
+            GitSnapshot? preSnapshot = await git.CaptureSnapshotAsync(cwd, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (preSnapshot is not null)
+            {
+                RecordPreSnapshot(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev, preSnapshot);
+            }
+
+            await RecordCanonicalSnapshotAsync(facts, classification, ev, cwd, cancellationToken).ConfigureAwait(false);
+        }
+
+        facts = await WithStrayPathsAsync(facts, classification, ev, cwd, cancellationToken).ConfigureAwait(false);
+
+        if (!needsSinceDispatch && !needsReviewChangedPaths && !needsChangeSet)
+        {
+            return facts;
+        }
+
+        string? head = await git.GetHeadAsync(cwd, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (head is null)
+        {
+            return facts;
+        }
+
+        if (needsSinceDispatch)
+        {
+            GitSnapshot? baseline = await FindPreSnapshotAsync(
+                ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev, cancellationToken)
+                .ConfigureAwait(false);
+            if (baseline is not null)
+            {
+                IReadOnlyList<string> sinceDispatch = [.. await git.GetChangedPathsSinceSnapshotAsync(
+                    cwd, baseline, cancellationToken: cancellationToken).ConfigureAwait(false)];
+                facts = facts.With("git.changed-paths.since-dispatch", sinceDispatch, ArbiterFactLabel.Derived);
+            }
+        }
+
+        string? baseRef = needsReviewChangedPaths || needsChangeSet
+            ? await ResolveBaseAsync(cwd, cancellationToken).ConfigureAwait(false)
+            : null;
+
+        if (needsReviewChangedPaths && baseRef is not null)
+        {
+            IReadOnlyList<string> changed = [.. await git.GetChangedPathsSinceBaseAsync(
+                cwd, baseRef, cancellationToken: cancellationToken).ConfigureAwait(false)];
+            facts = facts.With("review.changed-paths", changed, ArbiterFactLabel.Derived);
+            facts = facts.With("review.base-ref", baseRef, ArbiterFactLabel.Derived);
+            if (facts.Contains("review.diff-summary"))
+            {
+                string? summary = await git.GetDiffSummaryAsync(
+                    cwd, baseRef, changed, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (summary is not null)
+                {
+                    facts = facts.With("review.diff-summary", summary, ArbiterFactLabel.Derived);
+                }
+            }
+        }
+
+        if (needsChangeSet && baseRef is not null)
+        {
+            facts = WithChangeFacts(facts, await git.GetChangeSetAsync(
+                cwd, baseRef, cancellationToken: cancellationToken).ConfigureAwait(false));
+        }
+
+        return facts;
+    }
+
+    private async ValueTask<ArbiterFactSet> WithRunStartedAsync(
+        ArbiterFactSet facts,
+        ArbiterEvent ev,
+        string cwd,
+        CancellationToken cancellationToken)
+    {
+        if (!facts.Contains(RunStartedFact)
+            || !string.Equals(ev.Phase, "pre", StringComparison.OrdinalIgnoreCase)
+            || !facts.TryGet("delegation.target-profile", out ArbiterFact? profile)
+            || profile.Value is not string name
+            || !RunWriterProfiles.IsWriter(name))
+        {
+            return facts;
+        }
+
+        bool? started = await RunStartedAsync(
+            cwd, homeDirectory ?? process.HomeDirectory, cancellationToken).ConfigureAwait(false);
+        return started is null ? facts : facts.With(RunStartedFact, started.Value, ArbiterFactLabel.Derived);
+    }
+
+    private async ValueTask<bool?> RunStartedAsync(
+        string workingDirectory,
+        string home,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory) || string.IsNullOrWhiteSpace(home))
+        {
+            return null;
+        }
+
+        string? repository = await git.GetCommonDirectoryAsync(
+            workingDirectory, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return repository is null ? null : runStates.HasLiveRun(home, repository);
+    }
+
+    private async ValueTask RecordCanonicalSnapshotAsync(
+        ArbiterFactSet facts,
+        TriggerClassification classification,
+        ArbiterEvent ev,
+        string cwd,
+        CancellationToken cancellationToken)
+    {
+        if (!IsRunBranchWriter(facts)
+            || await CanonicalCheckoutWithSeparateRunAsync(cwd, cancellationToken).ConfigureAwait(false) is not { } canonical)
+        {
+            return;
+        }
+
+        GitSnapshot? snapshot = await git.CaptureSnapshotAsync(canonical, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        if (snapshot is not null)
+        {
+            RecordPreSnapshot(ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev, snapshot);
+        }
+    }
+
+    private async ValueTask<ArbiterFactSet> WithStrayPathsAsync(
+        ArbiterFactSet facts,
+        TriggerClassification classification,
+        ArbiterEvent ev,
+        string cwd,
+        CancellationToken cancellationToken)
+    {
+        if (!facts.Contains(StrayPathsFact)
+            || !string.Equals(ev.Phase, "post", StringComparison.OrdinalIgnoreCase)
+            || !IsRunBranchWriter(facts))
+        {
+            return facts;
+        }
+
+        string? repository = await git.GetCommonDirectoryAsync(
+            cwd, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (repository is null || checkouts.CanonicalCheckoutOf(repository) is not { } canonical)
+        {
+            return facts;
+        }
+
+        GitSnapshot? baseline = await FindPreSnapshotAsync(
+            ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev, cancellationToken)
+            .ConfigureAwait(false);
+        if (baseline is null)
+        {
+            return facts;
+        }
+
+        IReadOnlySet<string> changed = await git.GetChangedPathsSinceSnapshotAsync(
+            canonical, baseline, cancellationToken: cancellationToken).ConfigureAwait(false);
+        bool headMoved = !string.Equals(
+            await git.GetHeadAsync(canonical, cancellationToken: cancellationToken).ConfigureAwait(false),
+            baseline.Head,
+            StringComparison.Ordinal);
+        IReadOnlyDictionary<string, string> dirty = await git.GetDirtyStatusesAsync(
+            canonical, cancellationToken: cancellationToken).ConfigureAwait(false);
+        List<string> stray = [.. changed
+            .Where(path => (headMoved || dirty.ContainsKey(path)) && !IsScratchpad(path))
+            .Order(StringComparer.Ordinal)];
+        return facts.With(StrayPathsFact, stray, ArbiterFactLabel.Derived);
+    }
+
+    private async ValueTask<string?> CanonicalCheckoutWithSeparateRunAsync(
+        string cwd,
+        CancellationToken cancellationToken)
+    {
+        string home = homeDirectory ?? process.HomeDirectory;
+        string? repository = await git.GetCommonDirectoryAsync(
+            cwd, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (repository is null || checkouts.CanonicalCheckoutOf(repository) is not { } canonical)
+        {
+            return null;
+        }
+
+        return checkouts.LiveSeparateRuns(home, canonical) is { Count: > 0 } ? canonical : null;
+    }
+
+    private async ValueTask<GitSnapshot?> FindPreSnapshotAsync(
+        string directory,
+        string fileName,
+        string? target,
+        ArbiterEvent ev,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(ev.ToolCallId) && string.IsNullOrWhiteSpace(ev.Prompt))
+        {
+            return null;
+        }
+
+        if (!snapshots.Exists(directory, fileName))
+        {
+            return null;
+        }
+
+        StoredSnapshot? entry = await PeekUntilSettledAsync(
+            clock,
+            () => snapshots.ReadText(directory, fileName),
+            text =>
+            {
+                List<StoredSnapshot> entries = HookSnapshotDocument.Parse(text);
+                int index = HookSnapshotDocument.FindMatchingIndex(entries, target, ev.ToolCallId, ev.Prompt);
+                return index >= 0 ? entries[index] : null;
+            },
+            PeekRetryBudget,
+            cancellationToken).ConfigureAwait(false);
+        return entry is null
+            ? null
+            : new GitSnapshot(
+                entry.Head,
+                entry.BlobIds ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
+    }
+
+    internal static async Task<T?> PeekUntilSettledAsync<T>(
+        TimeProvider clock,
+        Func<string> read,
+        Func<string, T?> find,
+        TimeSpan budget,
+        CancellationToken cancellationToken = default)
+        where T : class
+    {
+        long started = clock.GetTimestamp();
+        string seen = read();
+        while (true)
+        {
+            T? match = find(seen);
+            if (match is not null || clock.GetElapsedTime(started) >= budget)
+            {
+                return match;
+            }
+
+            string next = read();
+            if (string.Equals(next, seen, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            seen = next;
+            await Task.Delay(PeekPause, clock, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask<string> ResolveBaseAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
+        string home = homeDirectory ?? process.HomeDirectory;
+        string? branch = await git.GetCurrentBranchAsync(
+            workingDirectory, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (branch is not null
+            && runStates.TryReadBaseRef(home, branch, out string? recorded)
+            && !string.IsNullOrWhiteSpace(recorded)
+            && await git.RefExistsAsync(workingDirectory, recorded, cancellationToken: cancellationToken)
+                .ConfigureAwait(false))
+        {
+            return recorded;
+        }
+
+        return ReviewBase;
+    }
+
+    /// <summary>
     /// Before a dispatch to a specialist that writes files, while a live run of this repository works in a
     /// worktree of its own, records a snapshot of the repository's canonical checkout, so the return can say
     /// which paths the dispatch left there (<c>KW-ARB-CHECKOUT-001</c>).

@@ -100,4 +100,131 @@ public interface IContextualHookDecisionEngine : IHookDecisionEngine
         HookContext context,
         string? toolCallId = null,
         string? sessionId = null);
+
+    /// <summary>Decides a pre-dispatch event with the harness and repository context, without blocking a thread.</summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="caller">The dispatching agent.</param>
+    /// <param name="target">The dispatched agent, or null when the event names none.</param>
+    /// <param name="prompt">The dispatch prompt.</param>
+    /// <param name="config">The loaded host configuration.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="toolCallId">The harness tool-call id, when it has one.</param>
+    /// <param name="sessionId">The harness session id, when it has one.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
+    /// <returns>What the rules decided for the dispatch.</returns>
+    Task<HookOutcome> DecidePreDispatchAsync(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId = null,
+        string? sessionId = null,
+        CancellationToken cancellationToken = default) =>
+        DecidePreDispatchAsync(
+            harness,
+            caller,
+            target,
+            prompt,
+            config,
+            context,
+            toolCallId,
+            sessionId,
+            dispatchModel: null,
+            deliveredPrompt: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Decides a pre-dispatch event that also carries the model the dispatch input names for its
+    /// sub-agent, without blocking a thread. The default forwards to the overload above and drops
+    /// the model, so an engine that predates the model field keeps compiling and decides as it did.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="caller">The dispatching agent.</param>
+    /// <param name="target">The dispatched agent, or null when the event names none.</param>
+    /// <param name="prompt">The dispatch prompt.</param>
+    /// <param name="config">The loaded host configuration.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="toolCallId">The harness tool-call id, when it has one.</param>
+    /// <param name="sessionId">The harness session id, when it has one.</param>
+    /// <param name="dispatchModel">The <c>model</c> the caller put on the dispatch input, or null when it named none.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
+    /// <returns>What the rules decided for the dispatch.</returns>
+    Task<HookOutcome> DecidePreDispatchAsync(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId,
+        string? sessionId,
+        string? dispatchModel = null,
+        CancellationToken cancellationToken = default) =>
+        DecidePreDispatchAsync(
+            harness,
+            caller,
+            target,
+            prompt,
+            config,
+            context,
+            toolCallId,
+            sessionId,
+            dispatchModel,
+            deliveredPrompt: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Decides a pre-dispatch event whose hook delivers a different prompt to the worker than the
+    /// caller wrote, without blocking a thread.
+    /// </summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="caller">The dispatching agent.</param>
+    /// <param name="target">The dispatched agent, or null when the event names none.</param>
+    /// <param name="prompt">The dispatch prompt as the caller wrote it.</param>
+    /// <param name="config">The loaded host configuration.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="toolCallId">The harness tool-call id, when it has one.</param>
+    /// <param name="sessionId">The harness session id, when it has one.</param>
+    /// <param name="dispatchModel">The <c>model</c> the caller put on the dispatch input, or null when it named none.</param>
+    /// <param name="deliveredPrompt">The prompt the hook inserts for the worker, or null when it inserts none.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
+    /// <returns>What the rules decided for the dispatch.</returns>
+    Task<HookOutcome> DecidePreDispatchAsync(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId,
+        string? sessionId,
+        string? dispatchModel,
+        string? deliveredPrompt,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Decides a post-dispatch (return) event with the harness and repository context, without blocking a thread.</summary>
+    /// <param name="harness">The harness token.</param>
+    /// <param name="caller">The dispatching agent.</param>
+    /// <param name="target">The dispatched agent, or null when the event names none.</param>
+    /// <param name="prompt">The original dispatch prompt, best effort.</param>
+    /// <param name="toolOutput">The harness's serialized tool result.</param>
+    /// <param name="config">The loaded host configuration.</param>
+    /// <param name="context">What the event is evaluated against.</param>
+    /// <param name="toolCallId">The harness tool-call id, when it has one.</param>
+    /// <param name="sessionId">The harness session id, when it has one.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
+    /// <returns>What the rules decided for the return.</returns>
+    Task<HookOutcome> DecidePostDispatchAsync(
+        string harness,
+        string caller,
+        string? target,
+        string prompt,
+        string toolOutput,
+        KyberWeaveConfig config,
+        HookContext context,
+        string? toolCallId = null,
+        string? sessionId = null,
+        CancellationToken cancellationToken = default);
 }

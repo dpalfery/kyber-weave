@@ -192,7 +192,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         ArbiterRunStore store = _host.State.RunStore(ArbiterDirectory, null, _host.Clock);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatchAsync(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -212,7 +212,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         ArbiterRunStore store = _host.State.RunStore(ArbiterDirectory, null, _host.Clock);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatchAsync(
             "claude",
             "code-reviewer",
             "review-lens",

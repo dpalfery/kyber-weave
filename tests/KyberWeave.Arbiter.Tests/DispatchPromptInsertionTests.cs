@@ -133,6 +133,23 @@ public sealed class DispatchPromptInsertionTests
 
         public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
             new(HookOutcomeKind.Allow);
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     /// <summary>An engine that asks the adapter to write a model, as the model-targeting path does.</summary>
@@ -180,6 +197,53 @@ public sealed class DispatchPromptInsertionTests
             string? toolCallId = null,
             string? sessionId = null) =>
             new(HookOutcomeKind.Allow);
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
     }
 
     private static KyberWeaveConfig EnabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = true } };
@@ -1116,6 +1180,19 @@ public sealed class DispatchPromptInsertionTests
 
         private static HookRunContext Context(string root) => new(
             "/repo", "/repo/.git", null, root, [root], null, null, null, false, HookRunContextSource.EventWorktree, []);
+        /// <inheritdoc/>
+        public Task<HookRunContext> ResolveAsync(
+            HookRunContextRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Resolve(request));
+
+        /// <inheritdoc/>
+        public Task<HookRunContext> SelectPlanAsync(
+            HookRunContext context,
+            string? planFile,
+            string? text,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(SelectPlan(context, planFile, text));
     }
 
     /// <summary>A run context resolver that records what the hook asked and keeps the hook's own root.</summary>
@@ -1132,5 +1209,18 @@ public sealed class DispatchPromptInsertionTests
         }
 
         public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => context;
+        /// <inheritdoc/>
+        public Task<HookRunContext> ResolveAsync(
+            HookRunContextRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Resolve(request));
+
+        /// <inheritdoc/>
+        public Task<HookRunContext> SelectPlanAsync(
+            HookRunContext context,
+            string? planFile,
+            string? text,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(SelectPlan(context, planFile, text));
     }
 }

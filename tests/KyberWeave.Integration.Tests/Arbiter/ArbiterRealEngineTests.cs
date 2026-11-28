@@ -137,6 +137,19 @@ public sealed class ArbiterRealEngineTests : IDisposable
         public HookRunContext Resolve(HookRunContextRequest request) => throw new NotSupportedException("container exploded");
 
         public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => throw new NotSupportedException("container exploded");
+        /// <inheritdoc/>
+        public Task<HookRunContext> ResolveAsync(
+            HookRunContextRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("container exploded");
+
+        /// <inheritdoc/>
+        public Task<HookRunContext> SelectPlanAsync(
+            HookRunContext context,
+            string? planFile,
+            string? text,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("container exploded");
     }
 
     private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")

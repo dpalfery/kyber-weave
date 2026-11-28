@@ -89,6 +89,22 @@ internal sealed class UnavailableDecisionEngine : IHookDecisionEngine, IFactoryT
     public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeave.Core.Configuration.KyberWeaveConfig config) =>
         throw new InvalidOperationException("No decision engine is available.");
 
+    public Task<HookOutcome> DecidePreDispatchAsync(
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeave.Core.Configuration.KyberWeaveConfig config,
+        CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("No decision engine is available.");
+
+    public Task<HookOutcome> DecidePostDispatchAsync(
+        string caller,
+        string? target,
+        string toolOutput,
+        KyberWeave.Core.Configuration.KyberWeaveConfig config,
+        CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("No decision engine is available.");
+
     public IEnumerable<string>? ReadLines(string path, long maxBytes) =>
         throw new InvalidOperationException("No transcript reader is available.");
 }
