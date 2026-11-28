@@ -106,8 +106,8 @@ public static class DashEndpointMappings
         kyber.MapPut("/settings", UpdateSettingsAsync);
 
         kyber.MapGet("/jobs", JobsStatus);
-        kyber.MapPost("/refresh", RefreshAsync);
-        kyber.MapPost("/import-history", ImportHistoryAsync);
+        kyber.MapPost("/refresh", Refresh);
+        kyber.MapPost("/import-history", ImportHistory);
         kyber.MapPost("/clean", CleanAsync);
 
         kyber.MapGet("/analytics/status", AnalyticsStatus);
@@ -879,7 +879,7 @@ public static class DashEndpointMappings
         });
     }
 
-    private static async Task<IResult> RefreshAsync(HttpRequest request, IJobSchedulerService jobs, CancellationToken cancellationToken)
+    private static IResult Refresh(HttpRequest request, IJobSchedulerService jobs, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(jobs);
@@ -887,11 +887,12 @@ public static class DashEndpointMappings
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, MutationForbiddenMessage);
 
+        cancellationToken.ThrowIfCancellationRequested();
         JobOutcome outcome = jobs.TriggerRefresh();
         return JobOutcomeResult(outcome);
     }
 
-    private static async Task<IResult> ImportHistoryAsync(HttpRequest request, IJobSchedulerService jobs, CancellationToken cancellationToken)
+    private static IResult ImportHistory(HttpRequest request, IJobSchedulerService jobs, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(jobs);
@@ -899,6 +900,7 @@ public static class DashEndpointMappings
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, MutationForbiddenMessage);
 
+        cancellationToken.ThrowIfCancellationRequested();
         JobOutcome outcome = jobs.TriggerImportHistory();
         return JobOutcomeResult(outcome);
     }
