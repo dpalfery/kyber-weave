@@ -103,10 +103,6 @@ public sealed class ReviewIndexTimeoutTests
             Executor = indexExecutor;
             return Task.FromResult(new ReviewCommandResult(0));
         }
-
-        public ReviewCommandResult Run(
-            ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output, CancellationToken cancellationToken) =>
-            new(0);
     }
 
     private sealed class RecordingSeats : IReviewSeatsService
@@ -115,7 +111,7 @@ public sealed class ReviewIndexTimeoutTests
 
         public Task<ReviewCommandResult> PrepareAsync(
             ReviewSeatsRequest request,
-            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
+            Func<string, KyberWeaveConfig, CancellationToken, Task<IReviewDecisionModel>> decisionModel,
             IProcessRunner indexExecutor,
             TextWriter output,
             CancellationToken cancellationToken = default)
@@ -123,14 +119,6 @@ public sealed class ReviewIndexTimeoutTests
             Executor = indexExecutor;
             return Task.FromResult(new ReviewCommandResult(0));
         }
-
-        public ReviewCommandResult Prepare(
-            ReviewSeatsRequest request,
-            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
-            IProcessExecutor indexExecutor,
-            TextWriter output,
-            CancellationToken cancellationToken) =>
-            new(0);
     }
 
     private sealed class NoDecisionModels : IReviewDecisionModelFactory
@@ -142,10 +130,6 @@ public sealed class ReviewIndexTimeoutTests
             TimeProvider clock,
             string? unavailableReason = null,
             string? cachePath = null) => throw new NotSupportedException();
-
-        public IReviewDecisionModel CreateForRepository(
-            string repositoryRoot, KyberWeaveConfig config, bool disabled, string? cachePath) =>
-            throw new NotSupportedException();
 
         public Task<IReviewDecisionModel> CreateForRepositoryAsync(
             string repositoryRoot,

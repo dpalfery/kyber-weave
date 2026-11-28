@@ -75,19 +75,6 @@ public sealed class ReviewPathSeamTests
     }
 
     [Fact]
-    public void TheCatalogueCommandLoadsTheConfigurationForTheResolvedRoot()
-    {
-        RecordingConfigs configs = new();
-        ReviewCatalogueService service = new(
-            configs, new UnusedLister(), _files, Paths, _environment, new KyberStandardsTemplateReader(_resources));
-
-        ReviewCommandResult result = service.Run(new ReviewCatalogueRequest("repo", null, []), TextWriter.Null);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal("/work/repo", configs.Root);
-    }
-
-    [Fact]
     public async Task TheCatalogueCommandLoadsTheConfigurationForTheResolvedRootAsync()
     {
         RecordingConfigs configs = new();

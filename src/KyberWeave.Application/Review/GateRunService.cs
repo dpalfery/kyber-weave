@@ -37,7 +37,7 @@ public sealed class GateRunService(
     private static readonly ArbiterRule GateSelectRule =
         ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == ArbiterRuleIds.GateSelect);
 
-    /// <summary>Runs every declared gate and returns the normalized report.</summary>
+    /// <inheritdoc />
     /// <remarks>
     /// Gates start in declaration order and each waits for the one before it, except a gate declared
     /// <c>concurrent</c>: it starts at its place and runs alongside the gates declared after it. The report
@@ -65,69 +65,7 @@ public sealed class GateRunService(
     /// timeout and the time left; every gate still running at the deadline, and every gate not yet started, is reported as
     /// <see cref="GateOutcome.DeadlinePassed"/>. Only <c>review gates --deadline</c> passes one.
     /// </param>
-    public GateReport Run(
-        ReviewConfig config,
-        string workingDirectory,
-        bool stopOnBlockingFailure = false,
-        IReadOnlyCollection<string>? changedPaths = null,
-        string? baseRef = null,
-        TimeSpan? deadline = null)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-
-        if (!fileSystem.DirectoryExists(workingDirectory))
-            throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
-
-        IReadOnlyList<ReviewGate> gates = config.Gates;
-        GateResult?[] results = new GateResult?[gates.Count];
-        List<(int Index, Task<GateResult?> Run)> alongside = [];
-        GateRunClock started = GateRunClock.Now(clock);
-        DateTime startedUtc = started.Started.UtcDateTime;
-        bool stopped = false;
-
-        using CancellationTokenSource stop = new();
-        using SemaphoreSlim slots = new(Math.Max(1, config.Parallelism));
-        try
-        {
-            for (int index = 0; index < gates.Count && !stopped; index++)
-            {
-                ReviewGate gate = gates[index];
-                GateResult? settled = SettleBeforeStart(gate, workingDirectory, changedPaths, deadline, started);
-
-                if (settled is null && gate.Concurrent)
-                {
-                    alongside.Add((index, Task.Run(() => RunInSlot(gate, workingDirectory, deadline, started, slots, stop.Token))));
-                    continue;
-                }
-
-                results[index] = settled ?? RunInSlot(gate, workingDirectory, deadline, started, slots, CancellationToken.None);
-
-                stopped = stopOnBlockingFailure
-                          && (StopsTheRun(gate, results[index], deadline)
-                              || alongside.Exists(run => run.Run.IsCompletedSuccessfully
-                                                         && StopsTheRun(gates[run.Index], run.Run.Result, deadline)));
-            }
-        }
-        finally
-        {
-            // A stopped run skips what has not finished, and no run returns with a gate's process still alive.
-            if (stopped)
-                stop.Cancel();
-
-            // Every concurrent gate is waited for before any result is read: reading rethrows a gate's
-            // unexpected fault, and that must not leave another gate's process running behind the run.
-            foreach ((_, Task<GateResult?> run) in alongside)
-                ((IAsyncResult)run).AsyncWaitHandle.WaitOne();
-
-            foreach ((int index, Task<GateResult?> run) in alongside)
-                results[index] = run.GetAwaiter().GetResult();
-        }
-
-        return BuildReport(workingDirectory, startedUtc, results, baseRef);
-    }
-
-    /// <inheritdoc />
+    /// <param name="cancellationToken">Cancels the run and stops active gates.</param>
     public async Task<GateReport> RunAsync(
         ReviewConfig config,
         string workingDirectory,
@@ -286,70 +224,17 @@ public sealed class GateRunService(
     private static GateResult NotApplicable(ReviewGate gate, string reason) =>
         new(gate.Id, gate.Blocking, 0, reason, 0, reason);
 
-    /// <summary>
-    /// Runs one agent's planned task gates in the order they were declared. A fix command, when
-    /// requested, runs before its verify command; a fix that does not succeed is reported beside the
-    /// run and never decides the gate on its own, because the verify command is what the change must pass.
-    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>
+    /// A fix command, when requested, runs before its verify command; a fix that does not succeed is reported
+    /// beside the run and never decides the gate on its own, because the verify command is what the change must pass.
+    /// </remarks>
     /// <param name="gates">The gates that will start, already expanded by <c>TaskGateSelectionService.Plan</c>.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
     /// <param name="observer">Sees each verify command's output and result, and may skip a later gate, for a caller that classifies them.</param>
-    public TaskGateRun RunTaskGates(
-        IReadOnlyList<PlannedTaskGate> gates,
-        string workingDirectory,
-        bool fix,
-        bool stopOnBlockingFailure = false,
-        TaskGateObserver? observer = null)
-    {
-        ArgumentNullException.ThrowIfNull(gates);
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-
-        if (!fileSystem.DirectoryExists(workingDirectory))
-            throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
-
-        List<GateResult> results = new(gates.Count);
-        List<GateResult> fixFailures = [];
-        DateTime startedUtc = clock.GetUtcNow().UtcDateTime;
-
-        foreach (PlannedTaskGate gate in gates)
-        {
-            string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
-
-            if (fix && gate.Fix.Count > 0)
-            {
-                GateResult applied = RunArgv(gate.Id, false, gate.Fix, gate.TimeoutSeconds, gateDirectory, false);
-                if (!applied.Passed)
-                    fixFailures.Add(applied);
-            }
-
-            if (observer?.SkipReason?.Invoke(gate) is { } skipReason)
-            {
-                results.Add(new GateResult(gate.Id, gate.Blocking, 0, skipReason, 0, skipReason));
-                continue;
-            }
-
-            GateResult result = RunArgv(
-                gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput,
-                captureOutput: observer?.Output);
-            results.Add(result);
-            observer?.After?.Invoke(gate, result);
-
-            if (stopOnBlockingFailure && gate.Blocking && !result.Passed)
-                break;
-        }
-
-        GateReport report = new(
-            GateReport.CurrentSchema,
-            results,
-            coverage.ReadNewest(workingDirectory, startedUtc),
-            coverage.ReadAll(workingDirectory, startedUtc));
-
-        return new TaskGateRun(report, fixFailures);
-    }
-
-    /// <inheritdoc />
+    /// <param name="cancellationToken">Cancels the run and stops the active gate.</param>
     public async Task<TaskGateRun> RunTaskGatesAsync(
         IReadOnlyList<PlannedTaskGate> gates,
         string workingDirectory,
@@ -532,50 +417,6 @@ public sealed class GateRunService(
     /// The time left on the deadline is taken once the slot is held, so a gate that waited for a slot is cut at the
     /// same deadline as one that did not, and a gate the deadline passed while it waited never starts.
     /// </remarks>
-    private GateResult? RunInSlot(
-        ReviewGate gate,
-        string workingDirectory,
-        TimeSpan? deadline,
-        GateRunClock runStarted,
-        SemaphoreSlim slots,
-        CancellationToken stop)
-    {
-        try
-        {
-            slots.Wait(stop);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-
-        try
-        {
-            TimeSpan? timeLeft = deadline - runStarted.Elapsed(clock);
-            if (deadline is { } passed && timeLeft <= TimeSpan.Zero)
-                return DeadlinePassedBeforeStart(gate, passed);
-
-            RunBudget? budget = deadline is { } limit ? new RunBudget(limit, timeLeft) : null;
-            return RunOne(gate, workingDirectory, budget, stop);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-        finally
-        {
-            slots.Release();
-        }
-    }
-
-    private GateResult RunOne(ReviewGate gate, string workingDirectory, RunBudget? budget, CancellationToken stop)
-    {
-        string gateDirectory = ResolveWorkingDirectory(workingDirectory, gate.WorkingDirectory);
-        return RunArgv(
-            gate.Id, gate.Blocking, gate.Run, gate.TimeoutSeconds, gateDirectory, gate.FailOnOutput, budget,
-            nameFailingTests: true, stop: stop);
-    }
-
     private async Task<GateResult?> RunInSlotAsync(
         ReviewGate gate,
         string workingDirectory,
@@ -644,45 +485,6 @@ public sealed class GateRunService(
         paths.GetFullPath(
             repositoryRelative.Replace('/', Path.DirectorySeparatorChar),
             paths.GetFullPath(root, environment.CurrentDirectory));
-
-    private GateResult RunArgv(
-        string id,
-        bool blocking,
-        IReadOnlyList<string> argv,
-        int timeoutSeconds,
-        string workingDirectory,
-        bool failOnOutput,
-        RunBudget? budget = null,
-        Action<string, string>? captureOutput = null,
-        bool nameFailingTests = false,
-        CancellationToken stop = default)
-    {
-        if (!TryPrepareArgv(
-                id, blocking, timeoutSeconds, workingDirectory, budget,
-                out GateResult? notStarted, out GateRunClock start, out bool deadlineFirst, out TimeSpan timeout))
-        {
-            return notStarted!;
-        }
-
-        try
-        {
-            ProcessResult process = ((IProgramRunner)programs).Run(
-                argv[0], [.. argv.Skip(1)], workingDirectory, timeout, cancellationToken: stop);
-            return ToGateResult(id, blocking, failOnOutput, captureOutput, nameFailingTests, start, process);
-        }
-        catch (TimeoutException ex) when (deadlineFirst)
-        {
-            return DeadlinePassedResult(id, blocking, budget, timeout, start, ex);
-        }
-        catch (TimeoutException ex)
-        {
-            return TimedOutResult(id, blocking, timeoutSeconds, start, ex);
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
-        {
-            return NotStartedResult(id, blocking, argv[0], start, ex);
-        }
-    }
 
     private async Task<GateResult> RunArgvAsync(
         string id,

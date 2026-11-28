@@ -17,7 +17,7 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
 
     public void Dispose() => _services.Dispose();
 
-    private GateReport Run(string program, string output, string error = "", int exitCode = 1)
+    private async Task<GateReport> RunAsync(string program, string output, string error = "", int exitCode = 1)
     {
         _services.Processes.Script(program, new ProcessRunResult(exitCode, string.Empty, TimedOut: false)
         {
@@ -25,7 +25,7 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
             StandardError = error,
         });
 
-        return _services.Gates.Run(
+        return await _services.Gates.RunAsync(
             new ReviewConfig { Gates = [new ReviewGate("tests", [program])] },
             _services.Root);
     }
@@ -41,7 +41,7 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
         """;
 
     [Fact]
-    public void AFailingDotnetTestGateNamesEachFailingTestAndItsErrorInTheReport()
+    public async Task AFailingDotnetTestGateNamesEachFailingTestAndItsErrorInTheReport()
     {
         string output = string.Join('\n',
             VsTestFailure("Acme.Tests.OrdersTests.Total_WhenTwoLines_IsTheirSum", "Assert.Equal() Failure: Values differ"),
@@ -49,7 +49,7 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
             "Failed!  - Failed:     2, Passed:     7, Skipped:     0, Total:     9, Duration: 1 s - Acme.Tests.dll (net10.0)");
 
         // The test host's logging fills standard error, which is what the summary used to show on its own.
-        GateReport report = Run("dotnet-test", output, error: "info: SignalR[0]\n      Hub connection established.");
+        GateReport report = await RunAsync("dotnet-test", output, error: "info: SignalR[0]\n      Hub connection established.");
 
         GateResult gate = Assert.Single(report.Gates);
         Assert.Contains("FAIL — tests: total=9 failed=2 passed=7", gate.Summary, StringComparison.Ordinal);
@@ -62,7 +62,7 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
     }
 
     [Fact]
-    public void AFailingScriptTestGateNamesEachFailingTest()
+    public async Task AFailingScriptTestGateNamesEachFailingTest()
     {
         string output = string.Join('\n',
             " FAIL  tests/cart.test.ts > cart > adds an item",
@@ -71,7 +71,7 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
             "Error: expected element to be visible",
             "Tests:       2 failed, 7 passed, 9 total");
 
-        GateResult gate = Assert.Single(Run("ts-test", output).Gates);
+        GateResult gate = Assert.Single((await RunAsync("ts-test", output)).Gates);
 
         Assert.Contains("FAIL — tests: total=9 failed=2 passed=7", gate.Summary, StringComparison.Ordinal);
         Assert.Contains("tests/cart.test.ts > cart > adds an item — AssertionError: expected 2 to be 3 // Object.is equality", gate.Summary, StringComparison.Ordinal);
@@ -79,14 +79,14 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
     }
 
     [Fact]
-    public void AFailingBuildGateListsTheCompileErrors()
+    public async Task AFailingBuildGateListsTheCompileErrors()
     {
         string output = string.Join('\n',
             "/repo/tests/Acme.Tests/OrdersTests.cs(12,17): error CS0246: The type or namespace name 'OrderTotals' could not be found [/repo/tests/Acme.Tests/Acme.Tests.csproj]",
             "/repo/tests/Acme.Tests/OrdersTests.cs(20,9): error CS0103: The name 'Cancel' does not exist in the current context [/repo/tests/Acme.Tests/Acme.Tests.csproj]",
             "Build FAILED.");
 
-        GateResult gate = Assert.Single(Run("dotnet-build", output).Gates);
+        GateResult gate = Assert.Single((await RunAsync("dotnet-build", output)).Gates);
 
         Assert.Contains("FAIL — the build failed with 2 compile errors, so no test ran", gate.Summary, StringComparison.Ordinal);
         Assert.Contains("CS0246 The type or namespace name 'OrderTotals' could not be found", gate.Summary, StringComparison.Ordinal);
@@ -94,10 +94,10 @@ public sealed class ReviewGatesFailureDigestTests : IDisposable
     }
 
     [Fact]
-    public void APassingGateKeepsItsSummary()
+    public async Task APassingGateKeepsItsSummary()
     {
         GateResult gate = Assert.Single(
-            Run("dotnet-test", "Passed!  - Failed:     0, Passed:    41, Skipped:     0, Total:    41, Duration: 2 s", exitCode: 0).Gates);
+            (await RunAsync("dotnet-test", "Passed!  - Failed:     0, Passed:    41, Skipped:     0, Total:    41, Duration: 2 s", exitCode: 0)).Gates);
 
         Assert.Equal("passed", gate.Summary);
     }

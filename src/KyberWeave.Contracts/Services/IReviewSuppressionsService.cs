@@ -15,11 +15,6 @@ namespace KyberWeave.Contracts.Services;
 /// </remarks>
 public interface IReviewSuppressionsService
 {
-    /// <summary>Scans the lines the change adds for a suppression that states no reason.</summary>
-    /// <param name="request">The options the command parsed.</param>
-    /// <param name="cancellationToken">Cancels the run.</param>
-    ReviewCommandResult Run(ReviewSuppressionsRequest request, CancellationToken cancellationToken = default);
-
     /// <summary>Scans the lines the change adds for a suppression that states no reason, without blocking a thread.</summary>
     /// <param name="request">The options the command parsed.</param>
     /// <param name="cancellationToken">Cancels the git reads.</param>

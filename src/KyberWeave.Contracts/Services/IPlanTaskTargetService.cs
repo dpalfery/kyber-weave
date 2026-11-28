@@ -12,16 +12,6 @@ public interface IPlanTaskTargetService
 {
     /// <summary>
     /// The task in this checkout's plans — the one in flight first, then the ones still in review — or in another
-    /// worktree's active plan, or null with the reason when there is not exactly one match.
-    /// </summary>
-    /// <param name="root">The repository root.</param>
-    /// <param name="config">The effective configuration.</param>
-    /// <param name="typedTask">The task id as the worker typed it, for example <c>T1</c>.</param>
-    /// <param name="reason">Why nothing was found; null when a task was found.</param>
-    PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason);
-
-    /// <summary>
-    /// The task in this checkout's plans — the one in flight first, then the ones still in review — or in another
     /// worktree's active plan, or null with the reason when there is not exactly one match, without blocking a thread.
     /// </summary>
     /// <param name="root">The repository root.</param>

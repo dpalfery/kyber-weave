@@ -40,15 +40,16 @@ public sealed class PlanTaskTargetStatusTests : IDisposable
     }
 
     [Fact]
-    public void ThePlansTaskInReviewIsUsedRatherThanTheClosedOutPlansTaskWithTheSameId()
+    public async Task ThePlansTaskInReviewIsUsedRatherThanTheClosedOutPlansTaskWithTheSameId()
     {
         WritePlan(CompletedPlan, "**Status: Completed.**", "tests/Completed/T2.cs");
         WritePlan(ReviewPlan, "**Status: Review required.**", "tests/Review/T2.cs");
 
-        PlanTaskTargetMatch? match =
-            _services.Get<IPlanTaskTargetService>().Find(_repo, EffectiveConfig(), "T2", out string? reason);
+        PlanTaskTargetLookup lookup =
+            await _services.Get<IPlanTaskTargetService>().FindAsync(_repo, EffectiveConfig(), "T2", CancellationToken.None);
+        PlanTaskTargetMatch? match = lookup.Match;
 
-        Assert.Null(reason);
+        Assert.Null(lookup.Reason);
         Assert.NotNull(match);
         Assert.Equal(ReviewPlan, match.Plan);
         Assert.Contains("tests/Review/T2.cs", match.Entry.Files ?? []);

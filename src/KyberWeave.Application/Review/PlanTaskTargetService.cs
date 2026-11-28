@@ -31,58 +31,6 @@ public sealed partial class PlanTaskTargetService(
     IProcessEnvironment environment) : IPlanTaskTargetService
 {
     /// <inheritdoc />
-    public PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(typedTask);
-
-        IReadOnlyList<string> active = tasks.ActivePlans(root, config);
-        if (active.Count > 1)
-        {
-            reason = $"{active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)})";
-            return null;
-        }
-
-        // The plan in flight first, then the plans still in review in this checkout: a review rework re-runs its task
-        // gate after the plan has moved into review, and the task's technology and files still come from its task file.
-        // A closed-out plan is left out, so its task with the same id cannot supply them instead.
-        IReadOnlyList<string> plans =
-            [.. active, .. tasks.ReviewPlans(root, config).Where(plan => !active.Contains(plan, StringComparer.Ordinal))];
-
-        string? unusable = null;
-        foreach (string plan in plans)
-        {
-            PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
-            if (outcome.File is null || outcome.Report.HasErrors)
-            {
-                unusable ??= $"the task file for {plan} is missing or does not match the plan";
-                continue;
-            }
-
-            if (PlanTaskPacket.FindTask(outcome.File, typedTask) is { } entry)
-            {
-                reason = null;
-                return new PlanTaskTargetMatch(plan, entry, ContractRow(root, plan, entry.Id));
-            }
-        }
-
-        if (active.Count == 0 && FindInOtherWorktree(root, config, typedTask) is { } elsewhere)
-        {
-            reason = null;
-            return elsewhere;
-        }
-
-        reason = unusable ?? (plans.Count switch
-        {
-            0 => $"no plan is {PlanStatus.ActiveWords} in this checkout or any other worktree of this repository",
-            1 => $"'{typedTask}' names no one task in {plans[0]}",
-            _ => $"'{typedTask}' names no one task in {string.Join(", ", plans)}"
-        });
-        return null;
-    }
-
-    /// <inheritdoc />
     public async Task<PlanTaskTargetLookup> FindAsync(
         string root,
         KyberWeaveConfig config,
@@ -140,35 +88,10 @@ public sealed partial class PlanTaskTargetService(
 
     /// <summary>
     /// The task in a plan that is active in one other worktree of this repository, or null when none has it or more
-    /// than one does. The conductor's plan and task file live in the run's worktree, while a worker runs its task gate
-    /// in a worktree of its own; <c>docs packet</c> reads the plan from there, so the gate reads it the same way.
+    /// than one does, without blocking a thread. The conductor's plan and task file live in the run's worktree, while a
+    /// worker runs its task gate in a worktree of its own; <c>docs packet</c> reads the plan from there, so the gate
+    /// reads it the same way.
     /// </summary>
-    private PlanTaskTargetMatch? FindInOtherWorktree(string root, KyberWeaveConfig config, string typedTask)
-    {
-        string here = Path.TrimEndingDirectorySeparator(paths.GetFullPath(root, environment.CurrentDirectory));
-        List<PlanTaskTargetMatch> matches = [];
-        foreach (string worktree in git.ListWorktrees(root))
-        {
-            string other = Path.TrimEndingDirectorySeparator(paths.GetFullPath(worktree, environment.CurrentDirectory));
-            if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
-                continue;
-
-            IReadOnlyList<string> active = tasks.ActivePlans(other, config);
-            if (active.Count != 1)
-                continue;
-
-            PlanTaskFileOutcome outcome = tasks.Run(other, config, active[0], PlanTaskFileMode.Check);
-            if (outcome.File is null || outcome.Report.HasErrors)
-                continue;
-
-            if (PlanTaskPacket.FindTask(outcome.File, typedTask) is { } entry)
-                matches.Add(new PlanTaskTargetMatch(active[0], entry, ContractRow(other, active[0], entry.Id)));
-        }
-
-        return matches.Count == 1 ? matches[0] : null;
-    }
-
-    /// <summary>The same lookup in the other worktrees, reading each active plan's task file without blocking a thread.</summary>
     private async Task<PlanTaskTargetMatch?> FindInOtherWorktreeAsync(
         string root,
         KyberWeaveConfig config,

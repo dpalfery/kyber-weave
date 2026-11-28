@@ -18,17 +18,6 @@ public sealed class ReviewSuppressionsService(
     IProcessEnvironment environment) : IReviewSuppressionsService
 {
     /// <inheritdoc />
-    public ReviewCommandResult Run(ReviewSuppressionsRequest request, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        if (!TryPrepare(request, out string root, out string baseRef, out DiagnosticReport report, out ReviewCommandResult? failure))
-            return failure;
-
-        return Report(scanner.Scan(root, baseRef), baseRef, report);
-    }
-
-    /// <inheritdoc />
     public async Task<ReviewCommandResult> RunAsync(
         ReviewSuppressionsRequest request,
         CancellationToken cancellationToken = default)

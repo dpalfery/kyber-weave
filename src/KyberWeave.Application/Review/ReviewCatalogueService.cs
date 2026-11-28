@@ -26,22 +26,6 @@ public sealed class ReviewCatalogueService(
     IKyberStandardsTemplates templates) : IReviewCatalogueService
 {
     /// <inheritdoc />
-    public ReviewCommandResult Run(
-        ReviewCatalogueRequest request,
-        TextWriter output,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(output);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (!TryPrepare(request, out string root, out IReadOnlyList<string> technologies, out ReviewCommandResult? failure))
-            return failure;
-
-        return WritePlan(root, technologies, lister.List(root), output);
-    }
-
-    /// <inheritdoc />
     public async Task<ReviewCommandResult> RunAsync(
         ReviewCatalogueRequest request,
         TextWriter output,
