@@ -858,35 +858,40 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             || BusyWordRegex().IsMatch(output);
     }
 
-    private static bool IsOperationalFailure(SqliteException exception)
+    /// <summary>The cause of an operational cache failure, or null for a failure that is not operational.</summary>
+    /// <param name="exception">The SQLite failure.</param>
+    /// <returns>The one cause the remedy is chosen by; one list serves both the catch filter and the remedy.</returns>
+    internal static OperationalCause? OperationalCauseOf(SqliteException exception)
     {
-        if (exception.SqliteErrorCode is 3 or 8 or 9 or 10 or 13 or 14)
-            return true;
-
-        string reason = exception.Message;
-        return reason.Contains("readonly", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("read-only", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("unable to open database", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>The remedy for an operational failure, by its cause: access, space, disk I/O, or an interrupt.</summary>
-    /// <param name="exception">A failure <see cref="IsOperationalFailure"/> accepted.</param>
-    /// <returns>One sentence naming what to fix.</returns>
-    private static string OperationalRemedy(SqliteException exception)
-    {
+        ArgumentNullException.ThrowIfNull(exception);
         string reason = exception.Message;
         if (exception.SqliteErrorCode == 13 || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase))
-            return "Free disk space on the volume that holds the cache.";
+            return OperationalCause.DiskFull;
         if (exception.SqliteErrorCode == 10 || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase))
-            return "The disk reported an I/O error; check the volume that holds the cache.";
+            return OperationalCause.DiskIo;
         if (exception.SqliteErrorCode == 9 || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase))
-            return "The operation was interrupted; run the command again.";
-        return "Check that the cache file and its folder are readable and writable.";
+            return OperationalCause.Interrupted;
+        if (exception.SqliteErrorCode is 3 or 8 or 14
+            || reason.Contains("readonly", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("read-only", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("unable to open database", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
+            return OperationalCause.Access;
+        return null;
     }
+
+    private static bool IsOperationalFailure(SqliteException exception) => OperationalCauseOf(exception) is not null;
+
+    /// <summary>The remedy for an operational failure, by its cause.</summary>
+    /// <param name="exception">A failure <see cref="IsOperationalFailure"/> accepted.</param>
+    /// <returns>One sentence naming what to fix.</returns>
+    internal static string OperationalRemedy(SqliteException exception) => OperationalCauseOf(exception) switch
+    {
+        OperationalCause.DiskFull => "Free disk space on the volume that holds the cache.",
+        OperationalCause.DiskIo => "The disk reported an I/O error; check the volume that holds the cache.",
+        OperationalCause.Interrupted => "The operation was interrupted; run the command again.",
+        _ => "Check that the cache file and its folder are readable and writable.",
+    };
 
     private static string FailureDetail(SqliteException exception)
     {
