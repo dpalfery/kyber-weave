@@ -885,30 +885,25 @@ public partial class MenubarService : IMenubarService
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        return await Task.Run(
-            () =>
-            {
-                try
+        try
+        {
+            return await ProcessRunner.RunAsync(
+                new ProcessStartInfo(fileName)
                 {
-                    return ProcessRunner.Run(
-                        new ProcessStartInfo(fileName)
-                        {
-                            RedirectStandardInput = true,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                        }.WithArguments(arguments),
-                        standardInput: string.Empty,
-                        timeout: timeout,
-                        cancellationToken: cancellationToken);
-                }
-                catch (Win32Exception ex)
-                {
-                    return new ProcessResult(127, string.Empty, ex.Message);
-                }
-            },
-            cancellationToken).ConfigureAwait(false);
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }.WithArguments(arguments),
+                standardInput: string.Empty,
+                timeout: timeout,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Win32Exception ex)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
     }
 }
 
