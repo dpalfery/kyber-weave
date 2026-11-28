@@ -354,11 +354,6 @@ public class TranscriptIngestionService : ITranscriptIngestionService
     public static DateTimeOffset RetentionFloor(DateTimeOffset now) =>
         CanonRefreshEngine.ContentRetentionFloor(now);
 
-    /// <summary>The retention floor for the current instant, formatted as the purge cutoff.</summary>
-    /// <returns>ISO-8601 UTC cutoff.</returns>
-    public static string RetentionFloorIso() =>
-        FormatUtc(CanonRefreshEngine.ContentRetentionFloor(TimeProvider.System.GetUtcNow()));
-
     private RefreshReport RefreshRelationalSources(int historyWeeks)
     {
         int weeks = CanonRefreshEngine.NormalizeHistoryWeeks(historyWeeks) ?? CanonRefreshEngine.DefaultHistoryWeeks;
