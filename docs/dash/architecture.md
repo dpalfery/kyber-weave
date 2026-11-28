@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-28
 decided-by:
   - adr/0084-kyberdash-csharp-engine
   - adr/0020-kyberdash-one-time-fork
@@ -2894,6 +2894,30 @@ The OTLP ingest seam and read-side query engine align raw harness telemetry with
   - `DashEndpointMappings.ReportAsync` (`dash/server/KyberDash.Api/Endpoints/DashEndpointMappings.cs`) trims `harness`/`session`/`run` (normalizing `harness`), clamps `limit` to `1..200` (default `50` when omitted), defaults `?days=` to `7` when omitted entirely, and returns HTTP 400 Bad Request (`"days must be a positive whole number"` / `"limit must be a positive whole number"`) via `DashHttp.OptionalPositiveInt` when `?days=` (or `?limit=`) is provided as blank, whitespace, zero, negative, or non-numeric.
   - `ServiceCollectionExtensions.RegisterEngines` passes `DashOptions.DatabasePath` as `storePath` into `KyberBridgeEngine` (defaulting to `CanonDbPath.Resolve()`), emitted at `coverage.storePath`.
   - `KyberBridgeEngine.GetReport` excludes excluded harnesses (`CanonPricing.CanonicalHarnessId(...) is null`, including `gemini`) and unprojected sessions, scopes sessions/runs/findings to the `days` window, preserves compatibility scalars (`schemaVersion`, `generatedAt`, `storeGeneration`, `sessionCount`, `findingCount`, `harnessCount`), emits `kyberdashVersion`, `scope`, `coverage` (`storePath`, `refresh`, `harnesses`, `quarantineCount`, `problemCount`, `hints`), `findings` (`recoverableTokens`, `view`, `errorBar`, `evidenceIds`), `harnesses[].dimensions` via `CanonRollupsEngine.BuildHarnessScorecard` from `StoredHarnessRollup` or bounded window rollups without N+1 `ReadSessionFigures` scans, `latestSession` (hydrating `ReadSessionFigures` at most once for that single newest session with `latestTurn` buckets, pressure, and residual or honest absent reasons), and non-blended `cost[]`.
+
+## Telemetry Verification and Cross-Harness Parity
+
+To prevent silent collection drops and UI-rendering blind spots across harnesses, KyberDash pairs a sanitized dual Copilot baseline contract (`dash/e2e/copilot-parity-baseline.ts`, `dash/e2e/otel-harness-payloads.ts`) with layer-by-layer parity assertions (`dash/e2e/session-dashboard-assertions.ts`) executed by the isolated Playwright suite `dash/e2e/harness-content-parity.spec.ts`.
+
+### Sanitized dual Copilot baseline contract
+
+- **OTLP `copilot` baseline (`COPILOT_DB_BASELINE_SNAPSHOT` & `buildCopilotBaselineFixture`):** Pins structural counts observed in `canon.db` (`schemaVersion: 30`, `detectorVersion: 8`, `projectionSchemaVersion: 30`) — 100% session/context/schema/token projection, `system_prompt` carry-forward across turns (truncated at 65,536 bytes when oversized), `tool_definitions` rows, `tool.invoke` spans paired to `tool_call` rows, `agent.invoke`, skills, and the `content_part_withheld` path triggered when `OtlpSpanMapperCore` (`BuildCollectedParts` / `BuildToolCall`) marks a JSON payload `IsDocument` (`PlainText = null`, `Withheld` populated). `assertNoRawCanonDbLeak` enforces that no raw prompt, title, transcript text, home path, email, or secret token enters committed fixtures.
+- **File-transcript `copilot-cli` contract (`CopilotCliMapper`):** Emits `llm.invoke` per `assistant.message`, child `tool.invoke` records via `CopilotCliMapper.BuildToolInvokeRecord` from journal `toolRequests`, `tool.execution_start`, and `tool.execution_complete` events (`system_prompt`, `conversation_history`, `tool_result_content` with `Withheld` when `IsDocument`), and subagent records from delegation calls.
+- **Canonical 25-harness parity matrix (`HARNESS_PARITY_MATRIX`):** Accounts for all `24` `HarnessSourceRegistry` registrations (`18` `LocalFiles`, `3` `OtlpOnly`: `copilot`, `opencode`, `copilot-agent`, `2` `ClassifiedOnly`: `claude-unclassified`, `codex-desktop`, `1` `Unevidenced`: `zcode`) plus OTLP `codex` mapped by `CodexAdapter` (`25` canonical IDs total) and `3` excluded IDs (`windsurf`, `aider`, `gemini`), with `normalizeParityHarnessId` mirroring `CanonPricing.NormalizeHarnessName`. Of those, `22` are HTTP-testable in isolated Playwright (`18` `LocalFiles` + `3` OTLP-distinct `copilot`, `opencode`, `codex` + `1` `Unevidenced` `zcode`).
+
+### Layer-by-layer parity assertions and two-server isolation
+
+`assertHarnessFullContentParity`, `inspectTurnFullContent`, and `classifyParityGap` (`dash/e2e/session-dashboard-assertions.ts`) inspect every layer where content can drop between ingest and screen:
+
+| Layer | API / UI surface verified | Gap & fallback handling |
+|---|---|---|
+| Collection & API payload | `/api/kyber/sessions`, `/api/kyber/session/:id/summary`, `/requests`, `/tools`, `/turn/:index/content?full=true`, `/span/:id/attributes`, `/content?span=...&full=true`, `/stored-fields`, `/stored-fields/tool_call` | Non-200 responses, missing sessions, or unsupported section page limits (`400`) fail immediately. |
+| User requests & tool definitions | `SessionRequestsSection` (`user-requests`, `requests-empty`, `request-row-*`) and `SessionToolsSection` (`tools-ranking-table` -> `tool_definitions` / `tool-definition-unavailable`) | Empty request lists and absent tool schemas emit structured gap annotations when honest; silent UI drops throw. |
+| Turn full-content drawer | `SessionChartsSection` (`turn-bar-*` or `context-turn-*`) -> `SessionInspectorDrawer` (`turn-content-full`, `turn-block-*`, `turn-block-*-raw`, `copy-turn-block-*` only when `block.text !== ''`, `turn-block-*-empty` when empty/withheld, `turn-content-empty`, `copy-turn-button`) | When both `turn-spend-not-measurable` and `context-composition-not-measurable`/`empty` render with zero clickable bars, records an `unreachable-drawer` annotation and falls back to timeline `llm.invoke` span inspection. |
+| Direct turn detail route | `/session/:id/turn/:index` (`page-turn`, `ContextInspector`, `context-band-*`, `context-content-pane` / `not-measurable-pane` / `empty-content-pane`, `copy-block-button`, `copy-turn-button`) | Verifies `context-band-*` renders only for blocks with content or `notMeasurable.reason`, and checks enabled vs disabled copy state. |
+| Timeline `tool.invoke` I/O & stored fields | `SessionTimelineSection` (`timeline-node-expand`, `span-inspector`, `drawer-content-*` / `drawer-content-fallback-note`, `tool-call-view`, `tool-result-view`) and `StoredFieldsPanel` (`stored-fields-table-content_part`, `content_part_text`, `content_part_withheld`, `tool_definition`, `stored-fields-table-toggle-tool_call` -> `stored-field-row-tool_call-*` / `stored-fields-empty-tool_call`) | Inspects tool inputs/results through timeline spans and `StoredFieldsPanel` rather than `ToolInvocationPreview`; emits `stored-field-empty` when `tool_call` has zero rows. |
+
+In `'annotate-gaps'` mode, `classifyParityGap` permits intrinsic honest-unobservability states (`[Honest unobservability](../rules/honest-unobservability.md)`) and documented `HARNESS_PARITY_MATRIX` gaps as `test.info().annotations`, while throwing `Unannotated content drop` if served content disappears from the UI without a documented gap. `dash/e2e/harness-content-parity.spec.ts` boots two separate `startIsolatedServer` instances (both asserting `server.dbPath !== USER_CANON` and `!server.url.includes(':4747')`): server #1 tests the healthy 21 ingestible harnesses, dual Copilot baseline, and excluded `gemini`; server #2 uses its own `rootDir`, `homeDir`, `stateDir`, and `dbPath` for unreadable SQLite sources (`cursor` `CURSOR_WORKSPACE_UNREADABLE`, `devin` `DEVIN_SESSION_UNREADABLE`, `warp` `SQLITE_SOURCE_UNREADABLE`), `zcode` (`SOURCE_FORMAT_UNEVIDENCED`), and unclaimed/unattributed OTLP telemetry (`unclaimed` quarantine + `OTLP_LOG_UNATTRIBUTED`) so fixed OS SQLite paths under `homeDir` never collide with healthy fixtures.
 
 ## Parity suite and C# engine verification (R15)
 

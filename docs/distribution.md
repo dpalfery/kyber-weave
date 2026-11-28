@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 ---
 
 # Distribution and release flow
@@ -207,7 +207,37 @@ SBOMs, and the aggregate SBOM — see
 [Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
 and that each hash is correct; if any asset is missing or unexpected, the release fails before `gh release create` runs (fail-closed, prevents publication).
 
-On success, the workflow creates a GitHub Release with the 51 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs post-publish verification steps that check the published assets against the expected set, byte-compare the manifest, and verify each archive's CycloneDX SBOM attestation. If a post-publish check detects a mismatch, it fails the job (the release is already public, so these checks are detective only).
+On success, the workflow creates a GitHub Release with the 51 assets, the manifest, and release notes (see [Release notes](#release-notes); passing `--prerelease` for hyphenated pre-releases), then runs post-publish verification steps that check the published assets against the expected set, byte-compare the manifest, and verify each archive's CycloneDX SBOM attestation and its SLSA build provenance. If a post-publish check detects a mismatch, it fails the job (the release is already public, so these checks are detective only).
+
+### Re-running a release: the chain receipt
+
+Every build, SBOM and publish job in `.github/workflows/release.yml` restores one shared,
+version-bound **chain receipt** — key `release-chain-<version>`, path `.release-chain` — and runs
+one verdict step that compares the receipt's `saved_at_epoch` against the workflow's
+`RECEIPT_MAX_AGE_SECONDS` (four hours). A re-run of the same version inside that window skips the
+build chain: the seven build and SBOM jobs do no work, and the two publish jobs verify the
+published state instead of publishing again.
+
+On a hit, `release` verifies the published asset names against the receipt's recorded list as
+sorted sets, `diff`s the published `SHA256SUMS.txt` against the recorded manifest, and verifies
+every published archive with `gh attestation verify` — `Verify SBOM attestations` pinning
+`https://cyclonedx.org/bom`, `Verify provenance attestations` pinning
+`https://slsa.dev/provenance/v1`. `gh-packages` proves each recorded `name@version` is still
+published. A missing asset, an extra asset, a manifest that does not match, a missing attestation
+or a missing package version fails the job. A hit does not re-check the macOS signature or the
+notarization: the publishing run verified those on the archives it published, and the hit path's
+per-archive `gh attestation verify` proves those archives are still the bytes that run attested.
+The manifest `diff` proves only that `SHA256SUMS.txt` is unchanged.
+
+A stale, absent or unparsable receipt rebuilds the chain. The receipt is written only in the
+`release` job, only after every post-publish check passed, and only on the miss path, so a skip can
+never extend its own lifetime.
+
+The save step carries `continue-on-error: true` on purpose: two runs can race for one cache key,
+and a save that loses that race must not fail a publish that already succeeded. Losing the save
+costs nothing but a full rebuild on the next run, so the tolerance is fail-open rather than a
+hidden failure. It is the one place in either workflow where `continue-on-error` is not an
+advisory scan ([the GitHub Actions standard](standards/github-actions/github-actions.standards.md#receipts-and-skips)).
 
 ### Release notes
 
@@ -316,7 +346,7 @@ The same release also stamps the release version onto `dash/server/KyberDash.{Cl
 
 ## Code signing status
 
-Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 51 assets (25 archives, 25 per-artifact SBOMs, and the aggregate SBOM). A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). Post-publish checks verify the published assets and each archive's SBOM attestation after the release is live; on mismatch they fail the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
+Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 51 assets (25 archives, 25 per-artifact SBOMs, and the aggregate SBOM). A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). Post-publish checks verify the published assets and each archive's SBOM attestation and build provenance after the release is live; on mismatch they fail the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
 Azure signing was ruled out on cost; GPG-signed manifests are not implemented; SignPath
 Foundation is a possible but unverified future option. See [ADR 0027](adr/0027-release-integrity-checksums-signing-deferred.md)
 for the complete decision record.
@@ -335,7 +365,7 @@ for the complete decision record.
 The release workflow enforces that `SHA256SUMS.txt` lists exactly the 51 expected assets and
 never itself. The published release contains those 51 assets plus `SHA256SUMS.txt` (52 files total).
 
-The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. Post-publish checks run after the release is created and compare the published asset names against the 51 expected assets plus `SHA256SUMS.txt`, byte-compare the published manifest, and verify each archive's SBOM attestation; on mismatch they fail the job (the release is already public, so these checks are detective only).
+The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. Post-publish checks run after the release is created and compare the published asset names against the 51 expected assets plus `SHA256SUMS.txt`, byte-compare the published manifest, and verify each archive's SBOM attestation and build provenance; on mismatch they fail the job (the release is already public, so these checks are detective only). `Verify published release assets` reads the chain receipt on a re-run, and the attestation checks download the published archives in that case; [Re-running a release](#re-running-a-release-the-chain-receipt) covers what a hit verifies.
 
 - **5** CLI: `kyber-weave-linux-x64.tar.gz`, `kyber-weave-linux-arm64.tar.gz`,
   `kyber-weave-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-win-x64.zip`
@@ -439,38 +469,61 @@ the `artifact-sboms` artifact for the release job.
 Every SBOM is attested before anything publishes, in the `attest-sbom` job
 (`needs: version, build, build-kyberdash, build-tray, pack-squad, sbom,
 artifact-sboms`). The job downloads all archives plus both SBOM shapes, then
-attests each one with `actions/attest@v4.1.1` in SBOM mode — not the deprecated
+attests each one with `actions/attest@v4.2.2` in SBOM mode — not the deprecated
 `attest-sbom` action — with the archive as the subject and the SBOM as the
 predicate:
 
 ```yaml
 - name: Attest kyber-weave-linux-x64 SBOM
-  uses: actions/attest@v4.1.1
+  uses: actions/attest@v4.2.2
   with:
     subject-path: attest-assets/kyber-weave-linux-x64.tar.gz
     sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json
 ```
 
-Each per-artifact SBOM is attested against its own archive (20 attestations);
+Each per-artifact SBOM is attested against its own archive (25 attestations);
 the aggregate SBOM is attested once against all archives via a glob over
 `*.tar.gz`, `*.zip`, and `*.exe` (never the `*.cdx.json` predicates beside
 them). Subject is always the archive; predicate is always the SBOM; the
 predicate type is `https://cyclonedx.org/bom`, which the release job's
 post-publish `Verify SBOM attestations` step pins when it runs
 `gh attestation verify <archive> --repo <owner/repo> --predicate-type
-https://cyclonedx.org/bom` over every published archive.
+https://cyclonedx.org/bom` over every published archive. Beside that step,
+`Verify provenance attestations` runs the same check with `--predicate-type
+https://slsa.dev/provenance/v1`, because the same job also mints build
+provenance for every archive.
 
 The job needs exactly four permissions: `id-token: write` (mints the OIDC token
 for the Sigstore signing certificate), `attestations: write` (persists the
 attestation), `artifact-metadata: write` (creates the storage record), and
 `contents: read` (reads the repo context). No extra secrets or services.
 
-Cost bound: attestation is one additional `ubuntu-latest` job with 21
-`actions/attest` steps (20 per-artifact plus the aggregate). Each step is
-seconds of Sigstore signing with no downloads beyond the already-built assets,
-so the release's added cost is bounded by minutes on the standard hosted
+Cost bound: attestation is one additional `ubuntu-latest` job with 27
+`actions/attest` steps (25 per-artifact SBOM attestations, the aggregate SBOM
+attestation, and one build-provenance attestation over every archive). Each
+step is seconds of Sigstore signing with no downloads beyond the already-built
+assets, so the release's added cost is bounded by minutes on the standard hosted
 runner — no new runner class, no paid service, no per-attestation billing
 beyond normal Actions minutes.
+
+#### Build provenance
+
+The same job mints **SLSA build provenance** for every archive, in one step
+beside the SBOM attestations:
+
+```yaml
+- name: Attest build provenance for all archives
+  uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+  with:
+    subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe
+```
+
+No `sbom-path` and no custom predicate: `actions/attest` runs in provenance
+mode, binding each archive to the workflow's identity rather than making a
+claim about its contents. The attestation reuses the `id-token` the SBOM
+attestations already mint, so the job's permission block is unchanged, and it
+is gated on the chain verdict like every other step in the job: a chain hit
+mints nothing and verifies the published provenance instead.
 
 ### Verification paths
 
@@ -488,6 +541,8 @@ Users and maintainers can verify asset integrity by:
 4. **SBOM attestation**: `gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type https://cyclonedx.org/bom`
    verifies that an archive is the one its SBOM was attested against (see
    [install.md](install.md#verifying-sbom-attestations)).
+5. **Build provenance**: `gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type https://slsa.dev/provenance/v1`
+   verifies that the archive was built by this repository's release workflow.
 
 SmartScreen reputation is tracked per file, so binaries from a new release will typically warn
 again. The documented hash-verification and **More info → Run anyway** flow in
