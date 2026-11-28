@@ -10,17 +10,18 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <summary>
 /// Computes the review verdict from the council's seat output, or a findings document, and the gate report.
 /// </summary>
-public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts, IConsole standard, IAnsiConsole ansi) : Command<ReviewVerdictSettings>
+public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts, IConsole standard, IAnsiConsole ansi) : AsyncCommand<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, ReviewVerdictSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context, ReviewVerdictSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        ReviewVerdictResult result = verdicts.Decide(
+        ReviewVerdictResult result = await verdicts.DecideAsync(
             new ReviewVerdictRequest(
                 settings.Path,
                 settings.Config,
@@ -36,11 +37,11 @@ public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts, IConsol
                 settings.Candidates,
                 settings.NoDecisionModel,
                 ReviewSeatsCommand.VerdictCommand(settings.Task)),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         CommandHelpers.Finish(ansi, result.Report, settings, "review verdict", "Review");
         if (result.NextStep is { } next && ReportRenderer.IsHuman(settings.FormatFor(ansi)))
-            standard.Out.WriteLine(next);
+            await standard.Out.WriteLineAsync(next).ConfigureAwait(false);
 
         return result.ExitCode;
     }

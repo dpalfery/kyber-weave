@@ -21,7 +21,7 @@ public sealed class ReviewSeatsCommand(
     IReviewDecisionModelFactory decisionModels,
     IConsole standard,
     IAnsiConsole ansi,
-    IBoundedProcessExecutor processes) : Command<ReviewSeatsSettings>
+    IProcessRunner processes) : AsyncCommand<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -32,7 +32,8 @@ public sealed class ReviewSeatsCommand(
     internal static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, ReviewSeatsSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context, ReviewSeatsSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -42,12 +43,12 @@ public sealed class ReviewSeatsCommand(
             return ClientInputExitCode;
         }
 
-        ReviewCommandResult result = service.Prepare(
+        ReviewCommandResult result = await service.PrepareAsync(
             Request(settings),
             (repositoryRoot, config) => decisionModels.CreateForRepository(repositoryRoot, config, settings.NoDecisionModel, cachePath: null),
-            new TimeBoundedProcessExecutor(processes, IndexTimeout),
+            new BoundedRunner(processes, IndexTimeout),
             standard.Out,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (result.ClientError is not null)
         {
@@ -78,6 +79,25 @@ public sealed class ReviewSeatsCommand(
         settings.HandBack,
         settings.Full,
         settings.NoDecisionModel);
+
+    /// <summary>Bounds every child at the index timeout unless the run names its own, so the index cannot outlive the seats.</summary>
+    /// <param name="runner">The process seam that starts the child and kills it when the limit passes.</param>
+    /// <param name="timeout">The limit applied to a run that names none of its own.</param>
+    private sealed class BoundedRunner(IProcessRunner runner, TimeSpan timeout) : IProcessRunner
+    {
+        /// <inheritdoc />
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            return runner.RunAsync(request with { Timeout = request.Timeout ?? timeout }, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public bool IsAlive(int processId) => runner.IsAlive(processId);
+
+        /// <inheritdoc />
+        public string? FindOnPath(string program) => runner.FindOnPath(program);
+    }
 }
 
 /// <summary>Options for <c>review seats</c>.</summary>
