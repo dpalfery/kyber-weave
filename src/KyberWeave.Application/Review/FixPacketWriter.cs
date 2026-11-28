@@ -56,8 +56,13 @@ internal static class FixPacketWriter
     /// <param name="cycles">Reads the earlier cycles one at a time.</param>
     /// <param name="git">Lists the commits made on the packet's files since its first readable cycle.</param>
     /// <param name="files">Writes each packet into the cycle folder.</param>
-    internal static FixPacketOutcome Write(
-        FixPacketInput input, IReviewCycleStore cycles, IGitChangeReader git, IWritableFileSystem files)
+    /// <param name="cancellationToken">Cancels the git runs.</param>
+    internal static async Task<FixPacketOutcome> WriteAsync(
+        FixPacketInput input,
+        IReviewCycleStore cycles,
+        IGitChangeReader git,
+        IWritableFileSystem files,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(cycles);
@@ -68,7 +73,7 @@ internal static class FixPacketWriter
         List<string> notes = [];
         try
         {
-            IReadOnlyList<string>? changed = ChangedPaths(input.Tree, input.BaseRef, git);
+            IReadOnlyList<string>? changed = await ChangedPathsAsync(input.Tree, input.BaseRef, git, cancellationToken).ConfigureAwait(false);
             if (changed is null)
                 notes.Add(NoTaskNote("git could not list the change"));
 
@@ -89,7 +94,7 @@ internal static class FixPacketWriter
                 string path = Path.Combine(folder, name + Markdown);
                 try
                 {
-                    files.WriteAllText(path, Text(packet, earlier, input.Tree, git));
+                    files.WriteAllText(path, await TextAsync(packet, earlier, input.Tree, git, cancellationToken).ConfigureAwait(false));
                     blocks.Add(DispatchBlock(packet, plan, path, afterOtherBlocks: wroteOtherBlocks));
                     wroteOtherBlocks |= packet.Kind != PacketKind.Docs;
                 }
@@ -137,11 +142,13 @@ internal static class FixPacketWriter
     }
 
     /// <summary>The change's paths, or null when git could not list them.</summary>
-    private static IReadOnlyList<string>? ChangedPaths(string tree, string? baseRef, IGitChangeReader git)
+    private static async Task<IReadOnlyList<string>?> ChangedPathsAsync(
+        string tree, string? baseRef, IGitChangeReader git, CancellationToken cancellationToken)
     {
         try
         {
-            return [.. git.ResolveSinceMergeBase(tree, baseRef ?? DefaultBase).Select(change => change.Path)];
+            return [.. (await git.ResolveSinceMergeBaseAsync(tree, baseRef ?? DefaultBase, cancellationToken).ConfigureAwait(false))
+                .Select(change => change.Path)];
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
@@ -516,7 +523,8 @@ internal static class FixPacketWriter
     }
 
     /// <summary>The packet's whole text: the fixed header, its notes, findings, the history and the commits on those files.</summary>
-    private static string Text(Packet packet, Earlier earlier, string tree, IGitChangeReader git)
+    private static async Task<string> TextAsync(
+        Packet packet, Earlier earlier, string tree, IGitChangeReader git, CancellationToken cancellationToken)
     {
         List<string> files = [.. packet.Findings.Select(finding => PlanFileOwnership.Normalize(finding.File)).Distinct(StringComparer.Ordinal)];
         foreach (OtherTaskFiles other in packet.AlsoInScope)
@@ -579,7 +587,7 @@ internal static class FixPacketWriter
                 text.Append(line).Append('\n');
 
         text.Append('\n');
-        AppendCommits(text, files, earlier, tree, git);
+        await AppendCommitsAsync(text, files, earlier, tree, git, cancellationToken).ConfigureAwait(false);
         return text.ToString();
     }
 
@@ -623,8 +631,13 @@ internal static class FixPacketWriter
     /// The commits on the packet's files since its first readable cycle, or one line saying why they are not listed:
     /// no cycle could be read, that cycle has no head, git could not answer, or the packet names no file.
     /// </summary>
-    private static void AppendCommits(
-        StringBuilder text, IReadOnlyList<string> files, Earlier earlier, string tree, IGitChangeReader git)
+    private static async Task AppendCommitsAsync(
+        StringBuilder text,
+        IReadOnlyList<string> files,
+        Earlier earlier,
+        string tree,
+        IGitChangeReader git,
+        CancellationToken cancellationToken)
     {
         if (earlier.Cycles.Count == 0)
         {
@@ -654,7 +667,7 @@ internal static class FixPacketWriter
         IReadOnlyList<string> commits;
         try
         {
-            commits = git.LogOneline(tree, first.Head, files);
+            commits = await git.LogOnelineAsync(tree, first.Head, files, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {

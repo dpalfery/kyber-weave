@@ -961,7 +961,9 @@ public sealed class ReviewGatesService(
             if (prepared.Setup is null)
                 return prepared.Failure ?? ReviewCommandResultFactory.Reported(1, report);
 
-            if (!TryResolveChanged(prepared.Setup, report, out IReadOnlyList<string> changed, out ReviewCommandResult? failure))
+            (IReadOnlyList<string>? resolvedChanged, ReviewCommandResult? failure) =
+                await TryResolveChangedAsync(prepared.Setup, report, cancellationToken).ConfigureAwait(false);
+            if (resolvedChanged is not { } changed)
                 return failure ?? ReviewCommandResultFactory.Reported(1, report);
 
             AgentPlan? plan = PlanGates(prepared.Setup, changed, request, report, out failure);
@@ -1108,32 +1110,26 @@ public sealed class ReviewGatesService(
 
         /// <summary>
         /// The files this run gates: those the request named, else the ones git lists from the base. A git failure or an
-        /// unsafe path is reported as a refusal and no gate starts.
+        /// unsafe path is reported as a refusal and no gate starts. Git runs without blocking a thread.
         /// </summary>
-        private bool TryResolveChanged(
+        /// <returns>The changed files, or null with the refusal when none can be gated.</returns>
+        private async Task<(IReadOnlyList<string>? Changed, ReviewCommandResult? Failure)> TryResolveChangedAsync(
             AgentSetup setup,
             DiagnosticReport report,
-            out IReadOnlyList<string> changed,
-            out ReviewCommandResult? failure)
+            CancellationToken cancellationToken)
         {
-            failure = null;
             if (setup.Paths.Count > 0)
-            {
-                changed = setup.Paths.Distinct(StringComparer.Ordinal).ToArray();
-                return true;
-            }
+                return (setup.Paths.Distinct(StringComparer.Ordinal).ToArray(), null);
 
             IReadOnlyList<string> resolved;
             try
             {
-                resolved = git.Resolve(setup.Root, setup.BaseRef);
+                resolved = await git.ResolveAsync(setup.Root, setup.BaseRef, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
             {
-                changed = [];
-                failure = ReviewGatesService.RefuseInput(report, [$"Could not list the changed files with git: {ex.Message}"
-                    + (setup.TargetMissing is null ? string.Empty : $" The task was not found in a plan either ({setup.TargetMissing}); pass --paths.")]);
-                return false;
+                return (null, ReviewGatesService.RefuseInput(report, [$"Could not list the changed files with git: {ex.Message}"
+                    + (setup.TargetMissing is null ? string.Empty : $" The task was not found in a plan either ({setup.TargetMissing}); pass --paths.")]));
             }
 
             // Paths git reports are checked with the same rules as --paths, because they reach argv the same way.
@@ -1143,14 +1139,9 @@ public sealed class ReviewGatesService(
                     gitRefusals.Add(gitProblem);
 
             if (gitRefusals.Count > 0)
-            {
-                changed = [];
-                failure = ReviewGatesService.RefuseInput(report, gitRefusals);
-                return false;
-            }
+                return (null, ReviewGatesService.RefuseInput(report, gitRefusals));
 
-            changed = resolved;
-            return true;
+            return (resolved, null);
         }
 
         /// <summary>Selects and expands the gates and records the skips, before any process starts.</summary>

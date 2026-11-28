@@ -55,7 +55,8 @@ public sealed class ReviewEvidenceSeamTests
     /// <summary>Git answers one merge base, one head and an empty change, so the evidence is written without a checkout.</summary>
     private sealed class StubGit : IGitChangeReader
     {
-        public IReadOnlyList<string> Resolve(string workingDirectory, string baseRef) => [];
+        public Task<IReadOnlyList<string>> ResolveAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
 
         public string CurrentBranch(string workingDirectory) => "branch";
 
@@ -73,6 +74,16 @@ public sealed class ReviewEvidenceSeamTests
 
         public string DiffSince(string workingDirectory, string commit) => "fix";
 
-        public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths) => [];
+        public Task<IReadOnlyList<ChangedPath>> ResolveSinceMergeBaseAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ChangedPath>>([]);
+
+        public Task<(string MergeBase, string Patch)> DiffSinceMergeBaseAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken) =>
+            Task.FromResult(DiffSinceMergeBase(workingDirectory, baseRef));
+
+        public Task<string> DiffSinceAsync(string workingDirectory, string commit, CancellationToken cancellationToken) =>
+            Task.FromResult(DiffSince(workingDirectory, commit));
+
+        public Task<IReadOnlyList<string>> LogOnelineAsync(string workingDirectory, string fromCommit, IReadOnlyList<string> paths, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
     }
 }
