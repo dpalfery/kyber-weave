@@ -298,6 +298,11 @@ public sealed class ReviewCommandConsoleSeamTests
 
         public ReviewCommandResult Run(ReviewSuppressionsRequest request, CancellationToken cancellationToken) => result;
 
+        public Task<ReviewCommandResult> RunAsync(
+            ReviewSuppressionsRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(result);
+
         public ReviewCommandResult Prepare(
             ReviewSeatsRequest request,
             Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
@@ -307,6 +312,17 @@ public sealed class ReviewCommandConsoleSeamTests
         {
             Output = output;
             return result;
+        }
+
+        public Task<ReviewCommandResult> PrepareAsync(
+            ReviewSeatsRequest request,
+            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
+            IProcessRunner indexExecutor,
+            TextWriter output,
+            CancellationToken cancellationToken = default)
+        {
+            Output = output;
+            return Task.FromResult(result);
         }
     }
 

@@ -116,6 +116,49 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
+    public async Task TheSeatsCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewCommandResult result = await Seats(configs).PrepareAsync(
+            new ReviewSeatsRequest("repo", null, null, null, false, false, false),
+            (_, _) => throw new InvalidOperationException("unexpected call"),
+            new ScriptedProcessRunner(),
+            TextWriter.Null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public async Task ATaskInAnotherWorktreeIsFoundAsyncWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
+    {
+        _files.CreateDirectory("/work/wt");
+        PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
+
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
+
+        Assert.NotNull(lookup.Match);
+        Assert.Null(lookup.Reason);
+        Assert.Equal("docs/plan.md", lookup.Match.Plan);
+    }
+
+    [Fact]
+    public async Task ATaskIsStillFoundAsyncInThisCheckoutsPlanThatHasMovedIntoReview()
+    {
+        _files.CreateDirectory("/work/repo");
+        PlanTaskTargetService service = Targets(worktrees: [], activeIn: null, reviewPlans: ["docs/plan.md"]);
+
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
+
+        Assert.Null(lookup.Reason);
+        Assert.NotNull(lookup.Match);
+        Assert.Equal("docs/plan.md", lookup.Match.Plan);
+        Assert.Equal("T1", lookup.Match.Entry.Id);
+    }
+
+    [Fact]
     public void ATaskInAnotherWorktreeIsFoundWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
     {
         _files.CreateDirectory("/work/wt");
