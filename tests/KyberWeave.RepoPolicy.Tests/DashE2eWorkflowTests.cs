@@ -66,7 +66,14 @@ public sealed class DashE2eWorkflowTests
         YamlMappingNode permissions = Assert.IsType<YamlMappingNode>(
             Child(job, "permissions"),
             exactMatch: false);
-        Assert.Equal("read", (Child(permissions, "contents") as YamlScalarNode)?.Value);
+        string[] granted = permissions.Children
+            .Select(entry =>
+                $"{Assert.IsType<YamlScalarNode>(entry.Key).Value}: {Assert.IsType<YamlScalarNode>(entry.Value).Value}")
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.True(
+            granted.SequenceEqual(["contents: read"], StringComparer.Ordinal),
+            $"dash-e2e must grant exactly 'contents: read'; found: {string.Join(", ", granted)}.");
     }
 
     /// <summary>
