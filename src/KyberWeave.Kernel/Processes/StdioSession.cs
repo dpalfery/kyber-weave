@@ -92,7 +92,7 @@ public sealed class StdioSession : IDisposable
 
         // Stderr is drained for the life of the child, not left to fill its pipe and block it. Only the first
         // non-empty line is kept: it is the one a failure message may show, and the rest is not disclosed.
-        _firstErrorLine = Task.Run(DrainFirstErrorLineAsync);
+        _firstErrorLine = DrainFirstErrorLineAsync();
     }
 
     /// <summary>The operating-system process id of the child.</summary>
@@ -134,6 +134,30 @@ public sealed class StdioSession : IDisposable
         return FirstErrorLine;
     }
 
+    /// <summary>
+    ///     <see cref="FirstErrorLine" />, after waiting up to <paramref name="wait" /> for stderr to finish, without
+    ///     blocking the calling thread.
+    /// </summary>
+    /// <param name="wait">The longest to wait for stderr to close.</param>
+    /// <returns>The first non-empty stderr line, or <c>null</c> when there is none.</returns>
+    public async Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait)
+    {
+        try
+        {
+            await _firstErrorLine.WaitAsync(wait, _time).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // Still draining: FirstErrorLine reports whatever was published so far.
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            // A faulted drain has no line to show, which FirstErrorLine reports as null.
+        }
+
+        return FirstErrorLine;
+    }
+
     /// <summary>Writes one line to the child's standard input and flushes it.</summary>
     /// <param name="line">The line to send, without its terminator.</param>
     public void SendLine(string line)
@@ -164,7 +188,7 @@ public sealed class StdioSession : IDisposable
         if (remaining <= TimeSpan.Zero)
             throw new TimeoutException("The session budget was exhausted before the child answered.");
 
-        Task<string?> read = ReadLineBoundedAsync();
+        Task<string?> read = ReadLineBoundedAsync(CancellationToken.None);
         try
         {
             // WaitAsync rather than Wait: Wait wraps a faulted reader in AggregateException, and the caller needs
@@ -186,10 +210,56 @@ public sealed class StdioSession : IDisposable
     }
 
     /// <summary>
+    ///     Reads the child's next standard output line without blocking a thread, waiting no longer than the
+    ///     session has left.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The line, without its terminator.</returns>
+    /// <exception cref="TimeoutException">
+    ///     The budget ran out before a line arrived. The session is then unusable: dispose it.
+    /// </exception>
+    /// <exception cref="EndOfStreamException">The child closed its standard output.</exception>
+    /// <exception cref="InvalidDataException">
+    ///     The child wrote more than the session's line cap without a terminator. The session is then unusable:
+    ///     dispose it.
+    /// </exception>
+    public async Task<string> ReadLineAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (_pendingRead is not null)
+            throw new InvalidOperationException("A previous read timed out; the session must be disposed, not read again.");
+
+        TimeSpan remaining = _budget - _time.GetElapsedTime(_started);
+        if (remaining <= TimeSpan.Zero)
+            throw new TimeoutException("The session budget was exhausted before the child answered.");
+
+        Task<string?> read = ReadLineBoundedAsync(cancellationToken);
+        try
+        {
+            // WaitAsync rather than Wait: Wait wraps a faulted reader in AggregateException, and the caller needs
+            // the reader's own exception — a line over the cap — to classify it. The wait is clamped because
+            // WaitAsync rejects a timeout past the runtime's maximum timer duration, and the budget is a caller's
+            // value with no upper bound of its own.
+            TimeSpan wait = remaining > MaxWait ? MaxWait : remaining;
+            await read.WaitAsync(wait, _time, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // The read is still outstanding on the stream. Keep it as pending so no second read starts
+            // while the first one is in flight.
+            _pendingRead = read;
+            throw new TimeoutException("The child did not answer within the session budget.");
+        }
+
+        return await read.ConfigureAwait(false)
+               ?? throw new EndOfStreamException("The child closed its standard output.");
+    }
+
+    /// <summary>
     ///     Reads one line without letting a child that never terminates one grow the buffer past
     ///     <see cref="MaxLineLength"/>. A read may cross a line end, so the remainder is kept for the next call.
     /// </summary>
-    private async Task<string?> ReadLineBoundedAsync()
+    private async Task<string?> ReadLineBoundedAsync(CancellationToken cancellationToken)
     {
         StringBuilder line = new();
         while (true)
@@ -208,7 +278,7 @@ public sealed class StdioSession : IDisposable
                 throw LineTooLong();
 
             char[] buffer = new char[ReadBufferLength];
-            int read = await _process.StandardOutput.ReadAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+            int read = await _process.StandardOutput.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
             if (read == 0)
                 return line.Length == 0 ? null : Complete(line);
 
