@@ -24,14 +24,14 @@ public sealed class AnalysisPersistenceTests
     [InlineData("/cache/\n", false)]
     [InlineData(".kyber-weave/cache/\n", false)]
     [InlineData("cache/*\n", false)]
-    public void IsSafeRequiresExactCacheDirectoryIgnoreEntry(string ignoreContents, bool expected)
+    public async Task IsSafeRequiresExactCacheDirectoryIgnoreEntry(string ignoreContents, bool expected)
     {
         using TempDirectory repository = new TempDirectory();
         string stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
         Directory.CreateDirectory(stateDirectory);
-        File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
+        await File.WriteAllTextAsync(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        bool actual = DocsPorts.CacheSafety.IsSafe(repository.Path);
+        bool actual = await DocsPorts.CacheSafety.IsSafeAsync(repository.Path);
 
         Assert.Equal(expected, actual);
     }
@@ -40,14 +40,14 @@ public sealed class AnalysisPersistenceTests
     [InlineData("cache/\n!cache/\n")]
     [InlineData("cache/\n!cache/docs-analysis.sqlite3\n")]
     [InlineData("cache/\n!**/cache/**\n")]
-    public void IsSafeWhenLaterRuleNegatesCacheProtectionReturnsFalse(string ignoreContents)
+    public async Task IsSafeWhenLaterRuleNegatesCacheProtectionReturnsFalse(string ignoreContents)
     {
         using TempDirectory repository = new TempDirectory();
         string stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
         Directory.CreateDirectory(stateDirectory);
-        File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
+        await File.WriteAllTextAsync(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        Assert.False(DocsPorts.CacheSafety.IsSafe(repository.Path));
+        Assert.False(await DocsPorts.CacheSafety.IsSafeAsync(repository.Path));
     }
 
     [Fact]
