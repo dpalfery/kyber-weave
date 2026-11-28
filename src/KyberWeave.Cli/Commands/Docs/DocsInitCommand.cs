@@ -199,7 +199,7 @@ public sealed class DocsInitCommand : AsyncCommand<DocsInitSettings>
             TimeSpan.FromSeconds(20),
             "codegraph",
             McpExecutable ?? "kyber-weave-mcp");
-        IProcessRunner executor = Executor ?? new BoundedExecutor(_processes, ProvisionIndexTimeout);
+        IProcessRunner executor = Executor ?? new DefaultTimeoutProcessRunner(_processes, ProvisionIndexTimeout);
 
         DoctorReport report = await _doctor.RunAsync(
             FullPath(settings.Path),
@@ -790,16 +790,4 @@ public sealed class DocsInitCommand : AsyncCommand<DocsInitSettings>
     }
 
     private string FullPath(string path) => _paths.GetFullPath(path, _environment.CurrentDirectory);
-    private sealed class BoundedExecutor(IProcessRunner process, TimeSpan timeout) : IProcessRunner
-    {
-        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            return process.RunAsync(request with { Timeout = request.Timeout ?? timeout }, cancellationToken);
-        }
-
-        public bool IsAlive(int processId) => process.IsAlive(processId);
-
-        public string? FindOnPath(string program) => process.FindOnPath(program);
-    }
 }

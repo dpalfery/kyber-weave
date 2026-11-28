@@ -37,7 +37,8 @@ public sealed class ToolingCheckService(
         DoctorOptions options = McpExecutable is null
             ? DoctorOptions.Defaults
             : DoctorOptions.Defaults with { McpExecutable = McpExecutable };
-        IProcessRunner executor = Executor ?? _process;
+        // A git or CodeGraph call that names no timeout is still bounded at the index timeout.
+        IProcessRunner executor = Executor ?? new DefaultTimeoutProcessRunner(_process, options.IndexTimeout);
 
         DoctorReport report;
         try
