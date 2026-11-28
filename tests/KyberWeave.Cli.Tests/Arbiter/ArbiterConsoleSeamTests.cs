@@ -131,7 +131,7 @@ public sealed class ArbiterConsoleSeamTests
             new OneRowGating(),
             console);
 
-        _ = await command.ExecuteAsync(null!, new ArbiterSettings { Path = NoRepository }, CancellationToken.None).ConfigureAwait(false);
+        _ = await command.ExecuteAsync(null!, new ArbiterSettings { Path = NoRepository }, CancellationToken.None);
 
         Assert.Contains("GLOBAL scope", console.Output, StringComparison.Ordinal);
         Assert.Contains("PROJECT scope", console.Output, StringComparison.Ordinal);
