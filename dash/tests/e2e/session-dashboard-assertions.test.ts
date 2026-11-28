@@ -104,10 +104,23 @@ class FakeWorld {
       const value = prefix[1] ?? ''
       return new FakeLocator(this, () => this.elements.filter((element) => element.testId.startsWith(value)))
     }
+    const exactWithAttr = selector.match(/^\[data-testid="(.+?)"\]\[aria-expanded="(.+?)"\]$/)
+    if (exactWithAttr !== null) {
+      const testId = exactWithAttr[1] ?? ''
+      const expanded = exactWithAttr[2] ?? ''
+      return new FakeLocator(this, () =>
+        this.elements.filter(
+          (element) => element.testId === testId && element.attrs?.['aria-expanded'] === expanded,
+        ),
+      )
+    }
     const exact = selector.match(/^\[data-testid="(.+)"\]$/)
     if (exact !== null) {
       const value = exact[1] ?? ''
       return new FakeLocator(this, () => this.elements.filter((element) => element.testId === value))
+    }
+    if (selector === '[role="button"]') {
+      return new FakeLocator(this, () => [])
     }
     throw new Error(`fake world cannot parse selector '${selector}'`)
   }
@@ -759,7 +772,7 @@ describe('assertHarnessFullContentParity', () => {
     ).rejects.toThrow(/Unannotated content drop \[content-part-drop\]/)
   })
 
-  it('maps matrix gap markers like content_part_withheld to content-part-drop', () => {
+  it('maps matrix gap markers like content_part_withheld to content-part-drop only for matching dimensions', () => {
     const annotation = classifyParityGap({
       code: 'content-part-drop',
       harness: 'copilot',
@@ -770,6 +783,17 @@ describe('assertHarnessFullContentParity', () => {
     })
     expect(annotation.documented).toBe(true)
     expect(annotation.code).toBe('content-part-drop')
+
+    expect(() =>
+      classifyParityGap({
+        code: 'content-part-drop',
+        harness: 'claude-code',
+        sessionId: SESSION_ID,
+        dimension: 'context-content',
+        detail: 'unexpected context drop',
+        documentedGaps: ['tool_call_input_text_absent'],
+      }),
+    ).toThrow(/Unannotated content drop/)
   })
 
   it('detects a single-part drop even when other blocks render content', async () => {
@@ -856,5 +880,53 @@ describe('assertHarnessFullContentParity', () => {
     const result = await assertHarnessFullContentParity(page, contract(), BASE_URL, { includeTurnDetail: false })
     expect(result.drawer?.turnContentEmpty).toBe(true)
     expect(result.gaps.map((gap) => gap.code)).toContain('turn-content-empty')
+  })
+
+  it('expands all nested roots even when expanding the first root reveals an expandable grandchild', async () => {
+    const baseRouter = apiRouter({
+      timelineNodes: [
+        { spanId: 'root-1', kind: 'agent.invoke', name: 'root-1', childCount: 1 },
+        { spanId: 'root-2', kind: 'agent.invoke', name: 'root-2', childCount: 1 },
+      ],
+    })
+    const { page, world } = buildPage((url) => {
+      if (url.pathname.endsWith('/timeline') && url.searchParams.get('parent') === 'root-1') {
+        return json(200, { nodes: [{ spanId: 'child-1', kind: 'llm.invoke', name: 'child-1', childCount: 1 }] })
+      }
+      if (url.pathname.endsWith('/timeline') && url.searchParams.get('parent') === 'root-2') {
+        return json(200, { nodes: [{ spanId: 'span-tool', kind: 'tool.invoke', name: 'execute_tool', childCount: 0 }] })
+      }
+      return baseRouter(url)
+    })
+    wireDashboard(world)
+    wireTurnDrawer(world)
+    const exp1: FakeElement = { testId: 'timeline-node-expand', attrs: { 'aria-expanded': 'false' } }
+    const exp2: FakeElement = { testId: 'timeline-node-expand', attrs: { 'aria-expanded': 'false' } }
+    world.add(exp1, exp2)
+    let clicks = 0
+    world.handle('timeline-node-expand', () => {
+      clicks += 1
+      if (clicks === 1) {
+        if (exp1.attrs) exp1.attrs['aria-expanded'] = 'true'
+        world.add({ testId: 'timeline-node-expand', attrs: { 'aria-expanded': 'false' } })
+      } else if (clicks === 2) {
+        const unexpanded = world.elements.find((e) => e.testId === 'timeline-node-expand' && e.attrs?.['aria-expanded'] === 'false')
+        if (unexpanded?.attrs) unexpanded.attrs['aria-expanded'] = 'true'
+      } else if (clicks >= 3) {
+        const unexpanded = world.elements.find((e) => e.testId === 'timeline-node-expand' && e.attrs?.['aria-expanded'] === 'false')
+        if (unexpanded?.attrs) unexpanded.attrs['aria-expanded'] = 'true'
+        world.add({ testId: 'timeline-bar-span-tool' })
+      }
+    })
+    world.handle('timeline-bar-span-tool', () => {
+      world.add(
+        { testId: 'span-inspector' },
+        { testId: 'drawer-content-scroll' },
+        { testId: 'drawer-close-button' },
+      )
+    })
+
+    const result = await assertHarnessFullContentParity(page, contract(), BASE_URL, { includeTurnDetail: false })
+    expect(result.timeline.inspectedSpanId).toBe('span-tool')
   })
 })

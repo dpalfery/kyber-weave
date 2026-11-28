@@ -269,15 +269,23 @@ const INTRINSIC_GAP_CODES: ReadonlySet<ParityGapCode> = new Set<ParityGapCode>([
   'tool-invocation-absent',
 ])
 
-/** Matrix gap markers (`HARNESS_PARITY_MATRIX.knownGaps`) that document a `content-part-drop`. */
-const CONTENT_DROP_MARKERS: ReadonlySet<string> = new Set<string>([
-  'content-part-drop',
-  'content_part_withheld',
-  'system_prompt_bucket_absent',
-  'partial_turn_projection',
-  'tool_call_input_text_absent',
-  'tool_call_result_text_absent',
-])
+/**
+ * Matrix gap markers (`HARNESS_PARITY_MATRIX.knownGaps`) scoped to the parity dimension(s) they
+ * document, so an upstream tool/projection absence does not excuse an unrelated context drop.
+ */
+const CONTENT_DROP_DIMENSIONS: Readonly<Record<string, ReadonlySet<CopilotParityDimension>>> = {
+  'content-part-drop': new Set<CopilotParityDimension>([
+    'context-content',
+    'turn-projection',
+    'tool-invocations',
+    'user-requests',
+  ]),
+  content_part_withheld: new Set<CopilotParityDimension>(['context-content']),
+  system_prompt_bucket_absent: new Set<CopilotParityDimension>(['context-content']),
+  partial_turn_projection: new Set<CopilotParityDimension>(['turn-projection']),
+  tool_call_input_text_absent: new Set<CopilotParityDimension>(['tool-invocations']),
+  tool_call_result_text_absent: new Set<CopilotParityDimension>(['tool-invocations']),
+}
 
 /** One piece of parity-gap evidence, before it is classified. */
 export type ParityGapEvidence = {
@@ -331,7 +339,8 @@ export function classifyParityGap(
   const documented =
     INTRINSIC_GAP_CODES.has(evidence.code) ||
     documentedGaps.includes(evidence.code) ||
-    (evidence.code === 'content-part-drop' && documentedGaps.some((marker) => CONTENT_DROP_MARKERS.has(marker)))
+    (evidence.code === 'content-part-drop' &&
+      documentedGaps.some((marker) => CONTENT_DROP_DIMENSIONS[marker]?.has(evidence.dimension) ?? false))
   if (!documented) {
     throw new Error(
       `Unannotated content drop [${evidence.code}] for ${evidence.harness} session ${evidence.sessionId}: ${evidence.detail} is not listed in the harness parity matrix`,
@@ -773,8 +782,9 @@ async function inspectChartDrawer(
   const drawer = page.getByTestId('session-inspector-drawer')
   await mustBeVisible(drawer, 'session inspector drawer')
 
+  const settled = await firstAppearingTestId(page, ['turn-section-error', 'turn-content-full', 'turn-content-empty'], 5_000)
   const { parts, projectionFailed } = await readTurnParts(page, baseUrl, sessionId, inspectedTurn)
-  const sectionErrorVisible = (await page.getByTestId('turn-section-error').count()) > 0
+  const sectionErrorVisible = settled === 'turn-section-error' || (await page.getByTestId('turn-section-error').count()) > 0
   if (projectionFailed) {
     if (!sectionErrorVisible && (await page.getByTestId('turn-content-empty').count()) === 0) {
       throw new Error(`turn ${inspectedTurn} of ${sessionId} faulted its projection without rendering an error or empty-turn state`)
@@ -932,11 +942,12 @@ async function inspectTimelineSpans(
   let bar = page.getByTestId(`timeline-bar-${spanId}`)
   if ((await bar.count()) === 0 && nestedRoots.length > 0) {
     const expandButtons = section.locator('[data-testid="timeline-node-expand"][aria-expanded="false"]')
-    const expandCount = await expandButtons.count()
-    for (let i = 0; i < expandCount; i += 1) {
+    const expandDeadline = Date.now() + 10_000
+    for (let clicks = 0; clicks < 50 && Date.now() < expandDeadline; clicks += 1) {
+      if ((await bar.count()) > 0 || (await expandButtons.count()) === 0) break
       await expandButtons.first().click()
+      bar = page.getByTestId(`timeline-bar-${spanId}`)
     }
-    bar = page.getByTestId(`timeline-bar-${spanId}`)
   }
   await mustBeVisible(bar, `timeline bar for span ${spanId}`)
   await bar.click()
