@@ -71,13 +71,38 @@ public sealed class ConfiguredArbiterProviderFactoryTests
     {
         QueuedHandler transport = new(ArbiterProviderTestSupport.Answer());
         _handlers.Transport = transport;
-        IArbiterProvider provider = Factory(environmentKey: "env-key").TryCreate(Config(Remote), "/kw/home")!;
+        IArbiterProvider provider = (await Factory(environmentKey: "env-key").TryCreateAsync(Config(Remote), "/kw/home"))!;
 
         _ = await provider.AskStep1Async([ArbiterProviderTestSupport.Rule()], ArbiterProviderTestSupport.Facts());
         (provider as IDisposable)?.Dispose();
 
         Assert.Equal("env-key", Assert.Single(transport.Authorizations)!.Parameter);
         Assert.Equal(1, _handlers.Created);
+    }
+
+    [Fact]
+    public async Task ProviderNone_AsyncAnswersNullAndCreatesNoTransport()
+    {
+        Assert.Null(await Factory(environmentKey: "k").TryCreateAsync(Config(Remote, ArbiterProviderKind.None), "/kw/home"));
+        Assert.Equal(0, _handlers.Created);
+    }
+
+    [Fact]
+    public async Task ARemoteEndpointWithNoKey_AsyncAnswersNullAndCreatesNoTransport()
+    {
+        Assert.Null(await Factory().TryCreateAsync(Config(Remote), "/kw/home"));
+        Assert.Equal(0, _handlers.Created);
+    }
+
+    [Fact]
+    public async Task ALoopbackEndpoint_AsyncNeedsNoKeyAndRunsOverTheTransportTheSeamSupplies()
+    {
+        IArbiterProvider? provider = await Factory(store: () => throw new InvalidOperationException("no store"))
+            .TryCreateAsync(Config("http://127.0.0.1:11434"), "/kw/home");
+
+        Assert.NotNull(provider);
+        Assert.Equal(1, _handlers.Created);
+        (provider as IDisposable)?.Dispose();
     }
 
     private sealed class RepositoryProviderSettings : IArbiterUserSettings

@@ -51,4 +51,46 @@ public sealed class OllamaProbe(IArbiterHttpHandlers handlers) : IOllamaProbe
             return false;
         }
     }
+
+    /// <inheritdoc />
+    public async Task<OllamaProbeResult> TryDetectAsync(Uri versionUri, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(versionUri);
+        if (versionUri.Scheme != Uri.UriSchemeHttp && versionUri.Scheme != Uri.UriSchemeHttps)
+            return new OllamaProbeResult(false, null);
+
+        try
+        {
+            using HttpClient client = new(handlers.Create(), disposeHandler: true)
+            {
+                Timeout = TimeSpan.FromSeconds(5),
+            };
+            using HttpResponseMessage response = await client.GetAsync(versionUri, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return new OllamaProbeResult(false, null);
+
+            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("version", out JsonElement versionElement)
+                || versionElement.ValueKind != JsonValueKind.String)
+            {
+                return new OllamaProbeResult(false, null);
+            }
+
+            string? found = versionElement.GetString();
+            if (!ArbiterCliText.IsOllamaSupported(found))
+                return new OllamaProbeResult(false, null);
+
+            return new OllamaProbeResult(true, found);
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+            or TaskCanceledException
+            or TimeoutException
+            or JsonException
+            or InvalidOperationException
+            or ObjectDisposedException)
+        {
+            return new OllamaProbeResult(false, null);
+        }
+    }
 }
