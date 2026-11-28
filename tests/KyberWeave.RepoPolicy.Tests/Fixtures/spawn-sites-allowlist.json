@@ -371,7 +371,7 @@
       "file": "src/KyberWeave.Application/Doctor/RepositoryDoctorService.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
-      "bound": "Builds the git rev-parse start info only for the async doctor path; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
+      "bound": "Builds the git rev-parse start info for the doctor; it runs through the IProcessRunner the caller passes in. Every caller wraps that runner in a DefaultTimeoutProcessRunner (the doctor command, docs init, run start and the MCP tooling check at the index timeout), so a request that names no timeout is still killed with its tree at the bound."
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/StdioSession.cs",
@@ -431,7 +431,7 @@
       "file": "src/KyberWeave.Application/Doctor/PostCheckoutHookInstaller.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
-      "bound": "Started through the injected process seam on the sync and async paths. The doctor command passes a timeout, 600 s by default, which kills the child tree on expiry; git argv only, in the repository root."
+      "bound": "Started through the IProcessRunner the caller passes in, which every caller wraps in a DefaultTimeoutProcessRunner at the index timeout (600 s for the doctor command), so the child tree is killed on expiry; git argv only, in the repository root."
     },
     {
       "file": "tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs",
@@ -641,7 +641,7 @@
       "file": "src/KyberWeave.Application/Arbiter/Facts/GitFacts.cs",
       "text": "ProcessStartInfo startInfo = new(gitExecutable)",
       "count": 1,
-      "bound": "Builds only; the synchronous fact reader hands it to the injected process seam, which starts, drains and reaps the child, and the async twin runs the same git arguments under the sixty-second GitTimeout."
+      "bound": "Builds only; the synchronous fact reader runs it through the kernel's ProcessRunner.Run (or the test hook) under the 60 s GitTimeout, which kills the tree on expiry, and the async twin runs the same git arguments through the injected runner under the same GitTimeout."
     },
     {
       "file": "tests/KyberWeave.Integration.Tests/RunStartPlannerTests.cs",
@@ -657,9 +657,9 @@
     },
     {
       "file": "src/KyberWeave.Application/Arbiter/Facts/GitFacts.cs",
-      "text": ": ProcessRunner.Run(startInfo, standardInput);",
+      "text": ": ProcessRunner.Run(startInfo, standardInput, GitTimeout);",
       "count": 1,
-      "bound": "Synchronous fact reader over the kernel runner, which drains both pipes, reaps the child and kills the tree on a fault; every git fact is a short, self-terminating command."
+      "bound": "Synchronous fact reader over the kernel runner with the 60 s GitTimeout: the tree is killed on expiry and the fact is reported absent; both pipes are drained and the child is reaped."
     },
     {
       "file": "src/KyberWeave.Application/Review/GitChangeReader.cs",
@@ -1080,6 +1080,54 @@
       "text": "ProcessResult async = await ProcessRunner.RunAsync(Probe(ProcessProbeProgram.Fail, \"7\", \"bad\"), string.Empty);",
       "count": 1,
       "bound": "ProcessRunner.RunAsync with the caller's timeout: the child's tree is killed on expiry, both pipes are drained before the wait, and the awaited call surfaces a start failure."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/sh\");",
+      "count": 2,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"/bin/sh\")",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"kyber-weave-no-such-program-for-the-interactive-test\");",
+      "count": 1,
+      "bound": "Starts nothing: the program does not exist, so the launch fails with a Win32Exception before any child runs."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "int exitCode = ProcessRunner.RunInteractive(startInfo);",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "Assert.Equal(0, ProcessRunner.RunInteractive(startInfo));",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "_ = ProcessRunner.RunInteractive(startInfo);",
+      "count": 1,
+      "bound": "Self-exiting command: /bin/sh -c \"exit N\" returns at once; ProcessRunner.RunInteractive waits for it, and the case skips off Linux and macOS."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "_ = Assert.Throws<Win32Exception>(() => ProcessRunner.RunInteractive(startInfo));",
+      "count": 1,
+      "bound": "Starts nothing: the program does not exist, so the launch fails with a Win32Exception before any child runs."
+    },
+    {
+      "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerInteractiveTests.cs",
+      "text": "_ = Assert.Throws<ArgumentNullException>(() => ProcessRunner.RunInteractive(null!));",
+      "count": 1,
+      "bound": "Starts nothing: a null start info is refused before any launch."
     },
     {
       "file": "tests/KyberWeave.RepoPolicy.Tests/DistributionManifestTests.cs",

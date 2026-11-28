@@ -248,7 +248,8 @@ internal sealed class HookGitFacts(
                 .ConfigureAwait(false);
             if (preSnapshot is not null)
             {
-                RecordPreSnapshot(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev, preSnapshot);
+                await RecordPreSnapshotAsync(ResolveArbiterDirectory(cwd), SnapshotFileName, classification.Target, ev, preSnapshot, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             await RecordCanonicalSnapshotAsync(facts, classification, ev, cwd, cancellationToken).ConfigureAwait(false);
@@ -362,7 +363,8 @@ internal sealed class HookGitFacts(
             .ConfigureAwait(false);
         if (snapshot is not null)
         {
-            RecordPreSnapshot(ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev, snapshot);
+            await RecordPreSnapshotAsync(ResolveArbiterDirectory(cwd), CanonicalSnapshotFileName, classification.Target, ev, snapshot, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -731,33 +733,50 @@ internal sealed class HookGitFacts(
         ArbiterEvent ev,
         GitSnapshot snapshot)
     {
-        // Without a tool-call id or a prompt there is no pairing key: no post can ever
-        // match this entry, so storing it only evicts baselines that could still pair.
-        if (string.IsNullOrWhiteSpace(ev.ToolCallId) && string.IsNullOrWhiteSpace(ev.Prompt))
+        if (!HasPairingKey(ev)) return;
+        snapshots.Update(directory, fileName, json => AppendSnapshot(json, target, ev, snapshot));
+    }
+
+    private async ValueTask RecordPreSnapshotAsync(
+        string directory,
+        string fileName,
+        string? target,
+        ArbiterEvent ev,
+        GitSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (!HasPairingKey(ev)) return;
+        await snapshots.UpdateAsync(directory, fileName, json => AppendSnapshot(json, target, ev, snapshot), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="ev"/> carries a tool-call id or a prompt. Without either there is no pairing key: no
+    /// post can ever match a recorded entry, so storing it only evicts baselines that could still pair.
+    /// </summary>
+    private static bool HasPairingKey(ArbiterEvent ev) =>
+        !string.IsNullOrWhiteSpace(ev.ToolCallId) || !string.IsNullOrWhiteSpace(ev.Prompt);
+
+    /// <summary>The snapshot document with <paramref name="snapshot"/> appended and expired or excess entries dropped.</summary>
+    private string AppendSnapshot(string json, string? target, ArbiterEvent ev, GitSnapshot snapshot)
+    {
+        List<StoredSnapshot> entries = HookSnapshotDocument.Parse(json);
+        DateTimeOffset now = clock.GetUtcNow();
+        entries.RemoveAll(entry => now - entry.RecordedAt > HookSnapshotDocument.Retention);
+        entries.Add(new StoredSnapshot(
+            ev.ToolCallId,
+            target,
+            HookSnapshotDocument.HashPrompt(ev.Prompt),
+            snapshot.Head,
+            clock.GetUtcNow(),
+            new Dictionary<string, string>(snapshot.BlobIds, StringComparer.Ordinal),
+            new Dictionary<string, string>(snapshot.Statuses, StringComparer.Ordinal)));
+        while (entries.Count > HookSnapshotDocument.MaxStoredSnapshots)
         {
-            return;
+            entries.RemoveAt(0);
         }
 
-        snapshots.Update(directory, fileName, json =>
-        {
-            List<StoredSnapshot> entries = HookSnapshotDocument.Parse(json);
-            DateTimeOffset now = clock.GetUtcNow();
-            entries.RemoveAll(entry => now - entry.RecordedAt > HookSnapshotDocument.Retention);
-            entries.Add(new StoredSnapshot(
-                ev.ToolCallId,
-                target,
-                HookSnapshotDocument.HashPrompt(ev.Prompt),
-                snapshot.Head,
-                clock.GetUtcNow(),
-                new Dictionary<string, string>(snapshot.BlobIds, StringComparer.Ordinal),
-                new Dictionary<string, string>(snapshot.Statuses, StringComparer.Ordinal)));
-            while (entries.Count > HookSnapshotDocument.MaxStoredSnapshots)
-            {
-                entries.RemoveAt(0);
-            }
-
-            return HookSnapshotDocument.Serialize(entries);
-        });
+        return HookSnapshotDocument.Serialize(entries);
     }
 
     private GitSnapshot? FindPreSnapshot(

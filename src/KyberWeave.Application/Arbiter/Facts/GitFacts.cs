@@ -20,6 +20,12 @@ public sealed class GitFacts(
     IFileSystem files,
     Func<ProcessStartInfo, string, ProcessResult>? syncRun = null) : IGitRepositoryFacts
 {
+    /// <summary>
+    /// The bound on one git fact read. Facts are short local reads; a git that has not answered by then is killed
+    /// with its tree and the fact is reported absent.
+    /// </summary>
+    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
+
 
     /// <summary>Resolves the repository root for a working directory.</summary>
     /// <returns>The root, or <c>null</c> when it cannot be determined.</returns>
@@ -931,10 +937,10 @@ public sealed class GitFacts(
             // uses the kernel's synchronous runner directly rather than blocking on the async twin.
             ProcessResult result = syncRun is { } run
                 ? run(startInfo, standardInput)
-                : ProcessRunner.Run(startInfo, standardInput);
+                : ProcessRunner.Run(startInfo, standardInput, GitTimeout);
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException or TimeoutException)
         {
             // Outside a repository git exits non-zero (handled above); a missing
             // binary, a dead working directory, or an unreadable pipe lands here.
@@ -959,9 +965,11 @@ public sealed class GitFacts(
                 Arguments = args,
                 WorkingDirectory = workingDirectory,
                 StandardInput = standardInput,
+                Timeout = GitTimeout,
             };
             ProcessRunResult result = await process.RunAsync(request, cancellationToken).ConfigureAwait(false);
-            return result.ExitCode == 0 ? result.StandardOutput : null;
+            // A git that did not finish within the bound is treated like one that could not answer: the fact is absent.
+            return result.ExitCode == 0 && !result.TimedOut ? result.StandardOutput : null;
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
         {

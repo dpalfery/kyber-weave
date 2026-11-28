@@ -82,11 +82,11 @@ public sealed class ReviewSeatsService(
         string folder = Path.Combine(setup.ReviewFolder, ScratchLayout.CycleFolder(setup.Plan.Number));
         string gatesPath = Path.Combine(folder, ScratchLayout.GatesFileName);
         string baseRef = request.BaseRef ?? DefaultBase;
-        IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
+        IReadOnlyList<string>? changed = await ChangedPathsAsync(root, baseRef, cancellationToken).ConfigureAwait(false);
 
         IReviewDecisionModel model = await decisionModel(root, config, cancellationToken).ConfigureAwait(false);
         CouncilSeatPlan seats = setup.Plan.Prior is { } verified && !request.Full
-            ? VerifierSeats(setup.Tree, verified, setup.Recheck)
+            ? await VerifierSeatsAsync(setup.Tree, verified, setup.Recheck, cancellationToken).ConfigureAwait(false)
             : await WithDecisionModelAsync(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -286,7 +286,7 @@ public sealed class ReviewSeatsService(
         string patch;
         try
         {
-            patch = git.DiffSinceMergeBase(root, baseRef).Patch;
+            patch = (await git.DiffSinceMergeBaseAsync(root, baseRef, cancellationToken).ConfigureAwait(false)).Patch;
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
@@ -309,7 +309,8 @@ public sealed class ReviewSeatsService(
     ///     The verifier cycle's seats, measured on the fix delta from the prior cycle's head: what the fix changed, and how
     ///     many lines. A head git cannot compare with leaves the files unknown, which still seats the narrow set.
     /// </summary>
-    private CouncilSeatPlan VerifierSeats(string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck)
+    private async Task<CouncilSeatPlan> VerifierSeatsAsync(
+        string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck, CancellationToken cancellationToken)
     {
         IReadOnlyList<string>? fixPaths = null;
         int fixLines = 0;
@@ -318,7 +319,7 @@ public sealed class ReviewSeatsService(
             fixPaths = selector.ChangedSince(tree, head);
             try
             {
-                fixLines = ChangedLineCount(git.DiffSince(tree, head));
+                fixLines = ChangedLineCount(await git.DiffSinceAsync(tree, head, cancellationToken).ConfigureAwait(false));
             }
             catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
             {
@@ -360,11 +361,11 @@ public sealed class ReviewSeatsService(
             files.WriteAllText(Path.Combine(packets, lens + ".md"), CouncilSeating.Packet(context, lens));
     }
 
-    private IReadOnlyList<string>? ChangedPaths(string root, string baseRef)
+    private async Task<IReadOnlyList<string>?> ChangedPathsAsync(string root, string baseRef, CancellationToken cancellationToken)
     {
         try
         {
-            return [.. git.ResolveSinceMergeBase(root, baseRef).Select(change => change.Path)];
+            return [.. (await git.ResolveSinceMergeBaseAsync(root, baseRef, cancellationToken).ConfigureAwait(false)).Select(change => change.Path)];
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {

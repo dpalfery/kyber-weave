@@ -59,7 +59,7 @@ namespace KyberWeave.Mcp;
 /// is left answering from whatever is on disk, exactly as it did before this refresh existed.
 /// </para>
 /// </remarks>
-public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate, IDisposable
+public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 {
     /// <summary>How long one refresh may take before it is stopped and reported as failed.</summary>
     private static readonly TimeSpan RefreshBound = TimeSpan.FromSeconds(30);
@@ -102,7 +102,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate, IDisposable
     private readonly IProcessRunner _processes;
     private readonly IProcessRunner _executor;
     private readonly Func<TimeSpan, CancellationToken, Task> _pause;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    /// <summary>1 while this process runs a refresh; a second caller sees it set and answers with the last verdict.</summary>
+    private int _refreshing;
 
     private DateTimeOffset? _lastAttempt;
     private CodeGraphGate _last = CodeGraphGate.Clear;
@@ -164,9 +165,6 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate, IDisposable
         _pause = pause ?? ((wait, cancellationToken) => Task.Delay(wait, time, cancellationToken));
     }
 
-    /// <inheritdoc />
-    public void Dispose() => _gate.Dispose();
-
     /// <summary>
     /// The gate's verdict for this call: no refresh was due, the refresh is someone else's, or
     /// CodeGraph failed in a way the caller has to be told about.
@@ -184,7 +182,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate, IDisposable
         // A refresh already under way in this process is answered the way one under way in
         // another process is: with the last verdict, rather than by waiting on this process's own
         // index work before the caller can have its answer.
-        if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false)) return _last;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0) return _last;
 
         try
         {
@@ -211,7 +210,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate, IDisposable
         }
         finally
         {
-            _gate.Release();
+            Volatile.Write(ref _refreshing, 0);
         }
     }
 

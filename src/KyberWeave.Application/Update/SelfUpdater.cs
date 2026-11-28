@@ -621,7 +621,7 @@ internal sealed class SelfUpdater : IDisposable
             _log("this KyberDash predates the tray restart; checking the engine the earlier way");
             await EnsureEngineAsync(windows, cancellationToken).ConfigureAwait(false);
             if (restartForRelease)
-                await UpdateTrayAsync(windows, version, cancellationToken).ConfigureAwait(false);
+                UpdateTray(windows, version);
             return;
         }
 
@@ -822,7 +822,7 @@ internal sealed class SelfUpdater : IDisposable
                 // No tray to own the engine: the engine alone is checked, and ShouldUpdateTray logs why the tray is left.
                 await EnsureEngineAsync(windows, cancellationToken).ConfigureAwait(false);
                 if (ShouldUpdateTray(options, version, windows, releaseChanged))
-                    await UpdateTrayAsync(windows, version, cancellationToken).ConfigureAwait(false);
+                    UpdateTray(windows, version);
             }
         }
 
@@ -921,7 +921,8 @@ internal sealed class SelfUpdater : IDisposable
             or BadImageFormatException
             or HttpRequestException
             or TimeoutException
-            or OperationCanceledException)
+            // A request timeout is a failed refresh; a cancel the user asked for propagates and stops the update.
+            || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
             WarnArbiterHooksNotRefreshed(DescribeFailure(ex), version, options);
         }
@@ -1168,7 +1169,11 @@ internal sealed class SelfUpdater : IDisposable
         return first.Length == 0 ? string.Empty : $": {first}";
     }
 
-    private async Task UpdateTrayAsync(bool windows, string version, CancellationToken cancellationToken)
+    /// <remarks>
+    /// Synchronous on purpose: the tray child runs interactively through the system's process seam, which streams its
+    /// output and returns its exit code; it has no async or cancellable form.
+    /// </remarks>
+    private void UpdateTray(bool windows, string version)
     {
         string kyberdash = Path.Combine(
             _host.InstallDirectory,

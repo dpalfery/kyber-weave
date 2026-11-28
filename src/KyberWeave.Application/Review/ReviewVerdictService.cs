@@ -238,8 +238,9 @@ public sealed partial class ReviewVerdictService(
             $"{outcome.Accepted.Count} finding(s) accepted, {outcome.Dropped.Count} dropped.",
             Subject));
 
-        FixRounds.Report(
-            prepared.Root, request, prepared.Config, outcome, prepared.GateResults, Cycle.CurrentCycleFolder(request), report);
+        await FixRounds.ReportAsync(
+            prepared.Root, request, prepared.Config, outcome, prepared.GateResults, Cycle.CurrentCycleFolder(request), report, cancellationToken)
+            .ConfigureAwait(false);
 
         report.AddMetric("verdict", outcome.Verdict.ToString());
         report.AddMetric("risk", outcome.Risk.ToString());
@@ -1378,14 +1379,15 @@ public sealed partial class ReviewVerdictService(
         /// schedule (a plan objection, or a hardening outside its cycle). A continuing round also writes one ready fix
         /// packet per owning group and prints its dispatch block after the <c>fix:</c> lines.
         /// </summary>
-        public void Report(
+        public async Task ReportAsync(
             string root,
             ReviewVerdictRequest request,
             KyberWeaveConfig config,
             ReviewOutcome outcome,
             IReadOnlyList<GateResult> gates,
             string? currentFolder,
-            DiagnosticReport report)
+            DiagnosticReport report,
+            CancellationToken cancellationToken)
         {
             ReviewPolicy policy = config.Review.Policy;
             IReadOnlyList<GateResult> failedGates = [.. FailedGates(gates)];
@@ -1404,7 +1406,8 @@ public sealed partial class ReviewVerdictService(
             foreach (string line in fix)
                 report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"{(stopped ? "open" : "fix")}: {line}", Subject));
             if (state == ReviewLoopState.Continue)
-                ReportFixPackets(root, request, config, fixFindings, failedGates, currentFolder, report);
+                await ReportFixPacketsAsync(root, request, config, fixFindings, failedGates, currentFolder, report, cancellationToken)
+                    .ConfigureAwait(false);
             foreach (string line in followUp)
                 report.Add(new Diagnostic(FixRoundCode, Severity.Info, $"follow-up: {line}", Subject));
             report.Add(new Diagnostic(
@@ -1442,14 +1445,15 @@ public sealed partial class ReviewVerdictService(
         /// conductor sends the findings themselves instead of paraphrasing the <c>fix:</c> lines. Everything the writer
         /// could not read or write is a warning line, including a cycle folder it could not name at all.
         /// </summary>
-        private void ReportFixPackets(
+        private async Task ReportFixPacketsAsync(
             string root,
             ReviewVerdictRequest request,
             KyberWeaveConfig config,
             IReadOnlyList<ReviewFinding> findings,
             IReadOnlyList<GateResult> gates,
             string? currentFolder,
-            DiagnosticReport report)
+            DiagnosticReport report,
+            CancellationToken cancellationToken)
         {
             if (currentFolder is not { } folder)
             {
@@ -1462,7 +1466,7 @@ public sealed partial class ReviewVerdictService(
                 return;
             }
 
-            FixPacketOutcome outcome = FixPacketWriter.Write(
+            FixPacketOutcome outcome = await FixPacketWriter.WriteAsync(
                 new FixPacketInput(
                     trees.Containing(root),
                     folder,
@@ -1473,7 +1477,8 @@ public sealed partial class ReviewVerdictService(
                     gates),
                 cycles,
                 git,
-                files);
+                files,
+                cancellationToken).ConfigureAwait(false);
             foreach (string note in outcome.Notes)
                 report.Add(new Diagnostic(FixRoundCode, Severity.Warning, note, Subject));
 

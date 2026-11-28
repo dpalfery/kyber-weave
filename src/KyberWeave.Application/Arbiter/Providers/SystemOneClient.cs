@@ -126,7 +126,15 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         int attempt = 0;
         while (true)
         {
-            using HttpRequestMessage request = await CreateRequestAsync(requestUri, built.BodyJson, cancellationToken).ConfigureAwait(false);
+            // The key lookup shares the provider budget: a locked keychain must not outlive arbiter.provider.timeout-ms.
+            using HttpRequestMessage? request = await TryCreateRequestAsync(requestUri, built.BodyJson, timeout.Token, cancellationToken)
+                .ConfigureAwait(false);
+            if (request is null)
+            {
+                // The budget ran out while the key was being read: undecidable on timeout, as a slow send is.
+                return UndecidableAll(askRules, null, null, true);
+            }
+
             HttpResponseMessage? response = await SendAsync(request, timeout.Token, cancellationToken).ConfigureAwait(false);
             if (response is null)
             {
@@ -177,6 +185,28 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
 
                 return ApplyAnswers(askRules, parsed);
             }
+        }
+    }
+
+    /// <summary>Builds the request under the provider budget, or null when the budget runs out first.</summary>
+    /// <param name="requestUri">The endpoint.</param>
+    /// <param name="bodyJson">The request body.</param>
+    /// <param name="budget">The provider budget's token.</param>
+    /// <param name="cancellationToken">The caller's token; its cancel propagates.</param>
+    /// <returns>The request, or null when the budget expired while the key was being read.</returns>
+    private async Task<HttpRequestMessage?> TryCreateRequestAsync(
+        Uri requestUri,
+        string bodyJson,
+        CancellationToken budget,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await CreateRequestAsync(requestUri, bodyJson, budget).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
         }
     }
 

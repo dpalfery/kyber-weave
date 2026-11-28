@@ -136,22 +136,6 @@ public static class ReviewCycleView
         }
     }
 
-    /// <summary>The paths the working tree changed since <paramref name="commit"/>, or null when git cannot list them.</summary>
-    public static IReadOnlyList<string>? TryChangedSince(IGitChangeReader git, string root, string commit)
-    {
-        ArgumentNullException.ThrowIfNull(git);
-
-        try
-        {
-            return git.ResolveSince(root, commit);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
-                                       or TimeoutException)
-        {
-            return null;
-        }
-    }
-
     /// <summary>
     ///     The prior cycle's findings the fix round took, which this cycle re-checks: every finding at or above
     ///     <c>review.policy.fix-level</c>.

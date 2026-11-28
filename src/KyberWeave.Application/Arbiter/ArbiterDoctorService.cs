@@ -70,6 +70,9 @@ public sealed class ArbiterDoctorService(
         await CheckKeyAsync(config, report, lines, cancellationToken).ConfigureAwait(false);
         await CheckLogIgnoredAsync(root, report, lines, cancellationToken).ConfigureAwait(false);
         await CheckBinaryAsync(report, lines, cancellationToken).ConfigureAwait(false);
+
+        // The checks below stay synchronous: they read the loaded config and a few small local files
+        // (index existence, the Squad receipt, model targets), which have no async API to await.
         CheckGuard(config, root, report, lines);
         CheckProjectHooks(gatingReport, report, lines);
         CheckModelTargets(config, home, globalTargets, report, lines);

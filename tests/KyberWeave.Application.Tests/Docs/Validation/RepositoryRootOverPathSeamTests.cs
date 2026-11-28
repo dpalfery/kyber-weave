@@ -178,7 +178,8 @@ public sealed class RepositoryRootOverPathSeamTests
 
     private sealed class NoGitChanges : IGitChangeReader
     {
-        public IReadOnlyList<string> Resolve(string workingDirectory, string baseRef) => [];
+        public Task<IReadOnlyList<string>> ResolveAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
 
         public string CurrentBranch(string workingDirectory) => string.Empty;
 
@@ -197,6 +198,16 @@ public sealed class RepositoryRootOverPathSeamTests
 
         public string DiffSince(string workingDirectory, string commit) => string.Empty;
 
-        public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths) => [];
+        public Task<IReadOnlyList<ChangedPath>> ResolveSinceMergeBaseAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ChangedPath>>([]);
+
+        public Task<(string MergeBase, string Patch)> DiffSinceMergeBaseAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken) =>
+            Task.FromResult(DiffSinceMergeBase(workingDirectory, baseRef));
+
+        public Task<string> DiffSinceAsync(string workingDirectory, string commit, CancellationToken cancellationToken) =>
+            Task.FromResult(DiffSince(workingDirectory, commit));
+
+        public Task<IReadOnlyList<string>> LogOnelineAsync(string workingDirectory, string fromCommit, IReadOnlyList<string> paths, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
     }
 }

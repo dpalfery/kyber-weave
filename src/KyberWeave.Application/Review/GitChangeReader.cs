@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
@@ -6,16 +7,20 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Lists the files a working tree changed, by running git with argv and never a shell.</summary>
-/// <param name="programs">Starts git.</param>
-/// <param name="syncRun">The synchronous runner a test supplies; null uses the kernel's synchronous runner.</param>
+/// <remarks>
+/// The <c>…Async</c> members run git through the injected <see cref="IProcessRunner"/> and never block a thread. The
+/// remaining members are synchronous because their callers sit behind synchronous contracts
+/// (<c>IReviewCycleSelector</c>, <c>IReviewWorkTreeService</c>, <c>IReviewEvidenceService</c>, <c>IDocsSchemaGate</c>);
+/// the injected runner has no synchronous run, so they go through <paramref name="syncRun"/> or, when it is null,
+/// the kernel's synchronous runner, until those callers move to the async members.
+/// </remarks>
+/// <param name="programs">Starts git for the <c>…Async</c> members.</param>
+/// <param name="syncRun">The synchronous runner the synchronous members use; null uses the kernel's synchronous runner.</param>
 public sealed class GitChangeReader(
     IProcessRunner programs,
     Func<ProcessStartInfo, string, ProcessResult>? syncRun = null) : IGitChangeReader
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
-
-    /// <summary>The process seam the reader was built over, retained for async consumers.</summary>
-    internal IProcessRunner Processes => programs;
 
     /// <summary>
     /// Lists the paths changed since <paramref name="baseRef"/> that still exist, together with untracked files.
@@ -26,18 +31,26 @@ public sealed class GitChangeReader(
     /// </remarks>
     /// <param name="workingDirectory">The repository root. Paths come back relative to it.</param>
     /// <param name="baseRef">The ref to diff the working tree against.</param>
+    /// <param name="cancellationToken">Cancels the run and kills git's process tree.</param>
     /// <exception cref="InvalidOperationException">git could not list the files.</exception>
-    public IReadOnlyList<string> Resolve(string workingDirectory, string baseRef)
+    /// <exception cref="Win32Exception">git could not be started.</exception>
+    /// <exception cref="TimeoutException">git outlived its time limit.</exception>
+    public async Task<IReadOnlyList<string>> ResolveAsync(
+        string workingDirectory, string baseRef, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
 
-        string[] changed = RunGitPaths(
-            workingDirectory,
-            "diff", "-z", "--name-only", "--relative", "--diff-filter=ACMRT", baseRef, "--");
-        string[] untracked = RunGitPaths(
-            workingDirectory,
-            "ls-files", "-z", "--others", "--exclude-standard", "--");
+        string[] changed = await RunGitPathsAsync(
+                workingDirectory,
+                cancellationToken,
+                "diff", "-z", "--name-only", "--relative", "--diff-filter=ACMRT", baseRef, "--")
+            .ConfigureAwait(false);
+        string[] untracked = await RunGitPathsAsync(
+                workingDirectory,
+                cancellationToken,
+                "ls-files", "-z", "--others", "--exclude-standard", "--")
+            .ConfigureAwait(false);
 
         return GitChangeParsing.Combine(changed, untracked);
     }
@@ -91,7 +104,7 @@ public sealed class GitChangeReader(
     /// together with untracked files.
     /// </summary>
     /// <remarks>
-    /// A deleted file can break a gate as surely as an edited one, so unlike <see cref="Resolve"/> this keeps it.
+    /// A deleted file can break a gate as surely as an edited one, so unlike <see cref="ResolveAsync"/> this keeps it.
     /// A commit git does not know, such as one a rebase dropped, is an error: the caller then cannot compare.
     /// </remarks>
     /// <param name="workingDirectory">The repository root. Paths come back relative to it.</param>
@@ -147,6 +160,38 @@ public sealed class GitChangeReader(
     }
 
     /// <summary>
+    /// The asynchronous twin of <see cref="ResolveSinceMergeBase"/>: the same scope and the same refusal, run through
+    /// the injected process runner.
+    /// </summary>
+    /// <param name="workingDirectory">The repository root. Paths come back relative to it.</param>
+    /// <param name="baseRef">The ref the merge base is resolved against.</param>
+    /// <param name="cancellationToken">Cancels the run and kills git's process tree.</param>
+    /// <exception cref="InvalidOperationException">No merge base resolves, so the scope is unknown.</exception>
+    /// <exception cref="Win32Exception">git could not be started.</exception>
+    /// <exception cref="TimeoutException">git outlived its time limit.</exception>
+    public async Task<IReadOnlyList<ChangedPath>> ResolveSinceMergeBaseAsync(
+        string workingDirectory, string baseRef, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+
+        string mergeBase = await ResolveMergeBaseAsync(workingDirectory, baseRef, cancellationToken).ConfigureAwait(false);
+
+        string[] status = await RunGitPathsAsync(
+                workingDirectory,
+                cancellationToken,
+                "diff", "-z", "--name-status", "-M", "--relative", mergeBase, "--")
+            .ConfigureAwait(false);
+        string[] untracked = await RunGitPathsAsync(
+                workingDirectory,
+                cancellationToken,
+                "ls-files", "-z", "--others", "--exclude-standard", "--")
+            .ConfigureAwait(false);
+
+        return GitChangeParsing.ParseNameStatus(status, untracked);
+    }
+
+    /// <summary>
     /// The unified diff from the merge base of <paramref name="baseRef"/> and <c>HEAD</c> to the files on disk, so
     /// staged and uncommitted edits are in it. Untracked files are not: <see cref="ResolveSinceMergeBase"/> lists them.
     /// </summary>
@@ -165,6 +210,29 @@ public sealed class GitChangeReader(
         return (mergeBase, DiffSince(workingDirectory, mergeBase));
     }
 
+    /// <summary>The asynchronous twin of <see cref="DiffSinceMergeBase"/>, run through the injected process runner.</summary>
+    /// <param name="workingDirectory">The repository root.</param>
+    /// <param name="baseRef">The ref the merge base is resolved against.</param>
+    /// <param name="cancellationToken">Cancels the run and kills git's process tree.</param>
+    /// <returns>The merge-base commit and the patch text.</returns>
+    /// <exception cref="InvalidOperationException">No merge base resolves, or git could not produce the diff.</exception>
+    /// <exception cref="Win32Exception">git could not be started.</exception>
+    /// <exception cref="TimeoutException">git outlived its time limit.</exception>
+    public async Task<(string MergeBase, string Patch)> DiffSinceMergeBaseAsync(
+        string workingDirectory, string baseRef, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
+
+        string[] output = await RunGitPathsAsync(workingDirectory, cancellationToken, "merge-base", baseRef, "HEAD")
+            .ConfigureAwait(false);
+        if (output.Length == 0)
+            throw new InvalidOperationException($"'{baseRef}' and HEAD have no common commit");
+
+        string mergeBase = output[0].Trim();
+        return (mergeBase, await DiffSinceAsync(workingDirectory, mergeBase, cancellationToken).ConfigureAwait(false));
+    }
+
     /// <summary>The unified diff from <paramref name="commit"/> to the files on disk; untracked files are not in it.</summary>
     /// <exception cref="InvalidOperationException">git could not produce the diff.</exception>
     public string DiffSince(string workingDirectory, string commit)
@@ -172,6 +240,21 @@ public sealed class GitChangeReader(
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(commit);
         return RunGit(workingDirectory, "diff", "--no-color", "--relative", commit, "--");
+    }
+
+    /// <summary>The asynchronous twin of <see cref="DiffSince"/>, run through the injected process runner.</summary>
+    /// <param name="workingDirectory">The repository root.</param>
+    /// <param name="commit">The commit to compare the working tree with.</param>
+    /// <param name="cancellationToken">Cancels the run and kills git's process tree.</param>
+    /// <exception cref="InvalidOperationException">git could not produce the diff.</exception>
+    /// <exception cref="Win32Exception">git could not be started.</exception>
+    /// <exception cref="TimeoutException">git outlived its time limit.</exception>
+    public async Task<string> DiffSinceAsync(string workingDirectory, string commit, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        return await RunGitAsync(workingDirectory, cancellationToken, "diff", "--no-color", "--relative", commit, "--")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -183,8 +266,15 @@ public sealed class GitChangeReader(
     /// <c>--literal-pathspecs</c> makes every path a literal name rather than a pattern. A path that is not
     /// repository-relative is ignored: git would read it as a path on the machine, not in the change.
     /// </remarks>
+    /// <param name="workingDirectory">The repository root.</param>
+    /// <param name="fromCommit">The commit the history starts after.</param>
+    /// <param name="paths">The repository-relative paths the commits must have touched.</param>
+    /// <param name="cancellationToken">Cancels the run and kills git's process tree.</param>
     /// <exception cref="InvalidOperationException">git could not list the commits.</exception>
-    public IReadOnlyList<string> LogOneline(string workingDirectory, string fromCommit, IReadOnlyList<string> paths)
+    /// <exception cref="Win32Exception">git could not be started.</exception>
+    /// <exception cref="TimeoutException">git outlived its time limit.</exception>
+    public async Task<IReadOnlyList<string>> LogOnelineAsync(
+        string workingDirectory, string fromCommit, IReadOnlyList<string> paths, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(fromCommit);
@@ -196,7 +286,7 @@ public sealed class GitChangeReader(
 
         List<string> arguments = ["--literal-pathspecs", "log", "--oneline", "--no-color", $"{fromCommit}..HEAD", "--"];
         arguments.AddRange(relative);
-        string output = RunGit(workingDirectory, [.. arguments]);
+        string output = await RunGitAsync(workingDirectory, cancellationToken, [.. arguments]).ConfigureAwait(false);
         return
         [
             .. output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -234,10 +324,43 @@ public sealed class GitChangeReader(
         return output[0].Trim();
     }
 
+    /// <summary>The asynchronous twin of <see cref="ResolveMergeBase"/>.</summary>
+    private async Task<string> ResolveMergeBaseAsync(string workingDirectory, string baseRef, CancellationToken cancellationToken)
+    {
+        string[] output;
+        try
+        {
+            output = await RunGitPathsAsync(workingDirectory, cancellationToken, "merge-base", baseRef, "HEAD").ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException(
+                $"Archive closeout scope is unknown: cannot determine what this change archives " +
+                $"from base '{baseRef}' ({ex.Message.Trim()}). " +
+                $"Fetch the full history ('git fetch --unshallow' or 'git fetch origin') and re-run.",
+                ex);
+        }
+
+        if (output.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"Archive closeout scope is unknown: cannot determine what this change archives " +
+                $"from base '{baseRef}' (git merge-base reported no common commit). " +
+                $"Fetch the full history ('git fetch --unshallow' or 'git fetch origin') and re-run.");
+        }
+
+        return output[0].Trim();
+    }
+
     private string[] RunGitPaths(string workingDirectory, params string[] arguments) =>
         GitChangeParsing.SplitPaths(RunGit(workingDirectory, arguments));
 
-    private string RunGit(string workingDirectory, params string[] arguments)
+    private async Task<string[]> RunGitPathsAsync(
+        string workingDirectory, CancellationToken cancellationToken, params string[] arguments) =>
+        GitChangeParsing.SplitPaths(
+            await RunGitAsync(workingDirectory, cancellationToken, arguments).ConfigureAwait(false));
+
+    private static ProcessStartInfo GitStartInfo(string workingDirectory, string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -250,11 +373,32 @@ public sealed class GitChangeReader(
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        // The change reader is a synchronous adapter over git for the review services; its callers stay synchronous
-        // until the review entry points move. Production uses the kernel's synchronous runner; a test supplies its own.
+        return startInfo;
+    }
+
+    private string RunGit(string workingDirectory, params string[] arguments)
+    {
+        ProcessStartInfo startInfo = GitStartInfo(workingDirectory, arguments);
+
+        // The synchronous members serve callers that sit behind synchronous contracts, and the injected runner has no
+        // synchronous run: they use the kernel's synchronous runner, or the one a test supplies.
         ProcessResult result = syncRun is { } run
             ? run(startInfo, string.Empty)
             : ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
+        return Output(result, arguments);
+    }
+
+    private async Task<string> RunGitAsync(
+        string workingDirectory, CancellationToken cancellationToken, params string[] arguments)
+    {
+        ProcessResult result = await programs
+            .RunAsync(GitStartInfo(workingDirectory, arguments), string.Empty, GitTimeout, cancellationToken)
+            .ConfigureAwait(false);
+        return Output(result, arguments);
+    }
+
+    private static string Output(ProcessResult result, string[] arguments)
+    {
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
