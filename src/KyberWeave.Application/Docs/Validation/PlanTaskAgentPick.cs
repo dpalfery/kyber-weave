@@ -151,7 +151,9 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks)
+    public async Task<IReadOnlyDictionary<string, PlanTaskAgentChoice>> PickAsync(
+        IReadOnlyList<PlanTaskFileEntry> tasks,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(tasks);
         Dictionary<string, PlanTaskAgentChoice> picks = new(StringComparer.Ordinal);
@@ -164,7 +166,12 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         PlanTaskAgentChoice?[] choices;
         try
         {
-            choices = Task.WhenAll(asked.Select(AskAsync)).GetAwaiter().GetResult();
+            // Every task's question goes out at once, so the cost is one round trip rather than one per task.
+            choices = await Task.WhenAll(asked.Select(task => AskAsync(task, cancellationToken))).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -173,12 +180,12 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
         for (int index = 0; index < asked.Count; index++)
         {
-            if (choices[index] is not { } choice)
+            if (choices[index] is not { } choice || asked[index].Id is not { } id)
                 continue;
 
             // An answer naming no candidate is no pick, exactly as a missing one; the agreement it arrived with
             // is independent of the pick, so it is kept.
-            picks[asked[index].Id!] = choice.Agent is not null && !names.Contains(choice.Agent)
+            picks[id] = choice.Agent is not null && !names.Contains(choice.Agent)
                 ? choice with { Agent = null, Confidence = 0 }
                 : choice;
         }
@@ -187,7 +194,9 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     }
 
     /// <summary>One task's question, asked on its own so the model reads only that task's state.</summary>
-    private async Task<PlanTaskAgentChoice?> AskAsync(PlanTaskFileEntry task)
+    /// <param name="task">The task to ask about.</param>
+    /// <param name="cancellationToken">Cancels the model call.</param>
+    private async Task<PlanTaskAgentChoice?> AskAsync(PlanTaskFileEntry task, CancellationToken cancellationToken)
     {
         if (task.Id is not { } taskId)
         {
@@ -215,7 +224,11 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         try
         {
             // One request per task carries both questions, so the check costs no second round trip.
-            result = await _provider.AskStep1Async(rules, facts).ConfigureAwait(false);
+            result = await _provider.AskStep1Async(rules, facts, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

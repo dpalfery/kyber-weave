@@ -173,16 +173,16 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     }
 
     /// <summary>A bot comment with a null body is classed through the tool as an error answer, not a thrown exception.</summary>
-    /// <remarks>Kilo 4537885372: <c>body.Length</c> dereferences a null body in <c>ClassifyBotReviewComment</c>.</remarks>
+    /// <remarks>Kilo 4537885372: <c>body.Length</c> dereferences a null body in <c>ClassifyBotReviewCommentAsync</c>.</remarks>
     [Fact]
-    public void AClassifyCallWithANullBodyReturnsAnErrorAnswer()
+    public async Task AClassifyCallWithANullBodyReturnsAnErrorAnswer()
     {
         ArbiterHookDecisionEngine engine = _host.Engine(
             providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null });
         ArbiterTools tools = _host.Tools(engine);
         _ = WriteCitedFile("docs/guide.md");
 
-        string json = tools.ClassifyBotReviewComment("docs/guide.md", 2, null!, null);
+        string json = await tools.ClassifyBotReviewCommentAsync("docs/guide.md", 2, null!, null);
 
         using JsonDocument document = JsonDocument.Parse(json);
         Assert.True(document.RootElement.TryGetProperty("error", out _), $"expected an error property, got: {json}");

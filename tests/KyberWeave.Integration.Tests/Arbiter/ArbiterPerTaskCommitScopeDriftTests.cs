@@ -19,21 +19,21 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 public sealed class ArbiterPerTaskCommitScopeDriftTests
 {
     [Fact]
-    public void PerTaskCommitsDoNotHideScopeDrift()
+    public async Task PerTaskCommitsDoNotHideScopeDrift()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
-        GitSnapshot? snapshot = RealGitFacts.Create().CaptureSnapshot(probe.Root);
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
+        GitSnapshot? snapshot = await RealGitFacts.Create().CaptureSnapshotAsync(probe.Root);
         Assert.NotNull(snapshot);
 
-        probe.Git("switch", "-c", "claude/feat/one-task", "origin/main");
+        await probe.GitAsync("switch", "-c", "claude/feat/one-task", "origin/main");
         string committed = Path.Combine(probe.Root, "src", "OneTask.cs");
         Directory.CreateDirectory(Path.GetDirectoryName(committed)!);
-        File.WriteAllText(committed, "// one task's work\n", System.Text.Encoding.UTF8);
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", "test(squad): one task, one commit");
-        Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
+        await File.WriteAllTextAsync(committed, "// one task's work\n", System.Text.Encoding.UTF8);
+        await probe.GitAsync("add", "-A");
+        await probe.GitAsync("commit", "-m", "test(squad): one task, one commit");
+        Assert.Equal(string.Empty, (await probe.GitOutputAsync("status", "--porcelain")).Trim());
 
-        IReadOnlySet<string> changed = RealGitFacts.Create().GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
+        IReadOnlySet<string> changed = await RealGitFacts.Create().GetChangedPathsSinceSnapshotAsync(probe.Root, snapshot!);
 
         Assert.Contains("src/OneTask.cs", changed);
     }

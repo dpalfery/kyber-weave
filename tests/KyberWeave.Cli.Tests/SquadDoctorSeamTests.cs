@@ -40,9 +40,9 @@ public sealed class SquadDoctorSeamTests : IDisposable
 
     /// <summary>A workspace with no Devin marker in the injected file system is reported as not checked.</summary>
     [Fact]
-    public void Execute_NoDevinMarkerInTheInjectedFileSystem_SkipsTheDevinCheck()
+    public async Task Execute_NoDevinMarkerInTheInjectedFileSystem_SkipsTheDevinCheck()
     {
-        int exit = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (int exit, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Equal(0, exit);
         Assert.Contains("Devin duplicate imports: not checked (no '.devin/' in this directory)", output, StringComparison.Ordinal);
@@ -53,11 +53,11 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// answer comes from the seam and not from the developer's disk.
     /// </summary>
     [Fact]
-    public void Execute_DevinMarkerInTheInjectedFileSystem_RunsTheDevinCheck()
+    public async Task Execute_DevinMarkerInTheInjectedFileSystem_RunsTheDevinCheck()
     {
         _files.CreateDirectory($"{Workspace}/.devin");
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains("Devin duplicate imports: none", output, StringComparison.Ordinal);
         Assert.DoesNotContain("not checked (no '.devin/'", output, StringComparison.Ordinal);
@@ -65,12 +65,12 @@ public sealed class SquadDoctorSeamTests : IDisposable
 
     /// <summary>The Devin check reports what the inspector finds: the file reading lives behind that port.</summary>
     [Fact]
-    public void Execute_DevinInspectorReportsAnOverlap_WarnsAboutIt()
+    public async Task Execute_DevinInspectorReportsAnOverlap_WarnsAboutIt()
     {
         _files.CreateDirectory($"{Workspace}/.devin");
         _devinOverlap.Report = new([new DevinImportOverlapEntry(".claude/skills", "skill", "claude", ["review"])]);
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains("Devin also loads 1 skill(s) from '.claude/skills/'", output, StringComparison.Ordinal);
     }
@@ -80,11 +80,11 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// deployment tree through the seam.
     /// </summary>
     [Fact]
-    public void Execute_RetiredSkillInTheInjectedFileSystem_WarnsAboutIt()
+    public async Task Execute_RetiredSkillInTheInjectedFileSystem_WarnsAboutIt()
     {
         _files.CreateDirectory($"{Workspace}/.claude/skills/{SquadRetiredSkills.SecondBrain}");
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains($"Retired skill '{SquadRetiredSkills.SecondBrain}' still present at", output, StringComparison.Ordinal);
     }
@@ -94,11 +94,11 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// template its rules moved into, so the operator sees the replacement, not just a name.
     /// </summary>
     [Fact]
-    public void Execute_RetiredTechnologySkillInAProjectRoot_WarnsWithItsStandardsTemplate()
+    public async Task Execute_RetiredTechnologySkillInAProjectRoot_WarnsWithItsStandardsTemplate()
     {
         _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev");
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains("Retired skill 'csharp-dev' still present at", output, StringComparison.Ordinal);
         Assert.Contains("`csharp` standards template", output, StringComparison.Ordinal);
@@ -109,11 +109,11 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// deployment is Squad's default, so the project tree alone would miss it.
     /// </summary>
     [Fact]
-    public void Execute_RetiredTechnologySkillUnderAGlobalRoot_WarnsWithItsStandardsTemplate()
+    public async Task Execute_RetiredTechnologySkillUnderAGlobalRoot_WarnsWithItsStandardsTemplate()
     {
         _files.CreateDirectory("/doctor-home/skills/rust-dev");
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains("Retired skill 'rust-dev' still present at", output, StringComparison.Ordinal);
         Assert.Contains("`rust` standards template", output, StringComparison.Ordinal);
@@ -125,13 +125,13 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// leaves behind when the operator edited the file.
     /// </summary>
     [Fact]
-    public void Execute_GlobalReceiptClaimsARetiredTechnologySkill_WarnsWithItsNewHome()
+    public async Task Execute_GlobalReceiptClaimsARetiredTechnologySkill_WarnsWithItsNewHome()
     {
         _state.GlobalReceipt = Receipt(
             SquadDeploymentScope.Global,
             new SquadOwnedFile("skills/dal-dev/SKILL.md", new string('0', 64), "claude", Adopted: false));
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains("Global deployment receipt still claims retired 'dal-dev' files", output, StringComparison.Ordinal);
         Assert.Contains("`data-access-layer` and `sql-server` standards templates", output, StringComparison.Ordinal);
@@ -142,13 +142,13 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// beside it still warns, which proves the lookalike check is not passing because nothing ran.
     /// </summary>
     [Fact]
-    public void Execute_LookalikeRetiredSkillName_WarnsOnlyAboutTheRealSkill()
+    public async Task Execute_LookalikeRetiredSkillName_WarnsOnlyAboutTheRealSkill()
     {
         _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev-extra");
         _files.CreateDirectory("/doctor-home/skills/csharp-dev-extra");
         _files.CreateDirectory($"{Workspace}/.claude/skills/csharp-dev");
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.DoesNotContain("'csharp-dev-extra'", output, StringComparison.Ordinal);
         Assert.Contains("Retired skill 'csharp-dev' still present at", output, StringComparison.Ordinal);
@@ -159,13 +159,13 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// reported drift is what the fake file holds, not what the developer's disk does.
     /// </summary>
     [Fact]
-    public void Execute_OwnedBlockFileInTheInjectedFileSystem_ReadsItThroughTheSeam()
+    public async Task Execute_OwnedBlockFileInTheInjectedFileSystem_ReadsItThroughTheSeam()
     {
         _state.Receipt = ReceiptWithOneBlock();
         _files.CreateDirectory($"{Workspace}/.claude");
         _files.WriteAllText($"{Workspace}/.claude/settings.json", "{ not json");
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Contains("Owned block drift: .claude/settings.json", output, StringComparison.Ordinal);
         Assert.DoesNotContain("(missing)", output, StringComparison.Ordinal);
@@ -177,11 +177,11 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// from the seam rather than from the developer's disk.
     /// </summary>
     [Fact]
-    public void Execute_ProjectRootOnlyInTheInjectedFileSystem_ImportsIt()
+    public async Task Execute_ProjectRootOnlyInTheInjectedFileSystem_ImportsIt()
     {
         _files.CreateDirectory(Workspace);
 
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out _);
+        _ = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Equal(Workspace, _migration.ImportedProjectRoot);
     }
@@ -191,9 +191,9 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// alone, because the anchor is resolved as a dry run.
     /// </summary>
     [Fact]
-    public void Execute_GlobalWithANamedPath_WritesTheIgnoredPathWarningToTheInjectedConsole()
+    public async Task Execute_GlobalWithANamedPath_WritesTheIgnoredPathWarningToTheInjectedConsole()
     {
-        _ = Execute(new SquadDoctorSettings { Path = Workspace, Global = true }, out string output);
+        (_, string output) = await Execute(new SquadDoctorSettings { Path = Workspace, Global = true });
 
         Assert.Contains("is ignored under --global", output, StringComparison.Ordinal);
     }
@@ -203,9 +203,9 @@ public sealed class SquadDoctorSeamTests : IDisposable
     /// With no path named, the diagnosed root is the environment seam's current directory, not the process's.
     /// </summary>
     [Fact]
-    public void Execute_NoNamedPath_DiagnosesTheEnvironmentSeamsCurrentDirectory()
+    public async Task Execute_NoNamedPath_DiagnosesTheEnvironmentSeamsCurrentDirectory()
     {
-        _ = Execute(new SquadDoctorSettings { Global = false }, out _);
+        _ = await Execute(new SquadDoctorSettings { Global = false });
 
         Assert.Equal("/launched-from", _locator.WorkingDirectory);
     }
@@ -213,18 +213,18 @@ public sealed class SquadDoctorSeamTests : IDisposable
 
     /// <summary>The state migration runs from the environment seam's current directory, not from the process's.</summary>
     [Fact]
-    public void Execute_MigrationRunsFromTheEnvironmentSeamsCurrentDirectory()
+    public async Task Execute_MigrationRunsFromTheEnvironmentSeamsCurrentDirectory()
     {
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out _);
+        _ = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Equal("/launched-from", _migration.InvokingCwd);
     }
 
     /// <summary>Nothing the doctor reports goes to the standard output the markup console does not own.</summary>
     [Fact]
-    public void Execute_WritesNothingToStandardOutput()
+    public async Task Execute_WritesNothingToStandardOutput()
     {
-        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out _);
+        _ = await Execute(new SquadDoctorSettings { Path = Workspace });
 
         Assert.Equal(string.Empty, _streams.Output);
     }
@@ -238,13 +238,13 @@ public sealed class SquadDoctorSeamTests : IDisposable
         Assert.False(wiring.HasDefaultValue);
     }
 
-    private int Execute(SquadDoctorSettings settings, out string output)
+    private async Task<(int ExitCode, string Output)> Execute(SquadDoctorSettings settings)
     {
         SquadDoctorCommand command = Doctor();
-        int exit = command.Execute(null!, settings, CancellationToken.None);
+        int exit = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
-        output = _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
-        return exit;
+        string output = _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return (exit, output);
     }
 
     private static SquadReceipt ReceiptWithOneBlock() =>

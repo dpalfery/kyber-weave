@@ -68,19 +68,22 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     }
 
     /// <inheritdoc />
-    public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default)
+    public async Task<DocumentationAnalysisResult> AnalyzeAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         KyberWeaveConfig config = LoadConfig();
         DocumentSet documents = _documents.Create(_repositoryRoot, config.Ontology).Load();
         cancellationToken.ThrowIfCancellationRequested();
-        ICodeGraphResolver codeGraph = _codeGraph.ForRepository(_repositoryRoot).Resolver;
+        CodeGraphPorts codeGraphPorts = await _codeGraph.ForRepositoryAsync(_repositoryRoot, cancellationToken)
+            .ConfigureAwait(false);
+        ICodeGraphResolver codeGraph = codeGraphPorts.Resolver;
         DocGraphProjection graph = DocGraphProjectionBuilder.Build(
             documents,
             codeGraph,
             config.DocsAnalysis.Search.MaxCodeNeighbors);
         cancellationToken.ThrowIfCancellationRequested();
-        IAnalysisPersistence persistence = _persistence.Open(_repositoryRoot);
+        IAnalysisPersistence persistence = await _persistence.OpenAsync(_repositoryRoot, cancellationToken)
+            .ConfigureAwait(false);
         IEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null
             : _embeddings.Create();
@@ -95,12 +98,12 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
             persistence);
         ManagedGlossaryLoadResult glossary = _glossaries.Open(_repositoryRoot, config).Load();
 
-        DocumentationAnalysisResult result = analyzer.Analyze(
+        DocumentationAnalysisResult result = await analyzer.AnalyzeAsync(
             documents,
             graph,
             config.DocsAnalysis,
             glossary.AnalysisGlossary,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         AddCodeGraphUnavailable(result.Diagnostics, codeGraph);
         return result;
     }

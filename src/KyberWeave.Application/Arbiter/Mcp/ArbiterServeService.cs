@@ -47,9 +47,10 @@ public sealed class ArbiterServeService(
     /// <summary>The largest client text one MCP call may embed, in characters: the shared Arbiter limit.</summary>
     private const int MaxTextChars = ArbiterTextLimits.MaxTextChars;
 
-    public string Evaluate(
+    public async Task<string> EvaluateAsync(
         string trigger,
-        ArbiterFacts facts)
+        ArbiterFacts facts,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(facts);
 
@@ -94,11 +95,12 @@ public sealed class ArbiterServeService(
             try
             {
                 outcome = post
-                    ? context.Engine.DecidePostDispatch(
+                    ? await context.Engine.DecidePostDispatchAsync(
                         Harness, item.Caller, item.Target, item.Prompt, facts.Output ?? string.Empty,
-                        config, hookContext, facts.CallId)
-                    : context.Engine.DecidePreDispatch(
-                        Harness, item.Caller, item.Target, item.Prompt, config, hookContext, facts.CallId);
+                        config, hookContext, facts.CallId, cancellationToken: cancellationToken).ConfigureAwait(false)
+                    : await context.Engine.DecidePreDispatchAsync(
+                        Harness, item.Caller, item.Target, item.Prompt, config, hookContext, facts.CallId,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
             {
@@ -284,7 +286,7 @@ public sealed class ArbiterServeService(
         return sb.ToString().TrimEnd();
     }
 
-    public string Status()
+    public async Task<string> StatusAsync(CancellationToken cancellationToken = default)
     {
         (KyberWeaveConfig? config, string? error) = Load();
         string provenance = Provenance(config);
@@ -316,7 +318,7 @@ public sealed class ArbiterServeService(
             // message only, never the stack, and never the key - it reports presence.
             key = !remote
                 ? "not needed (none or loopback provider)"
-                : context.KeyResolved(config)
+                : await context.KeyResolvedAsync(config, cancellationToken).ConfigureAwait(false)
                     ? "found"
                     : "missing (KW-ARB-KEY-001)";
         }
@@ -348,10 +350,12 @@ public sealed class ArbiterServeService(
     /// <param name="path">The repository-relative document path.</param>
     /// <param name="task">The task the sections are selected for.</param>
     /// <param name="maxSections">The most sections to list; null lists every selected section.</param>
-    public string SelectRelevantDocumentSections(
+    /// <param name="cancellationToken">Cancels the read and the provider call.</param>
+    public async Task<string> SelectRelevantDocumentSectionsAsync(
         string path,
         string task,
-        int? maxSections = null)
+        int? maxSections = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -374,8 +378,9 @@ public sealed class ArbiterServeService(
             return ErrorJson("maxSections must be at least 1.");
         }
 
-        SectionSelection selection = WithProvider(provider =>
-            sections.SelectAsync(full, task ?? string.Empty, provider).GetAwaiter().GetResult());
+        SectionSelection selection = await WithProviderAsync(
+            (provider, ct) => sections.SelectAsync(full, task ?? string.Empty, provider, ct),
+            cancellationToken).ConfigureAwait(false);
         IEnumerable<DocumentSection> shown = maxSections is int cap
             ? selection.Selected.Take(cap)
             : selection.Selected;
@@ -406,13 +411,15 @@ public sealed class ArbiterServeService(
     /// <param name="commitSha">The commit the comment was made on, when known.</param>
     /// <param name="summary">When true, <paramref name="body"/> is a PR-level summary; <paramref name="path"/> and <paramref name="line"/> are ignored and each table row is classified.</param>
     /// <param name="author">The login that posted the summary, when known. Only a configured bot's summary is classified.</param>
-    public string ClassifyBotReviewComment(
+    /// <param name="cancellationToken">Cancels the provider call.</param>
+    public async Task<string> ClassifyBotReviewCommentAsync(
         string path,
         int line,
         string body,
         string? commitSha = null,
         bool summary = false,
-        string? author = null)
+        string? author = null,
+        CancellationToken cancellationToken = default)
     {
         if (body is null)
         {
@@ -433,11 +440,10 @@ public sealed class ArbiterServeService(
         if (summary)
         {
             IReadOnlyList<string> botLogins = config?.Arbiter.CommentTriage.BotLogins ?? [];
-            CommentSummaryResult summaryResult = WithProvider(provider =>
-                triage.Create(provider, context.RepoRoot, arbiterDirectory, ruleSet, botLogins, rules)
-                    .ClassifySummaryAsync(new CommentSummaryRequest(body, author))
-                    .GetAwaiter()
-                    .GetResult());
+            CommentSummaryResult summaryResult = await WithProviderAsync(
+                (provider, ct) => triage.Create(provider, context.RepoRoot, arbiterDirectory, ruleSet, botLogins, rules)
+                    .ClassifySummaryAsync(new CommentSummaryRequest(body, author), ct),
+                cancellationToken).ConfigureAwait(false);
             return JsonSerializer.Serialize(new
             {
                 items = summaryResult.Items.Select(item => new
@@ -471,11 +477,10 @@ public sealed class ArbiterServeService(
             return ErrorJson($"The document '{OneLine(path)}' was not found under the repository root.");
         }
 
-        CommentTriageResult result = WithProvider(provider =>
-            triage.Create(provider, context.RepoRoot, arbiterDirectory, ruleSet, rules: rules)
-                .ClassifyAsync(new CommentTriageRequest(path, line, body, commitSha))
-                .GetAwaiter()
-                .GetResult());
+        CommentTriageResult result = await WithProviderAsync(
+            (provider, ct) => triage.Create(provider, context.RepoRoot, arbiterDirectory, ruleSet, rules: rules)
+                .ClassifyAsync(new CommentTriageRequest(path, line, body, commitSha), ct),
+            cancellationToken).ConfigureAwait(false);
         return JsonSerializer.Serialize(new
         {
             @class = result.Class,
@@ -488,15 +493,16 @@ public sealed class ArbiterServeService(
     }
 
     /// <summary>
-    /// Runs <paramref name="use"/> with the provider the host configuration names. The served surface is synchronous,
-    /// as the engine is, so the async service is awaited here. A provider the tool builds is disposed afterwards.
+    /// Runs <paramref name="use"/> with the provider the host configuration names. The served surface is async, so the
+    /// async service call is awaited here, with the caller's cancellation token passed through. A provider the tool
+    /// builds is disposed afterwards.
     /// </summary>
-    private T WithProvider<T>(Func<IArbiterProvider, T> use)
+    private async Task<T> WithProviderAsync<T>(Func<IArbiterProvider, CancellationToken, Task<T>> use, CancellationToken cancellationToken)
     {
         IArbiterProvider provider = ProviderForRoot();
         try
         {
-            return use(provider);
+            return await use(provider, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

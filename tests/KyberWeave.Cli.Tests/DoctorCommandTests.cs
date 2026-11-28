@@ -30,7 +30,7 @@ public sealed class DoctorCommandTests
     ///     directory.
     /// </summary>
     [Fact]
-    public void DoctorCommand_Check_WithExplicitCanonicalPathFromArbitraryDirectory_InspectsCanonicalRepository()
+    public async Task DoctorCommand_Check_WithExplicitCanonicalPathFromArbitraryDirectory_InspectsCanonicalRepository()
     {
         _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         _world.HealthyMcp(CanonicalPath);
@@ -58,7 +58,7 @@ public sealed class DoctorCommandTests
             Check = true
         };
 
-        int exitCode = command.Execute(null!, settings, CancellationToken.None);
+        int exitCode = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.True(gitInvokedOnCanonical,
@@ -70,7 +70,7 @@ public sealed class DoctorCommandTests
     ///     correctly and inspects the canonical repository.
     /// </summary>
     [Fact]
-    public void DoctorCommand_Check_WithRelativePathToCanonicalParent_ResolvesAndInspectsCanonicalPath()
+    public async Task DoctorCommand_Check_WithRelativePathToCanonicalParent_ResolvesAndInspectsCanonicalPath()
     {
         _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         _world.HealthyMcp(CanonicalPath);
@@ -101,7 +101,7 @@ public sealed class DoctorCommandTests
 
         DoctorCommand command = _world.Command(true, executor, McpExecutable);
 
-        int exitCode = command.Execute(null!, settings, CancellationToken.None);
+        int exitCode = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.True(gitInvokedOnCanonical,
@@ -113,13 +113,13 @@ public sealed class DoctorCommandTests
     ///     ensuring that DoctorReport.Root reflects the canonical repository and all checks pass.
     /// </summary>
     [Fact]
-    public void RepositoryDoctor_Run_WithExplicitCanonicalPath_InspectsCanonicalRootAndPassesChecks()
+    public async Task RepositoryDoctor_Run_WithExplicitCanonicalPath_InspectsCanonicalRootAndPassesChecks()
     {
         _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         _world.HealthyMcp(CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             CanonicalPath,
             DoctorMode.Check,
             DoctorHarness.Options(McpExecutable),
@@ -141,7 +141,7 @@ public sealed class DoctorCommandTests
     ///     DoctorCommand refuses with exit 2.
     /// </summary>
     [Fact]
-    public void DoctorCommand_WhenTargetIsNotGitRepository_RefusesWithExit2()
+    public async Task DoctorCommand_WhenTargetIsNotGitRepository_RefusesWithExit2()
     {
         ScriptedProcessExecutor executor = new(startInfo =>
             startInfo.FileName == "git"
@@ -155,7 +155,7 @@ public sealed class DoctorCommandTests
             Check = true
         };
 
-        int exitCode = command.Execute(null!, settings, CancellationToken.None);
+        int exitCode = await command.ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(2, exitCode);
     }
@@ -169,13 +169,13 @@ public sealed class DoctorCommandTests
     ///     failed ensure performs once.
     /// </remarks>
     [Fact]
-    public void DoctorCommand_ProvisionWithAnExistingIndex_SyncsAndNeverInitialises()
+    public async Task DoctorCommand_ProvisionWithAnExistingIndex_SyncsAndNeverInitialises()
     {
         _world.Files.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         _world.HealthyMcp(CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             CanonicalPath,
             DoctorMode.Provision,
             DoctorHarness.Options(McpExecutable),

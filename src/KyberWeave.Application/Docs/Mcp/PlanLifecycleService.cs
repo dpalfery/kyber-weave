@@ -32,18 +32,27 @@ public sealed class PlanLifecycleService(
     private readonly IDocsQueryService _query = query ?? throw new ArgumentNullException(nameof(query));
 
     /// <inheritdoc />
-    public string FinalizePlan(string planFile, string approvalMode, string approval) =>
-        FinalizeHere(planFile, approvalMode, approval);
+    public Task<string> FinalizePlanAsync(
+        string planFile,
+        string approvalMode,
+        string approval,
+        CancellationToken cancellationToken = default) =>
+        FinalizeHereAsync(planFile, approvalMode, approval, cancellationToken);
 
     /// <inheritdoc />
-    public string ArchivePlan(string planFile) => ArchiveHere(planFile);
+    public Task<string> ArchivePlanAsync(string planFile, CancellationToken cancellationToken = default) =>
+        ArchiveHereAsync(planFile, cancellationToken);
 
 
     private DateOnly Today() => DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
 
-    private string FinalizeHere(string planFile, string approvalMode, string approval)
+    private async Task<string> FinalizeHereAsync(
+        string planFile,
+        string approvalMode,
+        string approval,
+        CancellationToken cancellationToken)
     {
-        string provenance = _query.Provenance();
+        string provenance = await _query.ProvenanceAsync(cancellationToken).ConfigureAwait(false);
         DiagnosticReport report = new();
         if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
             return LifecycleResponse(provenance, "refused", report, null);
@@ -54,7 +63,9 @@ public sealed class PlanLifecycleService(
                 $"approvalMode '{approvalMode}' is not 'autonomous' or 'supervised'. Nothing was changed.");
         }
 
-        PlanFinalizeOutcome outcome = finalize.Run(_repositoryRoot, config, plan, mode, approval, Today());
+        PlanFinalizeOutcome outcome = await finalize
+            .RunAsync(_repositoryRoot, config, plan, mode, approval, Today(), cancellationToken)
+            .ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         if (outcome.Finalized)
             return LifecycleResponse(provenance, "finalized", report, ReadyNext(outcome));
@@ -68,14 +79,16 @@ public sealed class PlanLifecycleService(
         $"{outcome.ReadyQueue ?? "(unreadable: validate the task file)"}\ndispatch the first ready tasks now.";
 
 
-    private string ArchiveHere(string planFile)
+    private async Task<string> ArchiveHereAsync(string planFile, CancellationToken cancellationToken)
     {
-        string provenance = _query.Provenance();
+        string provenance = await _query.ProvenanceAsync(cancellationToken).ConfigureAwait(false);
         DiagnosticReport report = new();
         if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
             return LifecycleResponse(provenance, "refused", report, null);
 
-        PlanCloseoutOutcome outcome = closeout.Run(_repositoryRoot, config, plan, Today(), archive: true);
+        PlanCloseoutOutcome outcome = await closeout
+            .RunAsync(_repositoryRoot, config, plan, Today(), archive: true, cancellationToken)
+            .ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         return outcome.Archived
             ? LifecycleResponse(provenance, "archived", report,

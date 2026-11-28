@@ -93,14 +93,15 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// An unknown target is client input, not a crash: exit 2 naming the roster.
     /// </summary>
     [Fact]
-    public void Install_InvalidTarget_ExitsTwoNamingTheRoster()
+    public async Task Install_InvalidTarget_ExitsTwoNamingTheRoster()
     {
         string host = NewDir("install-bad-target");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "hal9000", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "hal9000", Provider = "none" },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("hal9000", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -115,13 +116,13 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// covered by the dedicated rule-id test.
     /// </summary>
     [Fact]
-    public void Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
+    public async Task Install_GlobalScope_ExplicitGlobal_IsAcceptedAndWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global");
         new FileUserHostConfigStore(_files).WriteGlobalTargets(_home, ["claude", "warp"]);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -129,7 +130,8 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Target = "claude",
                 Provider = "none",
                 Global = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("global", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -149,14 +151,15 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// is stored. An empty string must not become an unknown-provider failure.
     /// </summary>
     [Fact]
-    public void Install_EmptyProvider_ResolvesToNone()
+    public async Task Install_EmptyProvider_ResolvesToNone()
     {
         string host = NewDir("install-empty-provider");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty, Project = true }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty, Project = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         string config = _files.ReadAllText(ConfigPath(host));
@@ -169,15 +172,16 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// run says so.
     /// </summary>
     [Fact]
-    public void Install_OmittedProvider_KeepsTheExistingProvider()
+    public async Task Install_OmittedProvider_KeepsTheExistingProvider()
     {
         string host = NewDir("install-keep-provider");
         WriteProviderConfig(host, "systemone");
-        _store.Write(TypeSafeOrigin, "stored-key");
+        await _store.WriteAsync(TypeSafeOrigin, "stored-key");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
+        CommandExecution execution = await CaptureAsync(() => _host.Command<ArbiterInstallCommand>().ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("kind: systemone", _files.ReadAllText(ConfigPath(host)), StringComparison.Ordinal);
@@ -187,14 +191,15 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
 
     /// <summary>An explicit <c>--provider</c> replaces the configured provider and reports the change.</summary>
     [Fact]
-    public void Install_ExplicitProvider_ChangesTheExistingProvider()
+    public async Task Install_ExplicitProvider_ChangesTheExistingProvider()
     {
         string host = NewDir("install-change-provider");
         WriteProviderConfig(host, "systemone");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
+        CommandExecution execution = await CaptureAsync(() => _host.Command<ArbiterInstallCommand>().ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         string config = _files.ReadAllText(ConfigPath(host));
@@ -205,13 +210,14 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
 
     /// <summary>A machine with nothing configured keeps the default of no provider.</summary>
     [Fact]
-    public void Install_OmittedProviderOnAFreshMachine_DefaultsToNone()
+    public async Task Install_OmittedProviderOnAFreshMachine_DefaultsToNone()
     {
         string host = NewDir("install-fresh-provider");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
+        CommandExecution execution = await CaptureAsync(() => _host.Command<ArbiterInstallCommand>().ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("kind: none", _files.ReadAllText(ConfigPath(host)), StringComparison.Ordinal);
@@ -225,13 +231,13 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// a leaked key in the repo would be committed and pushed.
     /// </summary>
     [Fact]
-    public void Install_SystemoneKey_StoredOnlyInCredentialStore()
+    public async Task Install_SystemoneKey_StoredOnlyInCredentialStore()
     {
         const string key = "TS-INSTALL-KEY-7f3a9c1e4b2d";
         string host = NewDir("install-key");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -240,10 +246,11 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "systemone",
                 ArbiterKey = key,
                 Project = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Equal(key, _store.Read(TypeSafeOrigin));
+        Assert.Equal(key, await _store.ReadAsync(TypeSafeOrigin));
         Assert.DoesNotContain(key, execution.Output, StringComparison.Ordinal);
         string config = _files.ReadAllText(ConfigPath(host));
         Assert.DoesNotContain(key, config, StringComparison.Ordinal);
@@ -263,19 +270,20 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// The exit code is deliberately unpinned here: the packet pins the diagnostic.
     /// </summary>
     [Fact]
-    public void Install_SystemoneWithoutKey_SurfacesKey001()
+    public async Task Install_SystemoneWithoutKey_SurfacesKey001()
     {
         _keyStdinValue = null;
         _keyPromptValue = null;
         string host = NewDir("install-missing-key");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "systemone" }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "systemone" },
+            CancellationToken.None));
 
         Assert.Contains(ArbiterStatusCommand.KeyMissing, execution.Output, StringComparison.Ordinal);
-        Assert.Null(_store.Read(TypeSafeOrigin));
+        Assert.Null(await _store.ReadAsync(TypeSafeOrigin));
     }
 
     /// <summary>
@@ -283,13 +291,13 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// and no duplicate credential-store write.
     /// </summary>
     [Fact]
-    public void Install_SecondIdenticalRun_IsNoOpWithoutDuplicateWrites()
+    public async Task Install_SecondIdenticalRun_IsNoOpWithoutDuplicateWrites()
     {
         const string key = "TS-INSTALL-REPEAT-1a2b3c4d5e6f";
         string host = NewDir("install-repeat");
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
 
-        CommandExecution first = Capture(() => command.Execute(
+        CommandExecution first = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -298,8 +306,9 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "systemone",
                 ArbiterKey = key,
                 Project = true,
-            }));
-        CommandExecution second = Capture(() => command.Execute(
+            },
+            CancellationToken.None));
+        CommandExecution second = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -308,7 +317,8 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "systemone",
                 ArbiterKey = key,
                 Project = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, first.ExitCode);
         Assert.Equal(0, second.ExitCode);
@@ -322,7 +332,7 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// survive byte-for-byte while the provider choice is written.
     /// </summary>
     [Fact]
-    public void Install_PreservesPreExistingConfigContent()
+    public async Task Install_PreservesPreExistingConfigContent()
     {
         string host = NewDir("install-merge");
         string directory = Path.Combine(host, ".kyber-weave");
@@ -336,9 +346,10 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
             "custom-unrelated-key: custom-value\n");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         string config = _files.ReadAllText(ConfigPath(host));
@@ -356,20 +367,21 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// path is set, because a global install is intentionally user-scoped.
     /// </summary>
     [Fact]
-    public void Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
+    public async Task Install_DefaultScope_GlobalWritesToHomeConfigAndGlobalRoot()
     {
         string host = NewDir("install-global-default");
         new FileUserHostConfigStore(_files).WriteGlobalTargets(_home, ["claude", "warp"]);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
                 Path = host,
                 Target = "claude",
                 Provider = "none",
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("global", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -390,7 +402,7 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// the docs scaffolder is meant to populate.
     /// </summary>
     [Fact]
-    public void Install_DefaultGlobalScope_WithoutUserConfig_CreatesUserConfigAndNoDocsScaffold()
+    public async Task Install_DefaultGlobalScope_WithoutUserConfig_CreatesUserConfigAndNoDocsScaffold()
     {
         string host = NewDir("install-global-default-empty-home");
         Assert.False(_files.FileExists(UserHostConfigPath.Of(_home)));
@@ -398,14 +410,15 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
         Assert.False(_files.FileExists(Path.Combine(_home, "AGENTS.md")));
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
                 Path = host,
                 Target = "claude",
                 Provider = "none",
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.True(_files.FileExists(UserHostConfigPath.Of(_home)), "the default global install should create the user config");
@@ -421,20 +434,21 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// partial case under global scope.
     /// </summary>
     [Fact]
-    public void Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
+    public async Task Install_D13Output_ListsTierPathReasonAndTrustStepForEachGlobalHarness()
     {
         string host = NewDir("install-d13");
         new FileUserHostConfigStore(_files).WriteGlobalTargets(_home, ["claude", "warp", "copilot"]);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
                 Path = host,
                 Target = "claude",
                 Provider = "none",
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("tier", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -451,14 +465,15 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// or user config from the wrong scope.
     /// </summary>
     [Fact]
-    public void Install_PathWithoutProject_ExitsTwoWithScopeError()
+    public async Task Install_PathWithoutProject_ExitsTwoWithScopeError()
     {
         string host = NewDir("install-path-without-project");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Target = "claude", PathOption = host }));
+            new ArbiterInstallSettings { Target = "claude", PathOption = host },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("--project", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -471,12 +486,13 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// scope. The command must fail with the install-rule id rather than silently picking one.
     /// </summary>
     [Fact]
-    public void Install_GlobalAndProject_ExitsTwoWithKwArbInstall001()
+    public async Task Install_GlobalAndProject_ExitsTwoWithKwArbInstall001()
     {
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Target = "claude", Global = true, Project = true }));
+            new ArbiterInstallSettings { Target = "claude", Global = true, Project = true },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("KW-ARB-INSTALL-001", execution.Output, StringComparison.Ordinal);
@@ -488,12 +504,12 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// <c>.kyber-weave/</c> or any other file while reporting a plan.
     /// </summary>
     [Fact]
-    public void Install_DryRunOnAnEmptyDirectoryCreatesNothing()
+    public async Task Install_DryRunOnAnEmptyDirectoryCreatesNothing()
     {
         string host = NewDir("install-dry-run");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -502,7 +518,8 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "none",
                 DryRun = true,
                 Project = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Dry-run", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -514,7 +531,7 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// refusal and leaves the file alone instead of letting the exception escape as a crash.
     /// </summary>
     [Fact]
-    public void Install_FlowProviderValue_FailsWithAnActionableErrorAndLeavesTheConfig()
+    public async Task Install_FlowProviderValue_FailsWithAnActionableErrorAndLeavesTheConfig()
     {
         const string yaml = "arbiter:\n  enabled: true\n  provider: {kind: kilo, extra: 1}\n";
         string host = NewDir("install-flow-provider");
@@ -524,9 +541,10 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
         _files.WriteAllText(config, yaml);
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
+            new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("block mapping", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -539,7 +557,7 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// the override origin, so a dry run completes with exit 0 and no key finding.
     /// </summary>
     [Fact]
-    public void Install_SystemoneWithOverrideEndpointAndStoredKey_CompletesTheDryRun()
+    public async Task Install_SystemoneWithOverrideEndpointAndStoredKey_CompletesTheDryRun()
     {
         const string origin = "https://openrouter.ai";
         string host = NewDir("install-override-endpoint");
@@ -547,7 +565,7 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
         _store.Seed(origin, "override-key");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -556,7 +574,8 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "systemone",
                 DryRun = true,
                 Project = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain(ArbiterKeyResolver.MissingKeyCode, execution.Output, StringComparison.Ordinal);
@@ -568,13 +587,13 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// <c>KW-ARB-KEY-001</c>.
     /// </summary>
     [Fact]
-    public void Install_SystemoneWithInvalidOverrideEndpoint_FailsClosedNamingOverrideFile()
+    public async Task Install_SystemoneWithInvalidOverrideEndpoint_FailsClosedNamingOverrideFile()
     {
         string host = NewDir("install-invalid-override-endpoint");
         WriteOverride("provider:\n  kind: systemone\n  endpoint: not-a-url\n  model: jev-1.14.0\n");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -583,7 +602,8 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "systemone",
                 DryRun = true,
                 Project = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains(RuleValidator.MalformedSection, execution.Output, StringComparison.Ordinal);
@@ -598,12 +618,12 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
     /// write.
     /// </summary>
     [Fact]
-    public void Install_DryRunWithMissingExplicitConfig_ReportsTheMissingFile()
+    public async Task Install_DryRunWithMissingExplicitConfig_ReportsTheMissingFile()
     {
         string host = NewDir("install-dry-run-missing-config");
 
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -612,7 +632,8 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
                 Provider = "none",
                 DryRun = true,
                 Config = Path.Combine("custom", "missing.yml"),
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("not found", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -644,9 +665,9 @@ public sealed class ArbiterInstallCommandSeamTests : IDisposable
         return dir;
     }
 
-    private CommandExecution Capture(Func<int> execute)
+    private async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
     {
-        int exitCode = execute();
+        int exitCode = await execute();
         return new CommandExecution(exitCode, _console.Output);
     }
 

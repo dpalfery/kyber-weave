@@ -62,9 +62,9 @@ public class LegacyHostMigrationTests
     /// registry block as a host would after adding them, leaving only the legacy standards to be
     /// written.
     /// </summary>
-    private KyberWeaveConfig DeclareTechnologies()
+    private async Task<KyberWeaveConfig> DeclareTechnologiesAsync()
     {
-        _repo.Scaffold("6-Docs");
+        await _repo.ScaffoldAsync("6-Docs");
 
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
         _repo.Memory.WriteAllText(
@@ -125,9 +125,9 @@ public class LegacyHostMigrationTests
         _repo.RegistryValidator(config).Validate();
 
     [Fact]
-    public void AnUnmigratedHostValidatesWithoutErrors()
+    public async Task AnUnmigratedHostValidatesWithoutErrors()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
 
         DiagnosticReport documents = ValidateDocuments(config);
@@ -154,9 +154,9 @@ public class LegacyHostMigrationTests
     /// block is stale only because the project has not upgraded.
     /// </summary>
     [Fact]
-    public void AnOlderBuildsRegistryBlockIsAWarningDuringTheUpgradePeriod()
+    public async Task AnOlderBuildsRegistryBlockIsAWarningDuringTheUpgradePeriod()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
         WriteOlderBuildRegistryBlock(config);
 
@@ -182,9 +182,9 @@ public class LegacyHostMigrationTests
     /// folder's <c>README.md</c> — still contradicts the configuration and stays an error.
     /// </summary>
     [Fact]
-    public void ARegistryBlockWithAnyOtherContradictionStaysAnError()
+    public async Task ARegistryBlockWithAnyOtherContradictionStaysAnError()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
         WriteOlderBuildRegistryBlock(config);
 
@@ -222,9 +222,9 @@ public class LegacyHostMigrationTests
     /// block is generated output, and the next <c>docs init</c> refreshes it.
     /// </summary>
     [Fact]
-    public void AnOlderBuildsGeneratedProseAloneIsNotAStaleRegistry()
+    public async Task AnOlderBuildsGeneratedProseAloneIsNotAStaleRegistry()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
 
         string agents = PathOf("AGENTS.md");
@@ -242,9 +242,9 @@ public class LegacyHostMigrationTests
     }
 
     [Fact]
-    public void TheMigrationLeavesTheHostValid()
+    public async Task TheMigrationLeavesTheHostValid()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
 
         StandardsFolderMigrationResult result =
@@ -273,9 +273,9 @@ public class LegacyHostMigrationTests
     }
 
     [Fact]
-    public void MigratingTwiceChangesNothingTheSecondTime()
+    public async Task MigratingTwiceChangesNothingTheSecondTime()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
         _repo.Migration(config).Run();
 
@@ -298,9 +298,9 @@ public class LegacyHostMigrationTests
     /// the block.
     /// </summary>
     [Fact]
-    public void TheMigrationRefreshesAnOlderBuildsRegistryBlockAndLeavesTheHostValid()
+    public async Task TheMigrationRefreshesAnOlderBuildsRegistryBlockAndLeavesTheHostValid()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
         WriteOlderBuildRegistryBlock(config);
         string userConfig = _repo.Memory.ReadAllText(PathOf(".kyber-weave/kyber-weave.yml"));
@@ -330,9 +330,9 @@ public class LegacyHostMigrationTests
     /// and a second run finds neither a standard to rename nor a block to re-render.
     /// </summary>
     [Fact]
-    public void MigratingAnOlderBuildsHostTwiceChangesNothingTheSecondTime()
+    public async Task MigratingAnOlderBuildsHostTwiceChangesNothingTheSecondTime()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
         WriteOlderBuildRegistryBlock(config);
         _repo.Migration(config).Run();
@@ -351,9 +351,9 @@ public class LegacyHostMigrationTests
     /// it reports.
     /// </summary>
     [Fact]
-    public void ADryRunReportsTheRegistryRefreshWithoutWritingIt()
+    public async Task ADryRunReportsTheRegistryRefreshWithoutWritingIt()
     {
-        KyberWeaveConfig config = DeclareTechnologies();
+        KyberWeaveConfig config = await DeclareTechnologiesAsync();
         WriteLegacyStandards();
         WriteOlderBuildRegistryBlock(config);
         string agents = _repo.Memory.ReadAllText(PathOf("AGENTS.md"));

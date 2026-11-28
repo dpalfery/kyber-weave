@@ -137,6 +137,19 @@ public sealed class ArbiterRealEngineTests : IDisposable
         public HookRunContext Resolve(HookRunContextRequest request) => throw new NotSupportedException("container exploded");
 
         public HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text) => throw new NotSupportedException("container exploded");
+        /// <inheritdoc/>
+        public Task<HookRunContext> ResolveAsync(
+            HookRunContextRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("container exploded");
+
+        /// <inheritdoc/>
+        public Task<HookRunContext> SelectPlanAsync(
+            HookRunContext context,
+            string? planFile,
+            string? text,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("container exploded");
     }
 
     private string Payload(string hookEvent, string target, string prompt, string? status = null, string agentType = "conductor")
@@ -164,11 +177,11 @@ public sealed class ArbiterRealEngineTests : IDisposable
         return json + "}";
     }
 
-    private static (int Exit, string Stdout, string Log) Run(HookCommand command, string stdin)
+    private static async Task<(int Exit, string Stdout, string Log)> Run(HookCommand command, string stdin)
     {
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("claude", "conductor", stdin, stdout, log);
+        int exit = await command.RunAsync("claude", "conductor", stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
@@ -192,12 +205,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_LensSpawnOnAMarkdownOnlyChange_SkipsWithAReviewNoteNamingRuleAndReason()
+    public async Task RealEngine_LensSpawnOnAMarkdownOnlyChange_SkipsWithAReviewNoteNamingRuleAndReason()
     {
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new MarkdownOnlyGitFacts());
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             command,
             Payload("PreToolUse", "review-lens", LensPrompt, agentType: "code-reviewer"));
 
@@ -207,7 +220,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_PreDispatch_Deny_WritesDenyShapeWithEscalationEnvelope()
+    public async Task RealEngine_PreDispatch_Deny_WritesDenyShapeWithEscalationEnvelope()
     {
         WriteConfig(
             DisabledShippedRules() + "\n" +
@@ -221,7 +234,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { escalate-now: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider());
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, _) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -240,7 +253,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_PreDispatch_Allow_WritesNothing()
+    public async Task RealEngine_PreDispatch_Allow_WritesNothing()
     {
         WriteConfig(
             DisabledShippedRules() + "\n" +
@@ -255,14 +268,14 @@ public sealed class ArbiterRealEngineTests : IDisposable
         HookCommand command = CreateCommand(new FakeProvider());
 
         // docs-dev is not an implementation specialist, so an allow writes nothing.
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "docs-dev", Prompt));
+        (int exit, string stdout, _) = await Run(command, Payload("PreToolUse", "docs-dev", Prompt));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void RealEngine_PostDispatch_Escalate_WritesTopLevelBlock()
+    public async Task RealEngine_PostDispatch_Escalate_WritesTopLevelBlock()
     {
         WriteConfig(
             DisabledShippedRules() + "\n" +
@@ -276,7 +289,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { adds-work: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider());
 
-        (int exit, string stdout, _) = Run(command, Payload("PostToolUse", "dev-medium", Prompt, "completed"));
+        (int exit, string stdout, _) = await Run(command, Payload("PostToolUse", "dev-medium", Prompt, "completed"));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -288,12 +301,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_EvaluatorException_AllowsLoudlyWithHookCode()
+    public async Task RealEngine_EvaluatorException_AllowsLoudlyWithHookCode()
     {
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, string log) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -306,14 +319,14 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_ContainerFault_AllowsWithHookCodeAndStdoutCarriesOnlyTheDecision()
+    public async Task RealEngine_ContainerFault_AllowsWithHookCodeAndStdoutCarriesOnlyTheDecision()
     {
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(
             new FakeProvider(),
             runContexts: new ThrowingRunContexts());
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, string log) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -328,12 +341,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     /// remove.
     /// </summary>
     [Fact]
-    public void RealEngine_LoudAllowToASpecialistStillStripsHeaders()
+    public async Task RealEngine_LoudAllowToASpecialistStillStripsHeaders()
     {
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, _) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -345,7 +358,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_RemoteProviderWithoutSecretTool_AllowsLoudlyWithActionableEvidence()
+    public async Task RealEngine_RemoteProviderWithoutSecretTool_AllowsLoudlyWithActionableEvidence()
     {
         WriteConfig(DisabledShippedRules(), RemoteProviderYaml);
         HookCommand command = CreateCommand(
@@ -354,7 +367,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
                 new MissingExecutableCredentialProcessRunner()),
             environment: _ => null);
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, string log) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -369,7 +382,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_RemoteProviderWithRealSecretServiceAndNoSecretTool_AllowsLoudlyWithActionableEvidence()
+    public async Task RealEngine_RemoteProviderWithRealSecretServiceAndNoSecretTool_AllowsLoudlyWithActionableEvidence()
     {
         Assert.SkipWhen(SecretToolOnPath(), "secret-tool is installed, so the missing-tool path is not reachable here.");
         WriteConfig(DisabledShippedRules(), RemoteProviderYaml);
@@ -378,7 +391,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             credentialStoreFactory: () => new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner()),
             environment: _ => null);
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, string log) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -408,7 +421,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_ProviderCrash_AllowsLoudlyRatherThanBlocks()
+    public async Task RealEngine_ProviderCrash_AllowsLoudlyRatherThanBlocks()
     {
         WriteConfig(
             DisabledShippedRules() + "\n" +
@@ -423,7 +436,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { adds-work: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider { Throw = true });
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
+        (int exit, string stdout, string log) = await Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         // A provider crash leaves the question undecidable, which allows; the failure is logged, never a block.
         Assert.Equal(0, exit);
@@ -436,10 +449,10 @@ public sealed class ArbiterRealEngineTests : IDisposable
     /// Runs one factory <c>PreToolUse</c> <c>Task</c> dispatch to <c>architect</c> through the
     /// production hook command, with the shipped rules active and a <c>kind: none</c> provider.
     /// </summary>
-    private (int Exit, string Stdout, string Log) RunFactory(string prompt, string? sessionId, FakeProvider? provider = null)
+    private async Task<(int Exit, string Stdout, string Log)> RunFactory(string prompt, string? sessionId, FakeProvider? provider = null)
     {
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n" +
             "  docs-root: docs\n" +
@@ -462,7 +475,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         HookCommand command = CreateCommand(provider ?? new FakeProvider());
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("factory", null, stdin, stdout, log);
+        int exit = await command.RunAsync("factory", null, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
@@ -475,11 +488,11 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_Factory_AbsolutePlanFile_NoLongerBlocksByItself()
+    public async Task RealEngine_Factory_AbsolutePlanFile_NoLongerBlocksByItself()
     {
         // ADR 0072: an absolute PLAN_FILE is a spelling, not a finding. Step 0 cannot recognise it, the model is
         // asked, and with no model the dispatch proceeds.
-        (int exit, string stdout, _) = RunFactory(
+        (int exit, string stdout, _) = await RunFactory(
             "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nWrite the plan.",
             "sess-factory-absolute");
 
@@ -488,12 +501,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_Factory_ConfidentMalformedAnswer_DeniesWithTheModelReason()
+    public async Task RealEngine_Factory_ConfidentMalformedAnswer_DeniesWithTheModelReason()
     {
         FakeProvider provider = new();
         provider.Answers["KW-ARB-PLANNER-001"] = "malformed";
 
-        (int exit, string stdout, _) = RunFactory(
+        (int exit, string stdout, _) = await RunFactory(
             "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nRewrite src/Program.cs.",
             "sess-factory-absolute",
             provider);
@@ -505,12 +518,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_Factory_LowConfidenceMalformedAnswer_Allows()
+    public async Task RealEngine_Factory_LowConfidenceMalformedAnswer_Allows()
     {
         FakeProvider provider = new() { Confidence = 0.4 };
         provider.Answers["KW-ARB-PLANNER-001"] = "malformed";
 
-        (int exit, string stdout, _) = RunFactory(
+        (int exit, string stdout, _) = await RunFactory(
             "KYBER-ARBITER: true\nPLAN_FILE: /Users/x/repo.worktrees/fix/docs/plans/plan.md\n\nWrite the plan.",
             "sess-factory-absolute",
             provider);
@@ -520,9 +533,9 @@ public sealed class ArbiterRealEngineTests : IDisposable
     }
 
     [Fact]
-    public void RealEngine_Factory_RelativePlanFile_Allows()
+    public async Task RealEngine_Factory_RelativePlanFile_Allows()
     {
-        (int exit, string stdout, _) = RunFactory(
+        (int exit, string stdout, _) = await RunFactory(
             "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\n\nWrite the plan.",
             "sess-factory-relative");
 
@@ -535,31 +548,31 @@ public sealed class ArbiterRealEngineTests : IDisposable
     [InlineData("FINDINGS:")]
     [InlineData("STATUS: ARBITER_ESCALATION")]
     [InlineData("FEATURE: search\nPHASE: design")]
-    public void RealEngine_Factory_MarkerOnlyPlannerDispatch_Allows(string body)
+    public async Task RealEngine_Factory_MarkerOnlyPlannerDispatch_Allows(string body)
     {
-        (int exit, string stdout, _) = RunFactory($"KYBER-ARBITER: true\n\n{body}", "sess-factory-marker");
+        (int exit, string stdout, _) = await RunFactory($"KYBER-ARBITER: true\n\n{body}", "sess-factory-marker");
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void RealEngine_Factory_UnmarkedPlannerDispatch_PassesThrough()
+    public async Task RealEngine_Factory_UnmarkedPlannerDispatch_PassesThrough()
     {
-        (int exit, string stdout, _) = RunFactory("Plan the upgrade.", "sess-factory-unmarked");
+        (int exit, string stdout, _) = await RunFactory("Plan the upgrade.", "sess-factory-unmarked");
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void RealEngine_Factory_RepeatWithoutPlanFile_CountsOneSession()
+    public async Task RealEngine_Factory_RepeatWithoutPlanFile_CountsOneSession()
     {
         const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
 
-        string first = DenyReason(RunFactory(WithoutPlanFile, "sess-A", Malformed()).Stdout);
-        string second = DenyReason(RunFactory(WithoutPlanFile, "sess-A", Malformed()).Stdout);
-        string otherSession = DenyReason(RunFactory(WithoutPlanFile, "sess-B", Malformed()).Stdout);
+        string first = DenyReason((await RunFactory(WithoutPlanFile, "sess-A", Malformed())).Stdout);
+        string second = DenyReason((await RunFactory(WithoutPlanFile, "sess-A", Malformed())).Stdout);
+        string otherSession = DenyReason((await RunFactory(WithoutPlanFile, "sess-B", Malformed())).Stdout);
 
         Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 2", second, StringComparison.Ordinal);
@@ -570,12 +583,12 @@ public sealed class ArbiterRealEngineTests : IDisposable
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void RealEngine_Factory_RepeatWithoutPlanFileOrSession_NeverCountsTogether(string? sessionId)
+    public async Task RealEngine_Factory_RepeatWithoutPlanFileOrSession_NeverCountsTogether(string? sessionId)
     {
         const string WithoutPlanFile = "KYBER-ARBITER: true\n\nWrite the plan.";
 
-        string first = DenyReason(RunFactory(WithoutPlanFile, sessionId, Malformed()).Stdout);
-        string second = DenyReason(RunFactory(WithoutPlanFile, sessionId, Malformed()).Stdout);
+        string first = DenyReason((await RunFactory(WithoutPlanFile, sessionId, Malformed())).Stdout);
+        string second = DenyReason((await RunFactory(WithoutPlanFile, sessionId, Malformed())).Stdout);
 
         Assert.Contains("REPEAT: 1", first, StringComparison.Ordinal);
         Assert.Contains("REPEAT: 1", second, StringComparison.Ordinal);

@@ -8,10 +8,16 @@ namespace KyberWeave.Core.Arbiter.Credentials;
 public sealed class ProcessRunnerCredentialProcessRunner : ICredentialProcessRunner
 {
     /// <inheritdoc />
-    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+    public async Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
-        return ProcessRunner.Run(startInfo, standardInput);
+        return await ProcessRunner.RunAsync(
+            startInfo,
+            standardInput,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

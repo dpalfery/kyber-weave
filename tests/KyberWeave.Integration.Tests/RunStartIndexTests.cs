@@ -18,23 +18,29 @@ namespace KyberWeave.Integration.Tests;
 ///         banner or warning text printed there is a failure.
 ///     </para>
 /// </remarks>
-public sealed class RunStartIndexTests : IDisposable
+public sealed class RunStartIndexTests : IAsyncLifetime
 {
     private const string Governed = "onboarding: done\n";
     private const string FailingIndex = "case \"$1\" in init|sync|index) echo 'boom' >&2; exit 1 ;; esac\nexit 0";
     private const string WorkingIndex = "exit 0";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
-    public void ARunThatCreatesAWorktreeInitialisesTheIndexInsideThatWorktree()
+    public async Task ARunThatCreatesAWorktreeInitialisesTheIndexInsideThatWorktree()
     {
-        _probe.PublishGovernance(Governed);
+        await _probe.PublishGovernance(Governed);
         _probe.AppendLine("README.md", "uncommitted work");
         _probe.ScriptCodegraph(WorkingIndex);
 
@@ -49,9 +55,9 @@ public sealed class RunStartIndexTests : IDisposable
     }
 
     [Fact]
-    public void AFailedIndexInANewWorktreeStopsTheRunAndNamesTheDoctorFixForThatTree()
+    public async Task AFailedIndexInANewWorktreeStopsTheRunAndNamesTheDoctorFixForThatTree()
     {
-        _probe.PublishGovernance(Governed);
+        await _probe.PublishGovernance(Governed);
         _probe.AppendLine("README.md", "uncommitted work");
         _probe.ScriptCodegraph(FailingIndex);
 
@@ -65,9 +71,9 @@ public sealed class RunStartIndexTests : IDisposable
     }
 
     [Fact]
-    public void AFailedIndexWarnsAndContinuesWhenStopOnToolFailureIsFalse()
+    public async Task AFailedIndexWarnsAndContinuesWhenStopOnToolFailureIsFalse()
     {
-        _probe.PublishGovernance("stop-on-tool-failure: false\nonboarding: done\n");
+        await _probe.PublishGovernance("stop-on-tool-failure: false\nonboarding: done\n");
         _probe.AppendLine("README.md", "uncommitted work");
         _probe.ScriptCodegraph(FailingIndex);
 
@@ -78,14 +84,14 @@ public sealed class RunStartIndexTests : IDisposable
         Assert.Equal("warning", document.RootElement.GetProperty("index").GetString());
         Assert.Contains("kyber-weave doctor --ensure", Normalise(result.Output), StringComparison.Ordinal);
         Assert.True(
-            _probe.BranchExists("claude/fix/tighten-the-gate"),
+            await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"),
             "A run that continued past a failed index must still create its branch.");
     }
 
     [Fact]
-    public void AGovernedCheckoutThatAlreadyHasAnIndexSyncsItAndReportsReady()
+    public async Task AGovernedCheckoutThatAlreadyHasAnIndexSyncsItAndReportsReady()
     {
-        _probe.PublishGovernance(Governed);
+        await _probe.PublishGovernance(Governed);
         _probe.IgnoreCodegraphIndex();
         Directory.CreateDirectory(Path.Combine(_probe.Root, ".codegraph"));
         _probe.ScriptCodegraph(WorkingIndex);
@@ -100,7 +106,7 @@ public sealed class RunStartIndexTests : IDisposable
     }
 
     [Fact]
-    public void AnUngovernedRepositoryStartsNoIndexChildAndReportsNotGoverned()
+    public async Task AnUngovernedRepositoryStartsNoIndexChildAndReportsNotGoverned()
     {
         _probe.AppendLine("README.md", "uncommitted work");
         _probe.ScriptCodegraph(WorkingIndex);

@@ -62,25 +62,28 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
     /// has to fail rather than collapse into that set.
     /// </summary>
     [Fact]
-    public void Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
+    public async Task Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks()
     {
         string host = NewDir("install-three-global-blocks");
         RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["cursor", "codex", "factory"]);
         ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
 
-        CommandExecution cursor = Capture(() => command.Execute(
+        CommandExecution cursor = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "cursor", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "cursor", Provider = "none" },
+            CancellationToken.None));
         AssertInstalled(cursor, "cursor");
 
-        CommandExecution codex = Capture(() => command.Execute(
+        CommandExecution codex = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "codex", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "codex", Provider = "none" },
+            CancellationToken.None));
         AssertInstalled(codex, "codex");
 
-        CommandExecution factory = Capture(() => command.Execute(
+        CommandExecution factory = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterInstallSettings { Path = host, Target = "factory", Provider = "none" }));
+            new ArbiterInstallSettings { Path = host, Target = "factory", Provider = "none" },
+            CancellationToken.None));
         AssertInstalled(factory, "factory");
 
         string receiptPath = Path.Combine(
@@ -92,7 +95,7 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
         Assert.True(File.Exists(receiptPath), $"Expected one global receipt at '{receiptPath}'.");
 
         SquadStateStore reader = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, "cli-receipt-reader")));
-        SquadReceipt receipt = reader.DeserializeReceipt(File.ReadAllText(receiptPath));
+        SquadReceipt receipt = reader.DeserializeReceipt(await File.ReadAllTextAsync(receiptPath));
 
         Assert.Equal(SquadDeploymentScope.Global, receipt.Scope);
         Assert.Equal(3, receipt.Blocks.Count);
@@ -118,7 +121,7 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
     /// state store backs the whole run, so no mismatched second install is needed.
     /// </summary>
     [Fact]
-    public void Install_EndToEnd_RendersThroughSquadPipelineAndPrintsTrustStep()
+    public async Task Install_EndToEnd_RendersThroughSquadPipelineAndPrintsTrustStep()
     {
         const string key = "TS-INSTALL-E2E-9f8e7d6c5b4a";
         string host = NewDir("install-e2e");
@@ -140,7 +143,7 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
         });
         ArbiterInstallCommand command = e2eHost.Command<ArbiterInstallCommand>();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -150,7 +153,8 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
                 ArbiterKey = key,
                 Yes = true,
                 Project = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadRenderRequest request = Assert.Single(renderer.RenderRequests);
@@ -160,7 +164,7 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
             execution.Output,
             StringComparison.Ordinal);
         Assert.DoesNotContain(key, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(key, _store.Read(TypeSafeOrigin));
+        Assert.Equal(key, await _store.ReadAsync(TypeSafeOrigin));
     }
 
     private static void AssertInstalled(CommandExecution execution, string target) =>
@@ -175,9 +179,9 @@ public sealed class ArbiterInstallRealPipelineTests : IDisposable
         return dir;
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private static async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

@@ -16,4 +16,11 @@ public interface ICodeGraphIndexFreshness
     /// One line saying how the index lags the checkout, or null when it is current or cannot be judged.
     /// </summary>
     string? DescribeStaleness();
+
+    /// <summary>
+    /// One line saying how the index lags the checkout, without blocking a thread, or null when it is current or
+    /// cannot be judged.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the git reads the judgment needs.</param>
+    Task<string?> DescribeStalenessAsync(CancellationToken cancellationToken = default);
 }

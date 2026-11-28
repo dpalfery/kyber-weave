@@ -15,7 +15,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// shipped default. Both fail safe: every section comes back, and a comment is classed <c>real</c>.
 /// <c>arbiter_select_relevant_document_sections</c> returns each section's id, title and line range.
 /// <c>arbiter_classify_bot_review_comment</c> returns the class, the confidence and the decision id.
-/// RED: <c>ArbiterTools.SelectRelevantDocumentSections</c> and <c>ArbiterTools.ClassifyBotReviewComment</c> do not
+/// RED: <c>ArbiterTools.SelectRelevantDocumentSectionsAsync</c> and <c>ArbiterTools.ClassifyBotReviewCommentAsync</c> do not
 /// exist yet.
 /// </summary>
 /// <remarks>
@@ -43,11 +43,11 @@ public sealed class ArbiterSectionsAndCommentToolTests : IDisposable
 
     /// <summary>Without a provider every section comes back, with its id and line range, so the worker reads the whole document.</summary>
     [Fact]
-    public void SelectingSectionsWithNoProviderReturnsEverySectionWithItsLineRange()
+    public async Task SelectingSectionsWithNoProviderReturnsEverySectionWithItsLineRange()
     {
         string path = WriteDocument();
 
-        using JsonDocument json = JsonDocument.Parse(Tools().SelectRelevantDocumentSections(path, "Change the install steps."));
+        using JsonDocument json = JsonDocument.Parse(await Tools().SelectRelevantDocumentSectionsAsync(path, "Change the install steps."));
 
         JsonElement sections = json.RootElement.GetProperty("sections");
         Assert.Equal(3, sections.GetArrayLength());
@@ -59,9 +59,9 @@ public sealed class ArbiterSectionsAndCommentToolTests : IDisposable
 
     /// <summary>A document that does not exist is an error the caller sees, not an empty section list.</summary>
     [Fact]
-    public void SelectingSectionsOfAMissingDocumentReportsAnError()
+    public async Task SelectingSectionsOfAMissingDocumentReportsAnError()
     {
-        using JsonDocument json = JsonDocument.Parse(Tools().SelectRelevantDocumentSections("docs/missing.md", "Anything."));
+        using JsonDocument json = JsonDocument.Parse(await Tools().SelectRelevantDocumentSectionsAsync("docs/missing.md", "Anything."));
 
         Assert.True(json.RootElement.TryGetProperty("error", out _));
         Assert.False(json.RootElement.TryGetProperty("sections", out _));
@@ -69,11 +69,11 @@ public sealed class ArbiterSectionsAndCommentToolTests : IDisposable
 
     /// <summary>With no provider the comment is classed real, with a decision id the caller can cite.</summary>
     [Fact]
-    public void ClassifyingACommentWithNoProviderIsRealWithADecisionId()
+    public async Task ClassifyingACommentWithNoProviderIsRealWithADecisionId()
     {
         WriteDocument();
 
-        using JsonDocument json = JsonDocument.Parse(Tools().ClassifyBotReviewComment(
+        using JsonDocument json = JsonDocument.Parse(await Tools().ClassifyBotReviewCommentAsync(
             "docs/guide.md", 2, "Shorten this heading.", null));
 
         Assert.Equal("real", json.RootElement.GetProperty("class").GetString());

@@ -14,18 +14,19 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void ACommentWithoutAPathIsAUsageErrorNotAnException()
+    public async Task ACommentWithoutAPathIsAUsageErrorNotAnException()
     {
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
                 Root = _host.WorkingDirectory,
                 Line = 2,
                 Body = "Shorten this heading.",
-            }));
+            },
+            token));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("kyber-weave arbiter: error: --path is required.", execution.Output, StringComparison.Ordinal);
@@ -33,11 +34,11 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
 
     /// <summary>A comment with no body is a usage error on one line, as the MCP tool answers it with an error.</summary>
     [Fact]
-    public void ACommentWithoutABodyIsAUsageErrorNotAnException()
+    public async Task ACommentWithoutABodyIsAUsageErrorNotAnException()
     {
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -45,7 +46,8 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = null!,
-            }));
+            },
+            token));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("kyber-weave arbiter: error: --body is required.", execution.Output, StringComparison.Ordinal);

@@ -36,9 +36,9 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void DocsInitEstablishesTheCurrentDirectoryAsAnMcpRoot()
+    public async Task DocsInitEstablishesTheCurrentDirectoryAsAnMcpRoot()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_parent.Path);
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(_parent.Path);
 
         string resolved = Resolver().Resolve([], _parent.Path, null);
 
@@ -46,14 +46,14 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void ProjectLocalBindingsKeepQueriesInsideTheirOwnRepository()
+    public async Task ProjectLocalBindingsKeepQueriesInsideTheirOwnRepository()
     {
         string first = Path.Combine(_parent.Path, "first-repository");
         string second = Path.Combine(_parent.Path, "second-repository");
         Directory.CreateDirectory(first);
         Directory.CreateDirectory(second);
-        DocsTestCommands.Scaffolding.Scaffold(first, owner: "first-team");
-        DocsTestCommands.Scaffolding.Scaffold(second, owner: "second-team");
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(first, owner: "first-team");
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(second, owner: "second-team");
         WriteMarker(first, "first-only-marker");
         WriteMarker(second, "second-only-marker");
 
@@ -86,9 +86,9 @@ public sealed class McpRepositoryRootTests : IDisposable
     /// mode where a same-named server bound to another checkout answered silently.
     /// </summary>
     [Fact]
-    public void ExpectRootNamingADifferentRepositoryIsRefused()
+    public async Task ExpectRootNamingADifferentRepositoryIsRefused()
     {
-        (string first, string second) = CreateTwoInitializedRepositories();
+        (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
         ExpectedRootMismatchException error = Assert.Throws<ExpectedRootMismatchException>(() =>
             Resolver().Resolve(
@@ -101,9 +101,9 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void ExpectRootEqualToTheResolvedRootIsAccepted()
+    public async Task ExpectRootEqualToTheResolvedRootIsAccepted()
     {
-        (string first, _) = CreateTwoInitializedRepositories();
+        (string first, _) = await CreateTwoInitializedRepositoriesAsync();
 
         string resolved = Resolver().Resolve(
             ["--repo-root", ".", "--expect-root", first],
@@ -114,9 +114,9 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void ARelativeExpectRootResolvesAgainstTheBoundWorkingDirectory()
+    public async Task ARelativeExpectRootResolvesAgainstTheBoundWorkingDirectory()
     {
-        (string first, _) = CreateTwoInitializedRepositories();
+        (string first, _) = await CreateTwoInitializedRepositoriesAsync();
 
         string resolved = Resolver().Resolve(
             ["--repo-root", ".", "--expect-root", "."],
@@ -127,11 +127,11 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void ExpectRootFlagNamingADifferentRepositoryRefusesToServe()
+    public async Task ExpectRootFlagNamingADifferentRepositoryRefusesToServe()
     {
-        (string first, string second) = CreateTwoInitializedRepositories();
+        (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: second, expectedRootEnvironment: null, input: string.Empty);
 
         Assert.Equal(1, result.ExitCode);
@@ -140,11 +140,11 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void ExpectRootFlagEqualToTheRepositoryAllowsStartup()
+    public async Task ExpectRootFlagEqualToTheRepositoryAllowsStartup()
     {
-        (string first, _) = CreateTwoInitializedRepositories();
+        (string first, _) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: first, expectedRootEnvironment: null, input: InitializeRequests);
 
         Assert.Equal(0, result.ExitCode);
@@ -152,11 +152,11 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void ExpectRootEnvironmentVariableIsHonoredWhenTheFlagIsAbsent()
+    public async Task ExpectRootEnvironmentVariableIsHonoredWhenTheFlagIsAbsent()
     {
-        (string first, string second) = CreateTwoInitializedRepositories();
+        (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: null, expectedRootEnvironment: second, input: string.Empty);
 
         Assert.Equal(1, result.ExitCode);
@@ -164,11 +164,11 @@ public sealed class McpRepositoryRootTests : IDisposable
     }
 
     [Fact]
-    public void CommandLineExpectRootOverridesTheEnvironmentVariable()
+    public async Task CommandLineExpectRootOverridesTheEnvironmentVariable()
     {
-        (string first, string second) = CreateTwoInitializedRepositories();
+        (string first, string second) = await CreateTwoInitializedRepositoriesAsync();
 
-        ProcessResult result = RunMcp(
+        ProcessResult result = await RunMcp(
             first, expectRootFlag: first, expectedRootEnvironment: second, input: InitializeRequests);
 
         Assert.Equal(0, result.ExitCode);
@@ -198,14 +198,14 @@ public sealed class McpRepositoryRootTests : IDisposable
             $"# {marker}\n\nThis repository owns {marker}.\n");
     }
 
-    private (string First, string Second) CreateTwoInitializedRepositories()
+    private async Task<(string First, string Second)> CreateTwoInitializedRepositoriesAsync()
     {
         string first = Path.Combine(_parent.Path, "first-repository");
         string second = Path.Combine(_parent.Path, "second-repository");
         Directory.CreateDirectory(first);
         Directory.CreateDirectory(second);
-        DocsTestCommands.Scaffolding.Scaffold(first, owner: "first-team");
-        DocsTestCommands.Scaffolding.Scaffold(second, owner: "second-team");
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(first, owner: "first-team");
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(second, owner: "second-team");
         return (first, second);
     }
 
@@ -218,7 +218,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     /// avoid writing into a closed pipe. Starting cases send a minimal initialize so the
     /// server completes its normal lifecycle and exits zero.
     /// </remarks>
-    private static ProcessResult RunMcp(
+    private static async Task<ProcessResult> RunMcp(
         string repository,
         string? expectRootFlag,
         string? expectedRootEnvironment,
@@ -245,6 +245,6 @@ public sealed class McpRepositoryRootTests : IDisposable
             startInfo.Environment[ExpectRootEnvironmentVariable] = expectedRootEnvironment;
         }
 
-        return ProcessRunner.Run(startInfo, input, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, input, TimeSpan.FromSeconds(30));
     }
 }

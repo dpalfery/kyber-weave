@@ -20,21 +20,20 @@ public sealed class WorktreeIndexEnsurer(
     IDoctorFileSystem files,
     IRepositoryToolSettings settings) : IWorktreeIndexGuard
 {
-    /// <summary>Creates, syncs or proves the index of <paramref name="root"/>, unless the repository is not governed.</summary>
+    /// <summary>Creates, syncs or proves the index without blocking a thread, unless the repository is not governed.</summary>
     /// <param name="root">The tree whose index is wanted: a worktree, or the checkout itself.</param>
     /// <param name="options">The index budget and the CodeGraph executable name.</param>
-    /// <param name="executor">Runs the CodeGraph child. Production passes an executor bounded by the index timeout.</param>
+    /// <param name="executor">Runs the CodeGraph child, bounded by the index timeout.</param>
     /// <param name="lockDirectory">Where the index lock file lives.</param>
-    /// <param name="restore">
-    ///     Which tracked files the index run restores. The default restores every written file; the post-checkout hook
-    ///     passes <see cref="CodeGraphRestore.InitConfigFilesOnly"/>. Passed through to the provisioner.
-    /// </param>
-    public WorktreeIndexOutcome Ensure(
+    /// <param name="restore">Which tracked files the index run restores.</param>
+    /// <param name="cancellationToken">Cancels the index and git children.</param>
+    public async Task<WorktreeIndexOutcome> EnsureAsync(
         string root,
         DoctorOptions options,
-        IProcessExecutor executor,
+        IProcessRunner executor,
         string lockDirectory,
-        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles)
+        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(options);
@@ -64,7 +63,14 @@ public sealed class WorktreeIndexEnsurer(
         if (!governed)
             return new WorktreeIndexOutcome(WorktreeIndexStatus.NotGoverned, Created: false, StopsRun: false, []);
 
-        CodeGraphOutcome outcome = provisioner.Run(root, DoctorMode.Ensure, options, executor, lockDirectory, restore);
+        CodeGraphOutcome outcome = await provisioner.RunAsync(
+            root,
+            DoctorMode.Ensure,
+            options,
+            executor,
+            lockDirectory,
+            restore,
+            cancellationToken).ConfigureAwait(false);
 
         WorktreeIndexStatus status = outcome.BinaryMissing
             ? WorktreeIndexStatus.BinaryMissing

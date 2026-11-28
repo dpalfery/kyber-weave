@@ -39,17 +39,17 @@ public sealed class ConductorGuardRealFileSystemTests
     }
 
     [Fact]
-    public void APlanInTheRunsOwnWorktree_IsPermittedFromTheCanonicalCheckout()
+    public async Task APlanInTheRunsOwnWorktree_IsPermittedFromTheCanonicalCheckout()
     {
         using TempDirectory parent = new();
         string repo = Path.Combine(parent.Path, "repo");
         string other = Path.Combine(parent.Path, "other");
         Directory.CreateDirectory(repo);
         Directory.CreateDirectory(Path.Combine(other, "docs", "plans"));
-        Git(repo, "init", "-q", "-b", "main");
-        Git(repo, "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "initial");
+        await Git(repo, "init", "-q", "-b", "main");
+        await Git(repo, "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "-q", "--allow-empty", "-m", "initial");
         string worktree = Path.Combine(parent.Path, "repo.worktrees", "run");
-        Git(repo, "worktree", "add", "-q", "-b", "claude/feat/run", worktree);
+        await Git(repo, "worktree", "add", "-q", "-b", "claude/feat/run", worktree);
         string root = GitRoot(worktree);
         Directory.CreateDirectory(Path.Combine(root, "docs", "plans"));
 
@@ -62,7 +62,7 @@ public sealed class ConductorGuardRealFileSystemTests
     private static string GitRoot(string directory) =>
         RealGitFacts.Create().GetRoot(directory) ?? throw new InvalidOperationException("no git root");
 
-    private static void Git(string directory, params string[] arguments)
+    private static async Task Git(string directory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -75,7 +75,7 @@ public sealed class ConductorGuardRealFileSystemTests
         };
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
     }
 

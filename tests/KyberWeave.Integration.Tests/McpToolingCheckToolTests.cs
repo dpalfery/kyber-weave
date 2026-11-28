@@ -15,21 +15,22 @@ namespace KyberWeave.Integration.Tests;
 /// The docs server's tooling-check tool, which runs the same doctor as <c>kyber-weave doctor --ensure</c> for a caller
 /// with no shell. Every child is scripted or a shell stub: no test starts a real CodeGraph or the real docs server.
 /// </summary>
-public sealed class McpToolingCheckToolTests : IDisposable
+public sealed class McpToolingCheckToolTests : IAsyncLifetime
 {
     private readonly DocFixture _fixture = new();
     private readonly TempDirectory _stubs = new();
 
-    public McpToolingCheckToolTests()
+    public async ValueTask InitializeAsync()
     {
-        Git(_fixture.Root, "init", "-q", "-b", "main");
+        await GitAsync(_fixture.Root, "init", "-q", "-b", "main");
         Directory.CreateDirectory(Path.Combine(_fixture.Root, ".codegraph"));
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _stubs.Dispose();
         _fixture.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     private string Root => _fixture.Root;
@@ -70,15 +71,16 @@ public sealed class McpToolingCheckToolTests : IDisposable
         Assert.False(attribute.Destructive);
         Assert.True(attribute.Idempotent);
         Assert.False(attribute.OpenWorld);
-        ParameterInfo projectPath = Assert.Single(method.GetParameters());
+        ParameterInfo projectPath = method.GetParameters()[0];
         Assert.Equal("projectPath", projectPath.Name);
         Assert.False(projectPath.HasDefaultValue);
+        Assert.Equal(typeof(CancellationToken), method.GetParameters()[1].ParameterType);
     }
 
     [Fact]
-    public void AHealthyCheckoutReportsEachCheckOnOneLineAndExitsZero()
+    public async Task AHealthyCheckoutReportsEachCheckOnOneLineAndExitsZero()
     {
-        string[] lines = Lines(Tools().RunToolingCheck(Root));
+        string[] lines = Lines(await Tools().RunToolingCheckAsync(Root));
 
         Assert.StartsWith("provenance:", lines[0], StringComparison.Ordinal);
         Assert.Equal("result: passed", lines[1]);
@@ -90,9 +92,9 @@ public sealed class McpToolingCheckToolTests : IDisposable
     }
 
     [Fact]
-    public void AnIndexThatCannotBeRepairedReportsTheFixLineToolFailureAndExitOne()
+    public async Task AnIndexThatCannotBeRepairedReportsTheFixLineToolFailureAndExitOne()
     {
-        string[] lines = Lines(Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheck(Root));
+        string[] lines = Lines(await Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheckAsync(Root));
 
         Assert.Equal("result: failed", lines[1]);
         int failure = Array.FindIndex(lines, line => line.StartsWith("FAIL codegraph.", StringComparison.Ordinal));
@@ -103,20 +105,20 @@ public sealed class McpToolingCheckToolTests : IDisposable
     }
 
     [Fact]
-    public void AMissingCodeGraphBinaryReportsToolFailureAndExitThree()
+    public async Task AMissingCodeGraphBinaryReportsToolFailureAndExitThree()
     {
-        string[] lines = Lines(Tools(_ => throw DoctorHarness.BinaryNotFound()).RunToolingCheck(Root));
+        string[] lines = Lines(await Tools(_ => throw DoctorHarness.BinaryNotFound()).RunToolingCheckAsync(Root));
 
         Assert.Contains(ReturnStatus.ToolFailureLine, lines);
         Assert.Equal("EXIT: 3", lines[^1]);
     }
 
     [Fact]
-    public void ARepositoryThatOptedOutOfStoppingGetsWarningsExitZeroAndNoToolFailure()
+    public async Task ARepositoryThatOptedOutOfStoppingGetsWarningsExitZeroAndNoToolFailure()
     {
         _fixture.Write(".kyber-weave/kyber-weave.yml", "stop-on-tool-failure: false\n");
 
-        string[] lines = Lines(Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheck(Root));
+        string[] lines = Lines(await Tools(_ => new ProcessResult(1, string.Empty, "index is corrupt")).RunToolingCheckAsync(Root));
 
         Assert.Contains(lines, line => line.StartsWith("PASS codegraph.", StringComparison.Ordinal)
             && line.Contains(" warning: ", StringComparison.Ordinal));
@@ -127,9 +129,9 @@ public sealed class McpToolingCheckToolTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void AMissingProjectPathIsRefusedAndRunsNothing(string projectPath)
+    public async Task AMissingProjectPathIsRefusedAndRunsNothing(string projectPath)
     {
-        string response = Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheck(projectPath);
+        string response = await Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheckAsync(projectPath);
 
         Assert.Contains("result: refused", response, StringComparison.Ordinal);
         Assert.Contains("projectPath is required", response, StringComparison.Ordinal);
@@ -137,17 +139,17 @@ public sealed class McpToolingCheckToolTests : IDisposable
     }
 
     [Fact]
-    public void AProjectPathOutsideTheRepositoryIsRefusedAndRunsNothing()
+    public async Task AProjectPathOutsideTheRepositoryIsRefusedAndRunsNothing()
     {
         using TempDirectory elsewhere = new();
 
-        string response = Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheck(elsewhere.Path);
+        string response = await Tools(_ => throw new InvalidOperationException("the doctor must not run")).RunToolingCheckAsync(elsewhere.Path);
 
         Assert.Contains("projectPath was refused", response, StringComparison.Ordinal);
         Assert.DoesNotContain("EXIT:", response, StringComparison.Ordinal);
     }
 
-    private static void Git(string directory, params string[] arguments)
+    private static async Task GitAsync(string directory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -162,7 +164,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(directory, ".no-global-gitconfig");
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
     }
 }

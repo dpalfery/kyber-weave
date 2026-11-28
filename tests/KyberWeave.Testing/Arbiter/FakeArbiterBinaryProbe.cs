@@ -29,8 +29,8 @@ public sealed class FakeArbiterBinaryProbe : IArbiterBinaryProbe
     public string CliVersion => "1.0.0";
 
     /// <inheritdoc />
-    public ToolProbeResult Probe() =>
-        FailureReason is null
+    public Task<ToolProbeResult> ProbeAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(FailureReason is null
             ? new ToolProbeResult(IsAvailable: true, Version: CliVersion, FailureReason: null)
-            : new ToolProbeResult(IsAvailable: false, Version: null, FailureReason: FailureReason);
+            : new ToolProbeResult(IsAvailable: false, Version: null, FailureReason: FailureReason));
 }

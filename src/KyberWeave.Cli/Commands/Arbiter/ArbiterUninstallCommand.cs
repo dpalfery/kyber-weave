@@ -29,10 +29,10 @@ public sealed class ArbiterUninstallCommand(
     IFileSystem files,
     IPathResolver paths,
     IAnsiConsole console,
-    IArbiterUserSettings userSettings) : Command<ArbiterUninstallSettings>
+    IArbiterUserSettings userSettings) : AsyncCommand<ArbiterUninstallSettings>
 {
     /// <inheritdoc />
-    public override int Execute(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         ArbiterUninstallSettings settings,
         CancellationToken cancellationToken)
@@ -153,7 +153,7 @@ public sealed class ArbiterUninstallCommand(
                 $"[grey]No Arbiter deployment found at [bold]{Markup.Escape(root)}[/] " +
                 $"for target '[bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/]'. " +
                 "Nothing to uninstall.[/]");
-            if (settings.RemoveKey && !RemoveKey(root, scope, settings, target))
+            if (settings.RemoveKey && !await RemoveKeyAsync(root, scope, settings, target, cancellationToken).ConfigureAwait(false))
                 return 1;
 
             return 0;
@@ -186,7 +186,7 @@ public sealed class ArbiterUninstallCommand(
             }
         }
 
-        if (settings.RemoveKey && !RemoveKey(root, scope, settings, target))
+        if (settings.RemoveKey && !await RemoveKeyAsync(root, scope, settings, target, cancellationToken).ConfigureAwait(false))
             return 1;
 
         console.MarkupLine(
@@ -197,17 +197,12 @@ public sealed class ArbiterUninstallCommand(
 
     private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
-    /// <summary>Runs the command without cancellation; the entry-point tests use this.</summary>
-    public int Execute(CommandContext context, ArbiterUninstallSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
-    }
-
-    private bool RemoveKey(
+    private async Task<bool> RemoveKeyAsync(
         string root,
         SquadDeploymentScope scope,
         ArbiterUninstallSettings settings,
-        SquadTarget target)
+        SquadTarget target,
+        CancellationToken cancellationToken)
     {
         KyberWeaveConfigLoadResult loaded = configs.Load(root, settings.Config, scope == SquadDeploymentScope.Project);
         if (!loaded.Success)
@@ -254,7 +249,7 @@ public sealed class ArbiterUninstallCommand(
 
         try
         {
-            credentials.Delete(origin);
+            await credentials.DeleteAsync(origin, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InvalidOperationException
                                        or IOException

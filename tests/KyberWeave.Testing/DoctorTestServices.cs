@@ -40,14 +40,14 @@ internal static class DoctorTestServices
     /// <param name="mcpExecutable">The MCP executable to probe; null for the one on the path.</param>
     public static DoctorCommand Command(
         IProcessEnvironment environment,
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         string? mcpExecutable = null) =>
         new(
             Doctor,
             environment,
             Provider.GetRequiredService<IConsole>(),
             Provider.GetRequiredService<IPathResolver>(),
-            Provider.GetRequiredService<IBoundedProcessExecutor>(),
+            Provider.GetRequiredService<IProcessRunner>(),
             executor,
             mcpExecutable);
 }

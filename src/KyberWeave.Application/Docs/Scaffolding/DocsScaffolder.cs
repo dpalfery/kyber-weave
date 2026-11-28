@@ -91,19 +91,38 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     }
 
     /// <inheritdoc />
-    public ScaffoldResult Scaffold(
+    public async Task<ScaffoldResult> ScaffoldAsync(
         string repoRoot,
         string? docsRoot = null,
         string owner = "unassigned",
         bool force = false,
         bool kyberStandards = false,
         bool reviewGates = true,
-        IReadOnlyList<string>? standards = null)
+        IReadOnlyList<string>? standards = null,
+        CancellationToken cancellationToken = default)
+    {
+        ScaffoldPreparation preparation = PrepareScaffold(
+            repoRoot, docsRoot, owner, kyberStandards, standards, cancellationToken);
+        ReviewGatesPlan? reviewPlan = reviewGates
+            ? await _reviewBlock.PlanAsync(
+                preparation.Root, preparation.Ontology.Technologies, cancellationToken).ConfigureAwait(false)
+            : null;
+        return FinishScaffold(preparation, reviewPlan, force, kyberStandards, standards);
+    }
+
+    private ScaffoldPreparation PrepareScaffold(
+        string repoRoot,
+        string? docsRoot,
+        string owner,
+        bool kyberStandards,
+        IReadOnlyList<string>? standards,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = _paths.GetFullPath(repoRoot, _environment.CurrentDirectory);
-
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string root = _paths.GetFullPath(repoRoot, _environment.CurrentDirectory);
         string resolvedOwner = owner.Trim();
         ScaffoldValues.RequireCatalogValue(resolvedOwner, nameof(owner));
 
@@ -111,8 +130,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
             ? ResolveDocsRoot(root, loadedConfig)
             : (docsRoot.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
-        string resolvedDocsRoot = resolution.DocsRoot;
-        resolvedDocsRoot = ScaffoldValues.RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
+        string resolvedDocsRoot = ScaffoldValues.RequireEmittableValue(resolution.DocsRoot, nameof(docsRoot));
 
         // Checked before the first write, not only inside Write. The host config resolves
         // inside the root and would otherwise be created successfully and left behind,
@@ -142,20 +160,38 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
         }
 
-        bool writesShippedTemplates = kyberStandards;
         if (standards is { Count: > 0 })
         {
             ontology = WithChosenStandards(ontology, standards);
             templatedTechnologies.UnionWith(standards.Where(
                 name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
-            writesShippedTemplates = true;
         }
 
-        // Planned before the first host-config write so a newly created file carries the
-        // block at creation, and so the declared technologies are the merged ones when
-        // --kyber-standards is passed. Whether the file already had a review section is read
-        // up front too: the section is host-owned from then on and never rewritten.
-        ReviewGatesPlan? reviewPlan = reviewGates ? _reviewBlock.Plan(root, ontology.Technologies) : null;
+        return new ScaffoldPreparation(
+            root,
+            resolvedOwner,
+            loadedConfig,
+            resolution.Source,
+            resolvedDocsRoot,
+            ontology,
+            templatedTechnologies);
+    }
+
+    private ScaffoldResult FinishScaffold(
+        ScaffoldPreparation preparation,
+        ReviewGatesPlan? reviewPlan,
+        bool force,
+        bool kyberStandards,
+        IReadOnlyList<string>? standards)
+    {
+        string root = preparation.Root;
+        string resolvedDocsRoot = preparation.ResolvedDocsRoot;
+        string resolvedOwner = preparation.ResolvedOwner;
+        OntologyConfig ontology = preparation.Ontology;
+        KyberWeaveConfigLoadResult loadedConfig = preparation.LoadedConfig;
+
+        // Whether the file already had a review section is read up front too: the section is
+        // host-owned from then on and never rewritten.
         string? preexistingConfigPath = _config.FindConfigPath(root);
         bool hadReviewSection = preexistingConfigPath is not null
             && ReviewBlockWriter.HasReviewSection(_files.ReadAllText(preexistingConfigPath));
@@ -179,12 +215,12 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         }
 
         files.AddRange(WriteStandardScopes(
-            root, resolvedDocsRoot, resolvedOwner, ontology, templatedTechnologies, force));
+            root, resolvedDocsRoot, resolvedOwner, ontology, preparation.TemplatedTechnologies, force));
 
         files.AddRange(CopyShippedSkills(
             root,
             resolvedDocsRoot,
-            [.. ontology.Technologies.Where(templatedTechnologies.Contains), .. ontology.Roles]));
+            [.. ontology.Technologies.Where(preparation.TemplatedTechnologies.Contains), .. ontology.Roles]));
 
         if ((kyberStandards || standards is { Count: > 0 })
             && _templates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
@@ -199,11 +235,20 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfigDefaults.Product).ConfigReg;
         files.Add(WriteConfigReg(root, resolvedDocsRoot, configReg.Resolve(ontology), configReg.Autonomy));
 
-        return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files)
+        return new ScaffoldResult(resolvedDocsRoot, preparation.DocsRootSource, files)
         {
             ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
         };
     }
+
+    private sealed record ScaffoldPreparation(
+        string Root,
+        string ResolvedOwner,
+        KyberWeaveConfigLoadResult LoadedConfig,
+        DocsRootSource DocsRootSource,
+        string ResolvedDocsRoot,
+        OntologyConfig Ontology,
+        HashSet<string> TemplatedTechnologies);
 
     /// <summary>
     /// Writes the four standards files for every technology and role the host declares, and returns

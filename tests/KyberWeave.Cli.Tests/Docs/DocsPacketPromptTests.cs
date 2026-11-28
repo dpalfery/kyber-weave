@@ -12,13 +12,14 @@ namespace KyberWeave.Tests;
 public sealed class DocsPacketPromptTests
 {
     [Fact]
-    public void TheCommandPrintsThePromptTheServiceBuilds()
+    public async Task TheCommandPrintsThePromptTheServiceBuilds()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
         KyberWeaveConfig config = DocsTaskPromptFixture.Config(fixture);
 
-        string printed = DocsTaskPromptFixture.Packet(fixture, "T1").TrimEnd('\r', '\n');
-        TaskPromptResult built = DocsTaskPromptFixture.Service(fixture).Build(new TaskPromptRequest(fixture.Root, TaskId: "T1"), config);
+        string printed = (await DocsTaskPromptFixture.PacketAsync(fixture, "T1")).TrimEnd('\r', '\n');
+        TaskPromptResult built = await DocsTaskPromptFixture.Service(fixture).BuildAsync(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1"), config, CancellationToken.None);
 
         Assert.True(built.Built, built.Refusal);
 

@@ -13,6 +13,13 @@ namespace KyberWeave.Core.Arbiter.Credentials;
 /// </remarks>
 public interface ICredentialProcessRunner
 {
-    /// <summary>Runs a child process to completion with the given stdin.</summary>
-    ProcessResult Run(ProcessStartInfo startInfo, string standardInput);
+    /// <summary>Runs a child process to completion with the given stdin, without blocking a thread.</summary>
+    /// <param name="startInfo">The configured program; its argument list is used, never its argument string.</param>
+    /// <param name="standardInput">The text written to standard input.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        CancellationToken cancellationToken = default);
 }

@@ -46,29 +46,29 @@ public sealed class PostCheckoutHookInstallerTests
         });
 
     [Fact]
-    public void ARelativeHooksAnswerIsResolvedAgainstTheRepositoryRoot()
+    public async Task ARelativeHooksAnswerIsResolvedAgainstTheRepositoryRoot()
     {
-        DoctorCheck? check = Installer().Ensure(Root, Git(".git/hooks"));
+        DoctorCheck? check = await Installer().EnsureAsync(Root, Git(".git/hooks"));
 
         Assert.True(check?.Passed);
         Assert.Contains("/kw/repo/.git/hooks/post-checkout", _written.Keys);
     }
 
     [Fact]
-    public void AHooksFolderOutsideTheRepositoryIsUsedWithoutAskingGitWhetherItIsTracked()
+    public async Task AHooksFolderOutsideTheRepositoryIsUsedWithoutAskingGitWhetherItIsTracked()
     {
         ScriptedProcessExecutor git = Git("../shared/hooks");
 
-        _ = Installer().Ensure(Root, git);
+        _ = await Installer().EnsureAsync(Root, git);
 
         Assert.Contains("/kw/shared/hooks/post-checkout", _written.Keys);
         Assert.DoesNotContain(git.Calls, c => c.ArgumentList.Contains("ls-files"));
     }
 
     [Fact]
-    public void ATrackedRedirectedHooksFolderInsideTheRepositoryIsRefused()
+    public async Task ATrackedRedirectedHooksFolderInsideTheRepositoryIsRefused()
     {
-        DoctorCheck? check = Installer().Ensure(Root, Git("hooks", hooksPath: "hooks", tracked: "hooks/pre-commit\n"));
+        DoctorCheck? check = await Installer().EnsureAsync(Root, Git("hooks", hooksPath: "hooks", tracked: "hooks/pre-commit\n"));
 
         Assert.StartsWith("warning: core.hooksPath points at 'hooks'", check?.Reason, StringComparison.Ordinal);
         Assert.Empty(_written);

@@ -32,10 +32,10 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// its declared technologies: the block <c>docs init</c> writes.
     /// </summary>
     [Fact]
-    public void StdoutEqualsTheRenderedCatalogueBlockForTheFixtureTechnologies()
+    public async Task StdoutEqualsTheRenderedCatalogueBlockForTheFixtureTechnologies()
     {
-        string repo = NewFixtureRepo("go", ["go"]);
-        ReviewGatesPlan plan = DocsTestCommands.Catalogue.Plan(repo, ["go"]);
+        string repo = await NewFixtureRepo("go", ["go"]);
+        ReviewGatesPlan plan = await DocsTestCommands.Catalogue.PlanAsync(repo, ["go"], CancellationToken.None);
         Assert.True(
             plan.ShouldWrite,
             "The go fixture planned no review block, so the stdout comparison proves nothing.");
@@ -53,9 +53,9 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// The command writes no file: every file under PATH is byte-identical after the run.
     /// </summary>
     [Fact]
-    public void CatalogueWritesNoFileUnderPath()
+    public async Task CatalogueWritesNoFileUnderPath()
     {
-        string repo = NewFixtureRepo("go", ["go"]);
+        string repo = await NewFixtureRepo("go", ["go"]);
         string[] before = Snapshot(repo);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
@@ -72,9 +72,9 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// <c>KyberStandardsTemplates.Render</c> gives it.
     /// </summary>
     [Fact]
-    public void UnknownTechnologyExitsTwoAndSuggestsTheNearestSlug()
+    public async Task UnknownTechnologyExitsTwoAndSuggestsTheNearestSlug()
     {
-        string repo = NewFixtureRepo("go", ["go"]);
+        string repo = await NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "gox"]));
@@ -88,9 +88,9 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// A known slug with no catalogue family is not an error: it reports the gap and exits 0.
     /// </summary>
     [Fact]
-    public void TechnologyWithNoCatalogueFamilyExitsZeroAndReportsNoGatesShipped()
+    public async Task TechnologyWithNoCatalogueFamilyExitsZeroAndReportsNoGatesShipped()
     {
-        string repo = NewFixtureRepo("go", ["go"]);
+        string repo = await NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "azure"]));
@@ -107,9 +107,9 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// whose templates do ship. The catalogue reports the gap instead of refusing the whole run.
     /// </summary>
     [Fact]
-    public void ADeclaredTechnologyWithNoShippedTemplateExitsZeroAndReportsNoGatesShipped()
+    public async Task ADeclaredTechnologyWithNoShippedTemplateExitsZeroAndReportsNoGatesShipped()
     {
-        string repo = NewFixtureRepo(
+        string repo = await NewFixtureRepo(
             "go", ["csharp", "test", "typescript", "rust", "tauri", "go", "github-actions"]);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
@@ -133,10 +133,10 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// A broken <c>.kyber-weave/kyber-weave.yml</c> exits 1: the config load error is fatal.
     /// </summary>
     [Fact]
-    public void BrokenHostConfigExitsOne()
+    public async Task BrokenHostConfigExitsOne()
     {
-        string repo = NewFixtureRepo("go", ["go"]);
-        File.WriteAllText(ConfigPath(repo), "ontology: [unclosed\n  technologies: : : bad\n");
+        string repo = await NewFixtureRepo("go", ["go"]);
+        await File.WriteAllTextAsync(ConfigPath(repo), "ontology: [unclosed\n  technologies: : : bad\n");
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo]));
@@ -162,9 +162,9 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// the block <c>go</c> does rather than silently nothing.
     /// </summary>
     [Fact]
-    public void TechnologySlugCaseDoesNotChangeTheRenderedBlock()
+    public async Task TechnologySlugCaseDoesNotChangeTheRenderedBlock()
     {
-        string repo = NewFixtureRepo("go", ["go"]);
+        string repo = await NewFixtureRepo("go", ["go"]);
 
         CapturedConsoleExecution<int> lower = ProcessConsoleCapture.Run(
             () => CommandAppFixture.ReviewCatalogue().Run(["review", "catalogue", repo, "--technology", "go"]));
@@ -181,12 +181,12 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// family's technologies. Never builds in place: the repository's
     /// <c>Directory.Build.props</c> would otherwise apply to the fixture.
     /// </summary>
-    private string NewFixtureRepo(string family, IReadOnlyList<string> technologies)
+    private async Task<string> NewFixtureRepo(string family, IReadOnlyList<string> technologies)
     {
         string repo = Path.Combine(_temp.Path, family + "-" + Guid.NewGuid().ToString("N"));
         CopyDirectory(FixtureCleanPath(family), repo);
         WriteHostConfig(repo, technologies);
-        InitGit(repo);
+        await InitGit(repo);
         return repo;
     }
 
@@ -220,16 +220,16 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
         File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml.ToString());
     }
 
-    private static void InitGit(string repo)
+    private static async Task InitGit(string repo)
     {
-        MustGit(repo, "init", "--quiet");
-        MustGit(repo, "add", "-A");
-        MustGit(
+        await MustGit(repo, "init", "--quiet");
+        await MustGit(repo, "add", "-A");
+        await MustGit(
             repo, "-c", "user.name=t2r", "-c", "user.email=t2r@example.invalid",
             "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture");
     }
 
-    private static void MustGit(string repo, params string[] arguments)
+    private static async Task MustGit(string repo, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -245,7 +245,7 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
             startInfo.ArgumentList.Add(argument);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} failed: {result.StandardOutput} {result.StandardError}");

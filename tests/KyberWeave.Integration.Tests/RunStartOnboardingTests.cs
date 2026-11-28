@@ -20,17 +20,23 @@ namespace KyberWeave.Integration.Tests;
 /// <c>PATH</c>, so a stop is observed at the same surface the conductor sees.
 /// </para>
 /// </remarks>
-public sealed class RunStartOnboardingTests : IDisposable
+public sealed class RunStartOnboardingTests : IAsyncLifetime
 {
     private const string OnboardingSkill = "kyber-docs-onboarding-and-assessment";
 
     private const string Branch = "claude/fix/tighten-the-gate";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -43,16 +49,16 @@ public sealed class RunStartOnboardingTests : IDisposable
     /// operator to find the verb.
     /// </remarks>
     [Fact]
-    public void AnUnsetOnboardingSettingStopsTheRunAndNamesTheSkill()
+    public async Task AnUnsetOnboardingSettingStopsTheRunAndNamesTheSkill()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\n");
 
-        ProbeResult result = StartRun();
+        ProbeResult result = await StartRun();
 
         Assert.True(result.ExitCode != 0, $"A run with onboarding unset exited 0. {result.Output}");
         Assert.Contains(OnboardingSkill, result.Output, StringComparison.Ordinal);
         Assert.False(
-            _probe.BranchExists(Branch),
+            await _probe.BranchExistsAsync(Branch),
             "A run stopped at onboarding created its branch, so the stop happened after the work began.");
     }
 
@@ -65,12 +71,12 @@ public sealed class RunStartOnboardingTests : IDisposable
     /// be fine once someone has answered the question.
     /// </remarks>
     [Fact]
-    public void TheOnboardingStopIsReportedBeforeAToolFailure()
+    public async Task TheOnboardingStopIsReportedBeforeAToolFailure()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\n");
-        _probe.BreakOrigin();
+        await _probe.BreakOriginAsync();
 
-        ProbeResult result = StartRun();
+        ProbeResult result = await StartRun();
 
         Assert.True(result.ExitCode != 0, $"A run with onboarding unset exited 0. {result.Output}");
         Assert.Contains(OnboardingSkill, result.Output, StringComparison.Ordinal);
@@ -86,15 +92,15 @@ public sealed class RunStartOnboardingTests : IDisposable
     /// refuses everything.
     /// </remarks>
     [Fact]
-    public void ARecordedDoneValueLetsTheRunContinue()
+    public async Task ARecordedDoneValueLetsTheRunContinue()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\nonboarding: done\n");
 
-        ProbeResult result = StartRun();
+        ProbeResult result = await StartRun();
 
         Assert.True(result.ExitCode == 0, $"A run in an onboarded repository exited {result.ExitCode}. {result.Output}");
         Assert.DoesNotContain(OnboardingSkill, result.Output, StringComparison.Ordinal);
-        Assert.True(_probe.BranchExists(Branch), "A ready run created no branch. " + result.Output);
+        Assert.True(await _probe.BranchExistsAsync(Branch), "A ready run created no branch. " + result.Output);
     }
 
     /// <summary>
@@ -105,15 +111,15 @@ public sealed class RunStartOnboardingTests : IDisposable
     /// is the behaviour the value exists to end.
     /// </remarks>
     [Fact]
-    public void ARecordedDeclinedValueLetsTheRunContinueWithoutAskingAgain()
+    public async Task ARecordedDeclinedValueLetsTheRunContinueWithoutAskingAgain()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\nonboarding: declined\n");
 
-        ProbeResult result = StartRun();
+        ProbeResult result = await StartRun();
 
         Assert.True(result.ExitCode == 0, $"A run in a declined repository exited {result.ExitCode}. {result.Output}");
         Assert.DoesNotContain(OnboardingSkill, result.Output, StringComparison.Ordinal);
-        Assert.True(_probe.BranchExists(Branch), "A declined run created no branch. " + result.Output);
+        Assert.True(await _probe.BranchExistsAsync(Branch), "A declined run created no branch. " + result.Output);
     }
 
     /// <summary>
@@ -126,21 +132,21 @@ public sealed class RunStartOnboardingTests : IDisposable
     /// every later run.
     /// </remarks>
     [Fact]
-    public void AnAutonomousRunStopsWithoutAnsweringTheQuestionForTheUser()
+    public async Task AnAutonomousRunStopsWithoutAnsweringTheQuestionForTheUser()
     {
         const string config = "ontology:\n  docs-root: docs\nautonomy: autonomous\n";
         _probe.WriteHostConfig(config);
 
-        ProbeResult result = StartRun();
+        ProbeResult result = await StartRun();
 
         Assert.True(result.ExitCode != 0, $"An autonomous run with onboarding unset exited 0. {result.Output}");
         Assert.Contains(OnboardingSkill, result.Output, StringComparison.Ordinal);
         Assert.Equal(
             config,
-            File.ReadAllText(Path.Combine(_probe.Root, ".kyber-weave", "kyber-weave.yml")));
+            await File.ReadAllTextAsync(Path.Combine(_probe.Root, ".kyber-weave", "kyber-weave.yml")));
     }
 
-    private ProbeResult StartRun()
+    private async Task<ProbeResult> StartRun()
     {
         return _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
     }

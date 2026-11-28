@@ -41,13 +41,13 @@ public sealed class RepositoryDoctorNestedWorktreeTests
     [InlineData(DoctorMode.Check)]
     [InlineData(DoctorMode.Provision)]
     [InlineData(DoctorMode.Ensure)]
-    public void IndexHoldingAgentWorktreeFile_FailsWithFixAndExits1(DoctorMode mode)
+    public async Task IndexHoldingAgentWorktreeFile_FailsWithFixAndExits1(DoctorMode mode)
     {
         InMemoryDoctorWorld world = WorldIndexing(".agent_worktrees/run-1/src/Program.cs");
         world.Files.CreateDirectory(Path.Combine(world.Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(world.Root);
 
-        DoctorReport report = world.Doctor.Run(world.Root, mode, HealthyOptions(world), executor, _ => null, world.Locks);
+        DoctorReport report = await world.Doctor.RunAsync(world.Root, mode, HealthyOptions(world), executor, _ => null, world.Locks);
 
         DoctorCheck check = DoctorHarness.CheckNamed(report, CheckId);
         Assert.False(check.Passed);
@@ -57,14 +57,14 @@ public sealed class RepositoryDoctorNestedWorktreeTests
 
     /// <summary>Under <c>stop-on-tool-failure: false</c> an ensure run reports the nested worktree as a warning and exits 0.</summary>
     [Fact]
-    public void EnsureWithStopOnToolFailureFalse_ReportsWarningAndExits0()
+    public async Task EnsureWithStopOnToolFailureFalse_ReportsWarningAndExits0()
     {
         InMemoryDoctorWorld world = WorldIndexing(".agent_worktrees/run-1/src/Program.cs");
         world.WriteGoverned("stop-on-tool-failure: false\n");
         world.Files.CreateDirectory(Path.Combine(world.Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(world.Root);
 
-        DoctorReport report = world.Doctor.Run(world.Root, DoctorMode.Ensure, HealthyOptions(world), executor, _ => null, world.Locks);
+        DoctorReport report = await world.Doctor.RunAsync(world.Root, DoctorMode.Ensure, HealthyOptions(world), executor, _ => null, world.Locks);
 
         DoctorCheck check = DoctorHarness.CheckNamed(report, CheckId);
         Assert.True(check.Passed);
@@ -74,26 +74,26 @@ public sealed class RepositoryDoctorNestedWorktreeTests
 
     /// <summary>An index with no file under the run worktree folder passes the check.</summary>
     [Fact]
-    public void IndexWithoutAgentWorktreeFile_PassesCheck()
+    public async Task IndexWithoutAgentWorktreeFile_PassesCheck()
     {
         InMemoryDoctorWorld world = WorldIndexing("src/Program.cs");
         world.Files.CreateDirectory(Path.Combine(world.Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(world.Root);
 
-        DoctorReport report = world.Doctor.Run(world.Root, DoctorMode.Check, HealthyOptions(world), executor, _ => null, world.Locks);
+        DoctorReport report = await world.Doctor.RunAsync(world.Root, DoctorMode.Check, HealthyOptions(world), executor, _ => null, world.Locks);
 
         Assert.True(DoctorHarness.CheckNamed(report, CheckId).Passed);
     }
 
     /// <summary>An unavailable index passes this check: <c>codegraph.index</c> already reports the missing index, and a second line would repeat it.</summary>
     [Fact]
-    public void IndexUnavailable_PassesCheckWithoutNoise()
+    public async Task IndexUnavailable_PassesCheckWithoutNoise()
     {
         InMemoryDoctorWorld world = new(new UnavailableCodeGraphResolver());
         world.Files.CreateDirectory(Path.Combine(world.Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(world.Root);
 
-        DoctorReport report = world.Doctor.Run(world.Root, DoctorMode.Check, HealthyOptions(world), executor, _ => null, world.Locks);
+        DoctorReport report = await world.Doctor.RunAsync(world.Root, DoctorMode.Check, HealthyOptions(world), executor, _ => null, world.Locks);
 
         DoctorCheck check = DoctorHarness.CheckNamed(report, CheckId);
         Assert.True(check.Passed);
@@ -102,13 +102,13 @@ public sealed class RepositoryDoctorNestedWorktreeTests
 
     /// <summary>A sibling folder whose name only starts with <c>.agent_worktrees</c> is not a run worktree, so it does not fail the check.</summary>
     [Fact]
-    public void SiblingFolderWithSimilarPrefix_PassesCheck()
+    public async Task SiblingFolderWithSimilarPrefix_PassesCheck()
     {
         InMemoryDoctorWorld world = WorldIndexing(".agent_worktrees-other/src/Program.cs");
         world.Files.CreateDirectory(Path.Combine(world.Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(world.Root);
 
-        DoctorReport report = world.Doctor.Run(world.Root, DoctorMode.Check, HealthyOptions(world), executor, _ => null, world.Locks);
+        DoctorReport report = await world.Doctor.RunAsync(world.Root, DoctorMode.Check, HealthyOptions(world), executor, _ => null, world.Locks);
 
         Assert.True(DoctorHarness.CheckNamed(report, CheckId).Passed);
     }

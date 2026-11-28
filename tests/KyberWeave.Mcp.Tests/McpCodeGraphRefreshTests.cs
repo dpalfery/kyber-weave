@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -51,9 +52,9 @@ public sealed class McpCodeGraphRefreshTests
     /// converted to STATUS: TOOL_FAILURE rather than escaping, and the throttle does not bypass the gate.
     /// </summary>
     [Fact]
-    public void WhenResolverFactoryThrowsDuringRefresh_FailsToolsUnderStopRule()
+    public async Task WhenResolverFactoryThrowsDuringRefresh_FailsToolsUnderStopRule()
     {
-        Scaffold(Root);
+        await ScaffoldAsync(Root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, Root);
 
         int resolverCalls = 0;
@@ -65,13 +66,13 @@ public sealed class McpCodeGraphRefreshTests
                 throw new InvalidOperationException("boom resolver failed");
             });
 
-        string first = tools.Explore("anything");
+        string first = await tools.ExploreAsync("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", first, StringComparison.Ordinal);
         Assert.Contains("boom resolver failed", first, StringComparison.Ordinal);
         Assert.DoesNotContain("documents=0", first, StringComparison.Ordinal);
 
         // Subsequent call must not answer Clear as if healthy
-        string second = tools.Explore("anything");
+        string second = await tools.ExploreAsync("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", second, StringComparison.Ordinal);
         Assert.Contains("boom resolver failed", second, StringComparison.Ordinal);
     }
@@ -81,9 +82,9 @@ public sealed class McpCodeGraphRefreshTests
     /// the failure defaults to the stop rule (STATUS: TOOL_FAILURE) rather than fail-open advisory.
     /// </summary>
     [Fact]
-    public void WhenResolverFactoryThrowsAndConfigUnreadable_DefaultsToStopRule()
+    public async Task WhenResolverFactoryThrowsAndConfigUnreadable_DefaultsToStopRule()
     {
-        Scaffold(Root);
+        await ScaffoldAsync(Root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, Root);
 
         DocsTools tools = ScaffoldedTools(
@@ -94,7 +95,7 @@ public sealed class McpCodeGraphRefreshTests
                 throw new InvalidOperationException("boom resolver failed");
             });
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
         Assert.Contains("boom resolver failed", response, StringComparison.Ordinal);
         Assert.DoesNotContain("warning:", response, StringComparison.Ordinal);
@@ -105,9 +106,9 @@ public sealed class McpCodeGraphRefreshTests
     /// documents=unavailable rather than conflating failure with an empty corpus (documents=0).
     /// </summary>
     [Fact]
-    public void WhenDocsTreeUnreadable_BlockedResponseReportsDocumentsUnavailable()
+    public async Task WhenDocsTreeUnreadable_BlockedResponseReportsDocumentsUnavailable()
     {
-        Scaffold(Root);
+        await ScaffoldAsync(Root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, Root);
 
         KyberWeaveConfig config = _host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(Root);
@@ -121,12 +122,13 @@ public sealed class McpCodeGraphRefreshTests
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
+        CodeGraphFreshness freshness = NewFreshness(Root, ProvisionSucceeds());
         DocsTools tools = DocsToolsComposition.Create(
             host,
             null,
-            Freshness(Root, ProvisionSucceeds()));
+            freshness);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
         Assert.Contains("STATUS: TOOL_FAILURE", response, StringComparison.Ordinal);
         Assert.Contains("documents=unavailable", response, StringComparison.Ordinal);
         Assert.DoesNotContain("documents=0", response, StringComparison.Ordinal);
@@ -155,13 +157,13 @@ public sealed class McpCodeGraphRefreshTests
     /// index was healthy throughout, so the caller should not be able to tell the retry happened.
     /// </remarks>
     [Fact]
-    public void ASyncThatFindsTheIndexLockHeldOnceIsRetriedAndAnswersNormally()
+    public async Task ASyncThatFindsTheIndexLockHeldOnceIsRetriedAndAnswersNormally()
     {
         ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock, SyncSucceeded);
         List<TimeSpan> pauses = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, pauses);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Equal(2, executor.Calls.Count);
         Assert.Single(pauses);
@@ -182,13 +184,13 @@ public sealed class McpCodeGraphRefreshTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void ASyncThatAlwaysFindsTheIndexLockHeldAnswersWithANoteAndNoFailure(bool stopsOnToolFailure)
+    public async Task ASyncThatAlwaysFindsTheIndexLockHeldAnswersWithANoteAndNoFailure(bool stopsOnToolFailure)
     {
         ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock);
         List<TimeSpan> pauses = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, pauses, stopsOnToolFailure);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Equal(3, executor.Calls.Count);
         Assert.True(
@@ -212,13 +214,13 @@ public sealed class McpCodeGraphRefreshTests
     [InlineData("✗ Failed to sync: SQLITE_ERROR: no such table: nodes", true)]
     [InlineData("✗ Failed to sync: SQLITE_ERROR: no such table: nodes", false)]
     [InlineData("✗ Failed to sync: A rebuild of this index is in progress; retry when it finishes.", true)]
-    public void ASyncThatFailsForAnotherReasonStillFailsTheToolWithoutARetry(string error, bool stopsOnToolFailure)
+    public async Task ASyncThatFailsForAnotherReasonStillFailsTheToolWithoutARetry(string error, bool stopsOnToolFailure)
     {
         ScriptedProcessExecutor executor = SyncAnswers(new ProcessResult(1, SyncBanner, error + "\n"));
         List<TimeSpan> pauses = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, pauses, stopsOnToolFailure);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Single(executor.Calls);
         Assert.Empty(pauses);
@@ -237,13 +239,13 @@ public sealed class McpCodeGraphRefreshTests
 
     /// <summary>With no CodeGraph lock file the refresh syncs at once, without waiting.</summary>
     [Fact]
-    public void WithNoLockFileTheRefreshSyncsAtOnce()
+    public async Task WithNoLockFileTheRefreshSyncsAtOnce()
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, waits);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, waits);
 
-        _ = tools.Explore("anything");
+        _ = await tools.ExploreAsync("anything");
 
         Assert.Single(executor.Calls);
         Assert.Empty(waits);
@@ -261,21 +263,22 @@ public sealed class McpCodeGraphRefreshTests
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    public void ALockFileThatGoesAwayDuringAWaitLetsTheSyncRunThen(int waitsBeforeRelease)
+    public async Task ALockFileThatGoesAwayDuringAWaitLetsTheSyncRunThen(int waitsBeforeRelease)
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, wait =>
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, (wait, _) =>
         {
             Assert.Empty(executor.Calls);
             waits.Add(wait);
             if (waits.Count == waitsBeforeRelease)
                 _host.Files.DeleteFile(IndexLockFile);
+            return Task.CompletedTask;
         });
         _host.Files.WriteAllText(IndexLockFile, LivePid);
         _ = _host.Processes.WithAlive(LiveProcessId);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Equal(LockFileWaits.Take(waitsBeforeRelease), waits);
         Assert.Single(executor.Calls);
@@ -291,16 +294,16 @@ public sealed class McpCodeGraphRefreshTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void ALockFileThatOutlastsEveryWaitFailsTheToolWithoutSyncing(bool holderIsRunning)
+    public async Task ALockFileThatOutlastsEveryWaitFailsTheToolWithoutSyncing(bool holderIsRunning)
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, waits);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, waits);
         string pid = holderIsRunning ? LivePid : DeadPid;
         _host.Files.WriteAllText(IndexLockFile, pid);
         _ = _host.Processes.WithAlive(LiveProcessId, holderIsRunning);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Empty(executor.Calls);
         Assert.Equal(LockFileWaits, waits);
@@ -316,7 +319,7 @@ public sealed class McpCodeGraphRefreshTests
             StringComparison.Ordinal);
 
         _host.Files.DeleteFile(IndexLockFile);
-        string next = tools.Explore("anything");
+        string next = await tools.ExploreAsync("anything");
 
         Assert.Single(executor.Calls);
         Assert.DoesNotContain("STATUS: TOOL_FAILURE", next, StringComparison.Ordinal);
@@ -327,15 +330,15 @@ public sealed class McpCodeGraphRefreshTests
     /// the answer still comes back, again without a sync.
     /// </summary>
     [Fact]
-    public void ALockFileThatOutlastsEveryWaitIsAWarningWhenTheRepositoryOptedOut()
+    public async Task ALockFileThatOutlastsEveryWaitIsAWarningWhenTheRepositoryOptedOut()
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, waits, stopsOnToolFailure: false);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, waits, stopsOnToolFailure: false);
         _host.Files.WriteAllText(IndexLockFile, LivePid);
         _ = _host.Processes.WithAlive(LiveProcessId);
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Empty(executor.Calls);
         Assert.Equal(LockFileWaits, waits);
@@ -396,14 +399,18 @@ public sealed class McpCodeGraphRefreshTests
         });
     }
 
-    private DocsTools ToolsWithAnIndex(
-        string root, IProcessExecutor executor, List<TimeSpan> pauses, bool stopsOnToolFailure = true) =>
-        ToolsWithAnIndex(root, executor, pauses.Add, stopsOnToolFailure);
+    private Task<DocsTools> ToolsWithAnIndexAsync(
+        string root, IProcessRunner executor, List<TimeSpan> pauses, bool stopsOnToolFailure = true) =>
+        ToolsWithAnIndexAsync(root, executor, (wait, _) =>
+        {
+            pauses.Add(wait);
+            return Task.CompletedTask;
+        }, stopsOnToolFailure);
 
-    private DocsTools ToolsWithAnIndex(
-        string root, IProcessExecutor executor, Action<TimeSpan> pause, bool stopsOnToolFailure = true)
+    private async Task<DocsTools> ToolsWithAnIndexAsync(
+        string root, IProcessRunner executor, Func<TimeSpan, CancellationToken, Task> pause, bool stopsOnToolFailure = true)
     {
-        Scaffold(root);
+        await ScaffoldAsync(root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, root);
         if (!stopsOnToolFailure)
         {
@@ -425,10 +432,19 @@ public sealed class McpCodeGraphRefreshTests
             services.AddSingleton<ICodeGraphIndexWorkspace>(new FakeCodeGraphIndexWorkspace());
         });
 
-    private void Scaffold(string root) =>
-        Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(root);
+    private Task ScaffoldAsync(string root) =>
+        Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(root);
 
-    private CodeGraphFreshness Freshness(string root, IProcessExecutor executor, Action<TimeSpan>? pause = null)
+    private ICodeGraphFreshnessGate Freshness(
+        string root,
+        IProcessRunner executor,
+        Func<TimeSpan, CancellationToken, Task>? pause = null) =>
+        NewFreshness(root, executor, pause);
+
+    private CodeGraphFreshness NewFreshness(
+        string root,
+        IProcessRunner executor,
+        Func<TimeSpan, CancellationToken, Task>? pause = null)
     {
         IServiceProvider provider = Services();
         return new CodeGraphFreshness(
@@ -441,7 +457,6 @@ public sealed class McpCodeGraphRefreshTests
             provider.GetRequiredService<IPathResolver>(),
             provider.GetRequiredService<IProcessEnvironment>(),
             provider.GetRequiredService<IProcessRunner>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>(),
             executor,
             pause);
     }
@@ -449,8 +464,8 @@ public sealed class McpCodeGraphRefreshTests
     private DocsTools ScaffoldedTools(
         string root,
         Func<ICodeGraphResolver> resolverFactory,
-        IProcessExecutor? executor = null,
-        Action<TimeSpan>? pause = null)
+        IProcessRunner? executor = null,
+        Func<TimeSpan, CancellationToken, Task>? pause = null)
     {
         KyberWeaveConfig config = _host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(root);
         DocumentIndexHost host = new(

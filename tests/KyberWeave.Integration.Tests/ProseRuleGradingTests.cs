@@ -52,7 +52,7 @@ public sealed class ProseRuleGradingTests
 
         string endpoint = Environment.GetEnvironmentVariable(EndpointVariable) is { Length: > 0 } configured ? configured : DefaultEndpoint;
         string model = Environment.GetEnvironmentVariable(ModelVariable) is { Length: > 0 } chosen ? chosen : DefaultModel;
-        string? key = ResolveKey(endpoint, Environment.GetEnvironmentVariable);
+        string? key = await ResolveKeyAsync(endpoint, Environment.GetEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(key))
         {
             Assert.Skip($"{OptInVariable}=1 but no key resolved for {endpoint}: set TYPESAFE_API_KEY or store one for that origin.");
@@ -96,17 +96,17 @@ public sealed class ProseRuleGradingTests
     }
 
     [Fact]
-    public void ResolveKey_GivesTheEnvironmentKeyToTheConfiguredEndpoint()
+    public async Task ResolveKey_GivesTheEnvironmentKeyToTheConfiguredEndpoint()
     {
-        string? key = ResolveKey(DefaultEndpoint, name => name == ArbiterKeyResolver.EnvVarName ? "test-key" : null, store: null);
+        string? key = await ResolveKeyAsync(DefaultEndpoint, name => name == ArbiterKeyResolver.EnvVarName ? "test-key" : null, store: null);
 
         Assert.Equal("test-key", key);
     }
 
     [Fact]
-    public void ResolveKey_ReturnsNoKeyWhenNoneIsSetAndNoStoreAnswers()
+    public async Task ResolveKey_ReturnsNoKeyWhenNoneIsSetAndNoStoreAnswers()
     {
-        Assert.Null(ResolveKey(DefaultEndpoint, _ => null, store: null));
+        Assert.Null(await ResolveKeyAsync(DefaultEndpoint, _ => null, store: null));
     }
 
     [Fact]
@@ -279,14 +279,14 @@ public sealed class ProseRuleGradingTests
         }
     }
 
-    internal static string? ResolveKey(string endpoint, Func<string, string?> environment, ICredentialStore? store = null)
+    internal static Task<string?> ResolveKeyAsync(string endpoint, Func<string, string?> environment, ICredentialStore? store = null)
     {
         // The environment key serves only the TypeSafe origin unless the endpoint is passed as the
         // override, so an OpenRouter endpoint must name itself here or the key never resolves.
-        return ArbiterKeyResolver.Resolve(endpoint, store, environment, userOverrideEndpoint: endpoint);
+        return ArbiterKeyResolver.ResolveAsync(endpoint, store, environment, userOverrideEndpoint: endpoint);
     }
 
-    private static string? ResolveKey(string endpoint, Func<string, string?> environment)
+    private static async Task<string?> ResolveKeyAsync(string endpoint, Func<string, string?> environment)
     {
         ICredentialStore? store = null;
         try
@@ -300,11 +300,11 @@ public sealed class ProseRuleGradingTests
                 store = new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner());
             }
 
-            return ResolveKey(endpoint, environment, store);
+            return await ResolveKeyAsync(endpoint, environment, store).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
-            return ResolveKey(endpoint, environment, store: null);
+            return await ResolveKeyAsync(endpoint, environment, store: null).ConfigureAwait(false);
         }
     }
 

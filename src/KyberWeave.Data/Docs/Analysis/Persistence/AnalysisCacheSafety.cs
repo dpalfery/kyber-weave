@@ -9,15 +9,7 @@ using KyberWeave.Core.Processes;
 namespace KyberWeave.Core.Docs.Analysis.Persistence;
 
 /// <summary>Checks whether local analysis state is protected from accidental commits.</summary>
-/// <param name="files">Reads the repository's state ignore file.</param>
-/// <param name="paths">Resolves the repository root to a full path.</param>
-/// <param name="environment">Supplies the directory a relative root resolves against.</param>
-/// <param name="processes">Runs <c>git ls-files</c> under a time limit.</param>
-public sealed class AnalysisCacheSafety(
-    IFileSystem files,
-    IPathResolver paths,
-    IProcessEnvironment environment,
-    IBoundedProcessExecutor processes)
+public sealed class AnalysisCacheSafety
 {
     private const string CacheIgnoreEntry = "cache/";
 
@@ -26,23 +18,48 @@ public sealed class AnalysisCacheSafety(
     /// </summary>
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
+    private readonly IFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+    private readonly IProcessRunner _processes;
+
+    /// <summary>Checks whether local analysis state is protected from accidental commits, reading git without blocking.</summary>
+    /// <param name="files">Reads the repository's state ignore file.</param>
+    /// <param name="paths">Resolves the repository root to a full path.</param>
+    /// <param name="environment">Supplies the directory a relative root resolves against.</param>
+    /// <param name="processes">Runs <c>git ls-files</c> under a time limit without blocking a thread.</param>
+    public AnalysisCacheSafety(
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IProcessRunner processes)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(processes);
+        _files = files;
+        _paths = paths;
+        _environment = environment;
+        _processes = processes;
+    }
+
     /// <summary>
     /// Returns true only when the repository-owned state ignore file contains the narrow
-    /// cache-directory entry used by Kyber-Weave.
+    /// cache-directory entry used by Kyber-Weave, reading git without blocking a thread.
     /// </summary>
-    public bool IsSafe(string repositoryRoot)
+    /// <param name="repositoryRoot">The repository root.</param>
+    /// <param name="cancellationToken">Cancels the git read.</param>
+    public async Task<bool> IsSafeAsync(string repositoryRoot, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        string ignorePath = Path.Combine(
-            paths.GetFullPath(repositoryRoot, environment.CurrentDirectory),
-            UserStatePaths.DirectoryName,
-            ".gitignore");
+        string ignorePath = IgnorePathFor(repositoryRoot);
         try
         {
-            return files.FileExists(ignorePath)
+            return _files.FileExists(ignorePath)
                 && HasEffectiveCacheIgnore(ignorePath)
-                && !HasTrackedCacheEntry(repositoryRoot);
+                && !await HasTrackedCacheEntryAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
         }
         catch (IOException)
         {
@@ -54,10 +71,16 @@ public sealed class AnalysisCacheSafety(
         }
     }
 
+    private string IgnorePathFor(string repositoryRoot) =>
+        Path.Combine(
+            _paths.GetFullPath(repositoryRoot, _environment.CurrentDirectory),
+            UserStatePaths.DirectoryName,
+            ".gitignore");
+
     private bool HasEffectiveCacheIgnore(string ignorePath)
     {
         bool protectedByExactEntry = false;
-        foreach (string line in files.ReadLines(ignorePath))
+        foreach (string line in _files.ReadLines(ignorePath))
         {
             if (StringComparer.Ordinal.Equals(line, CacheIgnoreEntry))
             {
@@ -110,7 +133,27 @@ public sealed class AnalysisCacheSafety(
 #pragma warning restore CA1847
     }
 
-    private bool HasTrackedCacheEntry(string repositoryRoot)
+    private async Task<bool> HasTrackedCacheEntryAsync(string repositoryRoot, CancellationToken cancellationToken)
+    {
+        ProcessStartInfo startInfo = GitStartInfo(repositoryRoot);
+
+        try
+        {
+            ProcessResult result = await _processes.RunAsync(
+                startInfo,
+                string.Empty,
+                GitTimeout,
+                cancellationToken).ConfigureAwait(false);
+            return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or TimeoutException)
+        {
+            // Without git, or without an answer from it, persistence cannot prove that the cache is outside the index.
+            return true;
+        }
+    }
+
+    private static ProcessStartInfo GitStartInfo(string repositoryRoot)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("git")
         {
@@ -124,16 +167,6 @@ public sealed class AnalysisCacheSafety(
         startInfo.ArgumentList.Add("--cached");
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add(UserStatePaths.AnalysisCacheRelativeDirectory);
-
-        try
-        {
-            ProcessResult result = processes.Run(startInfo, string.Empty, GitTimeout);
-            return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or TimeoutException)
-        {
-            // Without git, or without an answer from it, persistence cannot prove that the cache is outside the index.
-            return true;
-        }
+        return startInfo;
     }
 }

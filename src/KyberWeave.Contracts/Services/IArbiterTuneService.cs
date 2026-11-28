@@ -61,4 +61,21 @@ public interface IArbiterTuneService
     /// <param name="report">Receives the findings.</param>
     /// <returns>The tally, or null when the log cannot be read whole; the findings say why.</returns>
     ArbiterTuneReport? Score(string repositoryPath, IReadOnlyList<double> thresholds, string? onlyRule, DiagnosticReport report);
+
+    /// <summary>
+    /// The same tally without blocking a thread: the repository root and the arbiter state directory are
+    /// resolved while git runs, and the resolution is awaited rather than waited on.
+    /// </summary>
+    /// <param name="repositoryPath">The repository whose log is read.</param>
+    /// <param name="thresholds">The candidate thresholds whose flips are counted.</param>
+    /// <param name="onlyRule">The one rule id to tally, or null for every rule.</param>
+    /// <param name="report">Receives the findings.</param>
+    /// <param name="cancellationToken">Cancels the git run and kills the process tree.</param>
+    /// <returns>The tally, or null when the log cannot be read whole; the findings say why.</returns>
+    Task<ArbiterTuneReport?> ScoreAsync(
+        string repositoryPath,
+        IReadOnlyList<double> thresholds,
+        string? onlyRule,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default);
 }

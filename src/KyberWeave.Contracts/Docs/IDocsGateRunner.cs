@@ -25,9 +25,11 @@ public interface IDocsGateRunner
     /// <param name="loadDocuments">Loads the corpus the gate checks.</param>
     /// <param name="codeGraph">Builds the CodeGraph port the linter resolves symbols through.</param>
     /// <param name="report">The report the findings are added to.</param>
-    void CheckDrift(
+    /// <param name="cancellationToken">Cancels the index freshness read.</param>
+    Task CheckDriftAsync(
         string repositoryRoot,
         Func<DocumentSet> loadDocuments,
         Func<ICodeGraphResolver> codeGraph,
-        DiagnosticReport report);
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default);
 }

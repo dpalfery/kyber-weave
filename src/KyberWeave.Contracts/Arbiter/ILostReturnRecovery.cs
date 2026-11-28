@@ -14,15 +14,9 @@ namespace KyberWeave.Arbiter.Hooks;
 public interface ILostReturnRecovery
 {
     /// <summary>
-    /// Closes the one dispatch <paramref name="agentNames"/> left open in <paramref name="sessionId"/>.
+    /// Closes the one dispatch <paramref name="agentNames"/> left open in <paramref name="sessionId"/>, without
+    /// blocking a thread.
     /// </summary>
-    /// <remarks>
-    /// A dispatch the rules refused wrote a pre event but never ran a worker, so it is not a candidate. When several
-    /// dispatches of the agent are still open the stop event cannot say which one ended: none is closed and one line
-    /// is logged, because closing the wrong one reports work as finished that never ran. A stop event that names the
-    /// agent's id closes exactly the dispatch the engine followed for that id, when its pre event is still open, and
-    /// nothing else; an id with no followed dispatch falls back to the name rule.
-    /// </remarks>
     /// <param name="harness">The harness token that delivered the stop event.</param>
     /// <param name="sessionId">The harness session the agent ran in, when the payload names one.</param>
     /// <param name="agentNames">Every name the stop event gives the agent; empty when it gives none.</param>
@@ -30,12 +24,14 @@ public interface ILostReturnRecovery
     /// <param name="agentId">The harness's id for the agent, when the stop event carries one.</param>
     /// <param name="stopEvent">The event that ended the agent, as the closing row's <c>recovered</c> value; null names
     /// the harness's own stop event.</param>
+    /// <param name="cancellationToken">Cancels the recovery.</param>
     /// <returns>How many dispatches were closed: 0 or 1.</returns>
-    int RecoverLostReturn(
+    Task<int> RecoverLostReturnAsync(
         string harness,
         string? sessionId,
         IReadOnlyList<string> agentNames,
         HookContext context,
         string? agentId = null,
-        string? stopEvent = null);
+        string? stopEvent = null,
+        CancellationToken cancellationToken = default);
 }

@@ -42,6 +42,28 @@ public sealed class ArbiterRepositoryLocator(
     }
 
     /// <inheritdoc />
+    public async Task<string> ResolveRepositoryRootAsync(string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        string working = paths.GetFullPath(path, environment.CurrentDirectory);
+        try
+        {
+            string workingDirectory = GitWorkingDirectory(working);
+            GitOutcome result = await git.RunAsync(
+                workingDirectory, ["rev-parse", "--show-toplevel"], cancellationToken).ConfigureAwait(false);
+            string root = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
+            if (!string.IsNullOrWhiteSpace(root))
+                return paths.GetFullPath(root, workingDirectory);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
+        {
+            // No git, no root: the caller works from the path itself.
+        }
+
+        return working;
+    }
+
+    /// <inheritdoc />
     public string ResolveArbiterDirectory(string path)
     {
         string root = ResolveRepositoryRoot(path);
@@ -53,6 +75,24 @@ public sealed class ArbiterRepositoryLocator(
 
         string working = paths.GetFullPath(path, environment.CurrentDirectory);
         string userLevel = ArbiterStateDirectory.ForGlobal(home, MainCheckoutOf(working, root), environment.CurrentDirectory);
+        return HasLedgerOrDecisionLog(userLevel, files)
+            ? userLevel
+            : ArbiterStateDirectory.ForProject(root);
+    }
+
+    /// <inheritdoc />
+    public async Task<string> ResolveArbiterDirectoryAsync(string path, CancellationToken cancellationToken = default)
+    {
+        string root = await ResolveRepositoryRootAsync(path, cancellationToken).ConfigureAwait(false);
+        string home = environment.HomeDirectory;
+        if (string.IsNullOrWhiteSpace(home))
+        {
+            return ArbiterStateDirectory.ForProject(root);
+        }
+
+        string working = paths.GetFullPath(path, environment.CurrentDirectory);
+        string mainCheckout = await MainCheckoutOfAsync(working, root, cancellationToken).ConfigureAwait(false);
+        string userLevel = ArbiterStateDirectory.ForGlobal(home, mainCheckout, environment.CurrentDirectory);
         return HasLedgerOrDecisionLog(userLevel, files)
             ? userLevel
             : ArbiterStateDirectory.ForProject(root);
@@ -78,6 +118,34 @@ public sealed class ArbiterRepositoryLocator(
         {
             string workingDirectory = GitWorkingDirectory(working);
             GitOutcome result = git.Run(workingDirectory, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+            string common = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
+            if (string.IsNullOrWhiteSpace(common))
+            {
+                return root;
+            }
+
+            string commonDirectory = paths.GetFullPath(common, workingDirectory);
+            return string.Equals(Path.GetFileName(commonDirectory), ".git", StringComparison.Ordinal)
+                ? Path.GetDirectoryName(commonDirectory) ?? root
+                : root;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
+        {
+            // No common directory, no main checkout: the key falls back to the root.
+            return root;
+        }
+    }
+
+    /// <summary>The main checkout of the repository, without blocking a thread while git runs.</summary>
+    private async Task<string> MainCheckoutOfAsync(string working, string root, CancellationToken cancellationToken)
+    {
+        try
+        {
+            string workingDirectory = GitWorkingDirectory(working);
+            GitOutcome result = await git.RunAsync(
+                workingDirectory,
+                ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cancellationToken).ConfigureAwait(false);
             string common = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
             if (string.IsNullOrWhiteSpace(common))
             {

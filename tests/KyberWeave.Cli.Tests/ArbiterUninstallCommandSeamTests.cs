@@ -40,9 +40,9 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     public void Dispose() => _console.Dispose();
 
     [Fact]
-    public void Execute_GlobalAndProject_RefusesWithExitCodeTwo()
+    public async Task Execute_GlobalAndProject_RefusesWithExitCodeTwo()
     {
-        int exit = Run(new ArbiterUninstallSettings { Global = true, Project = true, Target = "claude" });
+        int exit = await RunAsync(new ArbiterUninstallSettings { Global = true, Project = true, Target = "claude" });
 
         Assert.Equal(2, exit);
         Assert.Contains("mutually exclusive", _console.Output, StringComparison.Ordinal);
@@ -50,11 +50,11 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NoPath_UninstallsTheGlobalScopeAtTheHomeDirectory()
+    public async Task Execute_NoPath_UninstallsTheGlobalScopeAtTheHomeDirectory()
     {
         _uninstaller.Deployed = true;
 
-        int exit = Run(new ArbiterUninstallSettings { Target = "claude" });
+        int exit = await RunAsync(new ArbiterUninstallSettings { Target = "claude" });
 
         Assert.Equal(0, exit);
         Assert.Equal((Home, SquadDeploymentScope.Global, "claude"), Assert.Single(_uninstaller.Uninstalled));
@@ -63,12 +63,12 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ProjectWithARelativePath_ResolvesItAgainstTheWorkingDirectory()
+    public async Task Execute_ProjectWithARelativePath_ResolvesItAgainstTheWorkingDirectory()
     {
         _files.CreateDirectory("/kw/work/repo");
         _uninstaller.Deployed = true;
 
-        int exit = Run(new ArbiterUninstallSettings { Project = true, PathOption = "repo", Target = "claude" });
+        int exit = await RunAsync(new ArbiterUninstallSettings { Project = true, PathOption = "repo", Target = "claude" });
 
         Assert.Equal(0, exit);
         Assert.Equal(("/kw/work/repo", SquadDeploymentScope.Project, "claude"), Assert.Single(_uninstaller.Uninstalled));
@@ -76,11 +76,11 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ARootThatDoesNotExist_ReportsNothingToUninstallAndReturnsZero()
+    public async Task Execute_ARootThatDoesNotExist_ReportsNothingToUninstallAndReturnsZero()
     {
         _uninstaller.Deployed = true;
 
-        int exit = Run(new ArbiterUninstallSettings { Project = true, PathOption = "missing", Target = "claude" });
+        int exit = await RunAsync(new ArbiterUninstallSettings { Project = true, PathOption = "missing", Target = "claude" });
 
         Assert.Equal(0, exit);
         Assert.Contains("No Arbiter deployment found at /kw/work/missing", _console.Output, StringComparison.Ordinal);
@@ -88,27 +88,27 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_AnUnknownTarget_NamesTheRosterAndReturnsTwo()
+    public async Task Execute_AnUnknownTarget_NamesTheRosterAndReturnsTwo()
     {
-        int exit = Run(new ArbiterUninstallSettings { Target = "nonesuch" });
+        int exit = await RunAsync(new ArbiterUninstallSettings { Target = "nonesuch" });
 
         Assert.Equal(2, exit);
         Assert.Contains("Unknown target 'nonesuch'", _console.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_RemoveKey_DeletesTheStoredKeyForTheEndpointOrigin()
+    public async Task Execute_RemoveKey_DeletesTheStoredKeyForTheEndpointOrigin()
     {
         _uninstaller.Deployed = true;
 
-        int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true });
+        int exit = await RunAsync(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true });
 
         Assert.Equal(0, exit);
         Assert.Equal(ArbiterKeyResolver.TypeSafeOrigin, Assert.Single(_credentials.Deletes));
     }
 
     [Fact]
-    public void Execute_RemoveKey_DeletesTheKeyForTheOverrideEndpointOrigin()
+    public async Task Execute_RemoveKey_DeletesTheKeyForTheOverrideEndpointOrigin()
     {
         const string overrideOrigin = "https://openrouter.ai";
         _uninstaller.Deployed = true;
@@ -119,13 +119,13 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
             Override = (repository, _) => repository with { Kind = ArbiterProviderKind.Systemone, Endpoint = "https://openrouter.ai/api/v1" },
         };
 
-        int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
+        int exit = await RunAsync(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
 
         Assert.Equal(0, exit);
         Assert.Equal([overrideOrigin], _credentials.Deletes);
         Assert.Contains(overrideOrigin, _console.Output, StringComparison.Ordinal);
-        Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
-        Assert.Null(_credentials.Read(overrideOrigin));
+        Assert.Equal("typesafe-key", await _credentials.ReadAsync(ArbiterKeyResolver.TypeSafeOrigin));
+        Assert.Null(await _credentials.ReadAsync(overrideOrigin));
     }
 
     /// <summary>
@@ -133,7 +133,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     /// deletion, so a key the tool cannot attribute to an origin survives.
     /// </summary>
     [Fact]
-    public void Execute_RemoveKey_MalformedOverride_DeletesNothing()
+    public async Task Execute_RemoveKey_MalformedOverride_DeletesNothing()
     {
         _uninstaller.Deployed = true;
         _credentials.Seed(ArbiterKeyResolver.TypeSafeOrigin, "typesafe-key");
@@ -143,12 +143,12 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
                 $"[KW-ARB-CONFIG-001] The user override '{ArbiterUserSettings.GetPath(home)}' is malformed in this test."),
         };
 
-        int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
+        int exit = await RunAsync(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, userSettings);
 
         Assert.Equal(1, exit);
         Assert.Empty(_credentials.Deletes);
         Assert.Contains(ArbiterUserSettings.GetPath(Home), _console.Output, StringComparison.Ordinal);
-        Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
+        Assert.Equal("typesafe-key", await _credentials.ReadAsync(ArbiterKeyResolver.TypeSafeOrigin));
     }
 
     /// <summary>
@@ -159,7 +159,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     [InlineData("not-a-url")]
     [InlineData("ftp://openrouter.ai/api/v1")]
     [InlineData("")]
-    public void Execute_RemoveKey_InvalidOverrideEndpoint_FailsClosedAndDeletesNothing(string invalidEndpoint)
+    public async Task Execute_RemoveKey_InvalidOverrideEndpoint_FailsClosedAndDeletesNothing(string invalidEndpoint)
     {
         const string overrideOrigin = "https://openrouter.ai";
         _uninstaller.Deployed = true;
@@ -169,7 +169,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
         _files.CreateDirectory(Path.GetDirectoryName(overridePath)!);
         _files.WriteAllText(overridePath, $"provider:\n  kind: systemone\n  endpoint: \"{invalidEndpoint}\"\n");
 
-        int exit = Run(
+        int exit = await RunAsync(
             new ArbiterUninstallSettings { Target = "claude", RemoveKey = true },
             new FileArbiterUserSettings(_files));
 
@@ -177,8 +177,8 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
         Assert.Empty(_credentials.Deletes);
         Assert.Contains(RuleValidator.MalformedSection, _console.Output, StringComparison.Ordinal);
         Assert.Contains(overridePath, _console.Output, StringComparison.Ordinal);
-        Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
-        Assert.Equal("override-key", _credentials.Read(overrideOrigin));
+        Assert.Equal("typesafe-key", await _credentials.ReadAsync(ArbiterKeyResolver.TypeSafeOrigin));
+        Assert.Equal("override-key", await _credentials.ReadAsync(overrideOrigin));
     }
 
     /// <summary>
@@ -186,7 +186,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     /// fail-closed naming that host configuration file and deletes nothing.
     /// </summary>
     [Fact]
-    public void Execute_RemoveKey_InvalidHostConfigEndpoint_FailsClosedNamingHostConfig()
+    public async Task Execute_RemoveKey_InvalidHostConfigEndpoint_FailsClosedNamingHostConfig()
     {
         const string hostConfigPath = "/kw/home/.kyber-weave/kyber-weave.yml";
         _uninstaller.Deployed = true;
@@ -206,13 +206,13 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
                 configPath: hostConfigPath),
         };
 
-        int exit = Run(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, configs: configs);
+        int exit = await RunAsync(new ArbiterUninstallSettings { Target = "claude", RemoveKey = true }, configs: configs);
 
         Assert.Equal(1, exit);
         Assert.Empty(_credentials.Deletes);
         Assert.Contains(RuleValidator.MalformedSection, _console.Output, StringComparison.Ordinal);
         Assert.Contains(hostConfigPath, _console.Output, StringComparison.Ordinal);
-        Assert.Equal("typesafe-key", _credentials.Read(ArbiterKeyResolver.TypeSafeOrigin));
+        Assert.Equal("typesafe-key", await _credentials.ReadAsync(ArbiterKeyResolver.TypeSafeOrigin));
     }
 
     /// <summary>
@@ -220,7 +220,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     /// endpoint, <c>--remove-key</c> fails closed naming the per-user override file.
     /// </summary>
     [Fact]
-    public void Execute_RemoveKey_BothHostConfigAndOverrideSetSameInvalidEndpoint_FailsClosedNamingOverrideFile()
+    public async Task Execute_RemoveKey_BothHostConfigAndOverrideSetSameInvalidEndpoint_FailsClosedNamingOverrideFile()
     {
         const string hostConfigPath = "/kw/home/.kyber-weave/kyber-weave.yml";
         _uninstaller.Deployed = true;
@@ -243,7 +243,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
                 configPath: hostConfigPath),
         };
 
-        int exit = Run(
+        int exit = await RunAsync(
             new ArbiterUninstallSettings { Target = "claude", RemoveKey = true },
             new FileArbiterUserSettings(_files),
             configs);
@@ -256,16 +256,16 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_APathNamingTheHomeDirectory_IsTheGlobalScope()
+    public async Task Execute_APathNamingTheHomeDirectory_IsTheGlobalScope()
     {
         _uninstaller.Deployed = true;
 
-        _ = Run(new ArbiterUninstallSettings { Path = Home, Target = "claude" });
+        _ = await RunAsync(new ArbiterUninstallSettings { Path = Home, Target = "claude" });
 
         Assert.Equal(SquadDeploymentScope.Global, Assert.Single(_uninstaller.Uninstalled).Scope);
     }
 
-    private int Run(
+    private Task<int> RunAsync(
         ArbiterUninstallSettings settings,
         IArbiterUserSettings? userSettings = null,
         IArbiterConfigResolver? configs = null)
@@ -282,7 +282,7 @@ public sealed class ArbiterUninstallCommandSeamTests : IDisposable
             new FakePathResolver(_files),
             _console,
             userSettings ?? new FakeArbiterUserSettings());
-        return command.Execute(null!, settings);
+        return command.ExecuteAsync(null!, settings, CancellationToken.None);
     }
 
     private sealed class RecordingUninstaller : IArbiterUninstaller

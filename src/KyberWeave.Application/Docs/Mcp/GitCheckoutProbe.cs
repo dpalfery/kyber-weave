@@ -30,10 +30,10 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
     }
 
     /// <inheritdoc />
-    public GitCheckoutRevision ReadRevision(string root)
+    public async Task<GitCheckoutRevision> ReadRevisionAsync(string root, CancellationToken cancellationToken = default)
     {
-        string? revision = RunGit(root, "rev-parse", "--short", "HEAD");
-        string? status = RunGit(root, "status", "--porcelain", "--untracked-files=no");
+        string? revision = await RunGitAsync(root, ["rev-parse", "--short", "HEAD"], cancellationToken).ConfigureAwait(false);
+        string? status = await RunGitAsync(root, ["status", "--porcelain", "--untracked-files=no"], cancellationToken).ConfigureAwait(false);
         string dirty = status is null
             ? "unknown"
             : status.Trim().Length == 0 ? "no" : "yes";
@@ -185,7 +185,10 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
         return stamp;
     }
 
-    private string? RunGit(string root, params string[] arguments)
+    private async Task<string?> RunGitAsync(
+        string root,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
     {
         ProcessRunRequest request = new()
         {
@@ -198,7 +201,7 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, 
 
         try
         {
-            ProcessRunResult result = process.RunAsync(request).GetAwaiter().GetResult();
+            ProcessRunResult result = await process.RunAsync(request, cancellationToken).ConfigureAwait(false);
             return result.ExitCode == 0 && !result.TimedOut ? result.StandardOutput : null;
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception

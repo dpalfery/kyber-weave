@@ -73,7 +73,8 @@ internal sealed class FakeMcpStdioSessionFactory : IMcpStdioSessionFactory
     {
         public string? FirstErrorLine => owner.ErrorLine;
 
-        public string? WaitForFirstErrorLine(TimeSpan wait) => owner.ErrorLine;
+        public Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default) =>
+            Task.FromResult(owner.ErrorLine);
 
         public void SendLine(string line)
         {
@@ -82,13 +83,13 @@ internal sealed class FakeMcpStdioSessionFactory : IMcpStdioSessionFactory
                 throw failure.Failure;
         }
 
-        public string ReadLine()
+        public Task<string> ReadLineAsync(CancellationToken cancellationToken = default)
         {
             if (owner._replies.Count == 0)
                 throw new EndOfStreamException("The scripted server has nothing more to say.");
 
             object next = owner._replies.Dequeue();
-            return next is Exception failure ? throw failure : (string)next;
+            return Task.FromResult(next is Exception failure ? throw failure : (string)next);
         }
 
         public void Dispose() => owner.Disposed = true;

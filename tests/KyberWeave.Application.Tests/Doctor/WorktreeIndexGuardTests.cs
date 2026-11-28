@@ -39,12 +39,12 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void AMissingIndexIsInitialisedAtTheTreeAndIsReadyAndCreated()
+    public async Task AMissingIndexIsInitialisedAtTheTreeAndIsReadyAndCreated()
     {
         Govern(Governed);
         ScriptedProcessExecutor executor = Codegraph();
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.Ready, outcome.Status);
         Assert.True(outcome.Created, "A tree with no .codegraph folder must report that this run created the index.");
@@ -56,13 +56,13 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void AnExistingIndexIsSyncedAndIsReadyButNotCreated()
+    public async Task AnExistingIndexIsSyncedAndIsReadyButNotCreated()
     {
         Govern(Governed);
         _memory.CreateDirectory(Path.Combine(_root, ".codegraph"));
         ScriptedProcessExecutor executor = Codegraph();
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.Ready, outcome.Status);
         Assert.False(outcome.Created, "An index that was already on disk was not created by this call.");
@@ -75,7 +75,7 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void AFolderCodeGraphSaysIsNotInitialisedFallsBackToInitAndIsReady()
+    public async Task AFolderCodeGraphSaysIsNotInitialisedFallsBackToInitAndIsReady()
     {
         Govern(Governed);
         _memory.CreateDirectory(Path.Combine(_root, ".codegraph"));
@@ -88,7 +88,7 @@ public sealed class WorktreeIndexGuardTests
             _ => throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."),
         });
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.Ready, outcome.Status);
         Assert.Contains(
@@ -98,7 +98,7 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void AnUnreadableConfigurationIsAFailedIndexNotACrash()
+    public async Task AnUnreadableConfigurationIsAFailedIndexNotACrash()
     {
         Govern(Governed);
         string config = Path.Combine(_root, ".kyber-weave", "kyber-weave.yml");
@@ -106,19 +106,19 @@ public sealed class WorktreeIndexGuardTests
             operation => operation.Name == nameof(InMemoryFileSystem.ReadAllBytes) && operation.Path == config,
             new UnauthorizedAccessException("Access to the path is denied."));
 
-        WorktreeIndexOutcome outcome = Ensure(Codegraph());
+        WorktreeIndexOutcome outcome = await EnsureAsync(Codegraph());
 
         Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
         Assert.Contains(outcome.Checks, check => !check.Passed);
     }
 
     [Fact]
-    public void AnInitialisationThatFailsAfterTheOneRepairIsFailedAndStopsTheRunByDefault()
+    public async Task AnInitialisationThatFailsAfterTheOneRepairIsFailedAndStopsTheRunByDefault()
     {
         Govern(Governed);
         ScriptedProcessExecutor executor = Codegraph("init", "index");
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
         Assert.True(
@@ -134,18 +134,18 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void AFailedIndexDoesNotStopTheRunWhenStopOnToolFailureIsFalse()
+    public async Task AFailedIndexDoesNotStopTheRunWhenStopOnToolFailureIsFalse()
     {
         Govern(StopOff);
 
-        WorktreeIndexOutcome outcome = Ensure(Codegraph("init", "index"));
+        WorktreeIndexOutcome outcome = await EnsureAsync(Codegraph("init", "index"));
 
         Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
         Assert.False(outcome.StopsRun, "stop-on-tool-failure: false must let the run continue past a failed index.");
     }
 
     [Fact]
-    public void AMissingCodeGraphBinaryIsBinaryMissingAndStopsTheRunByDefault()
+    public async Task AMissingCodeGraphBinaryIsBinaryMissingAndStopsTheRunByDefault()
     {
         Govern(Governed);
         ScriptedProcessExecutor executor = new(startInfo => startInfo.FileName switch
@@ -155,7 +155,7 @@ public sealed class WorktreeIndexGuardTests
             _ => throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."),
         });
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.BinaryMissing, outcome.Status);
         Assert.True(outcome.StopsRun, "A missing binary stops the run unless the operator turned the stop off.");
@@ -163,7 +163,7 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void AMissingCodeGraphBinaryDoesNotStopTheRunWhenStopOnToolFailureIsFalse()
+    public async Task AMissingCodeGraphBinaryDoesNotStopTheRunWhenStopOnToolFailureIsFalse()
     {
         Govern(StopOff);
         ScriptedProcessExecutor executor = new(startInfo => startInfo.FileName switch
@@ -173,19 +173,19 @@ public sealed class WorktreeIndexGuardTests
             _ => throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."),
         });
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.BinaryMissing, outcome.Status);
         Assert.False(outcome.StopsRun);
     }
 
     [Fact]
-    public void ARepositoryWithoutTheHostConfigurationIsNotGovernedAndStartsNoCodeGraphChild()
+    public async Task ARepositoryWithoutTheHostConfigurationIsNotGovernedAndStartsNoCodeGraphChild()
     {
         _memory.CreateDirectory(Path.Combine(_root, "docs"));
         ScriptedProcessExecutor executor = Codegraph();
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.NotGoverned, outcome.Status);
         Assert.Empty(executor.CallsTo("codegraph"));
@@ -194,12 +194,12 @@ public sealed class WorktreeIndexGuardTests
     }
 
     [Fact]
-    public void ARepositoryWhoseDocsRootIsMissingIsNotGovernedAndStartsNoCodeGraphChild()
+    public async Task ARepositoryWhoseDocsRootIsMissingIsNotGovernedAndStartsNoCodeGraphChild()
     {
         Govern(Governed, createDocs: false);
         ScriptedProcessExecutor executor = Codegraph();
 
-        WorktreeIndexOutcome outcome = Ensure(executor);
+        WorktreeIndexOutcome outcome = await EnsureAsync(executor);
 
         Assert.Equal(WorktreeIndexStatus.NotGoverned, outcome.Status);
         Assert.Empty(executor.CallsTo("codegraph"));
@@ -215,7 +215,7 @@ public sealed class WorktreeIndexGuardTests
             _memory.CreateDirectory(Path.Combine(_root, "docs"));
     }
 
-    private WorktreeIndexOutcome Ensure(ScriptedProcessExecutor executor)
+    private Task<WorktreeIndexOutcome> EnsureAsync(ScriptedProcessExecutor executor)
     {
         InMemoryDoctorFileSystem files = new(_memory);
         CodeGraphIndexProvisioner provisioner = new(
@@ -225,7 +225,7 @@ public sealed class WorktreeIndexGuardTests
             new FakeProcessEnvironment(currentDirectory: Path.Combine(_memory.Root, "kw", "work")),
             new FakeTimeProvider());
         WorktreeIndexEnsurer ensurer = new(provisioner, files, new ConfigFileToolSettings(_config));
-        return ensurer.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
+        return ensurer.EnsureAsync(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
     }
 
     /// <summary>A CodeGraph that answers every verb healthily, except that each named verb exits 1.</summary>

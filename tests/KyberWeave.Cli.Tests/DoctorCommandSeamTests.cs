@@ -30,9 +30,9 @@ public sealed class DoctorCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_MoreThanOneMode_RefusesOnTheErrorStreamAndReturnsTwo()
+    public async Task Execute_MoreThanOneMode_RefusesOnTheErrorStreamAndReturnsTwo()
     {
-        int exit = Run(new DoctorSettings { Check = true, Ensure = true });
+        int exit = await Run(new DoctorSettings { Check = true, Ensure = true });
 
         Assert.Equal(2, exit);
         Assert.Equal(
@@ -44,9 +44,9 @@ public sealed class DoctorCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NonPositiveTimeout_RefusesOnTheErrorStreamAndReturnsTwo()
+    public async Task Execute_NonPositiveTimeout_RefusesOnTheErrorStreamAndReturnsTwo()
     {
-        int exit = Run(new DoctorSettings { IndexTimeoutSeconds = 0 });
+        int exit = await Run(new DoctorSettings { IndexTimeoutSeconds = 0 });
 
         Assert.Equal(2, exit);
         Assert.Contains("must be positive seconds", _console.ErrorOutput, StringComparison.Ordinal);
@@ -54,20 +54,20 @@ public sealed class DoctorCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_RelativePath_IsResolvedAgainstTheWorkingDirectoryTheEnvironmentNames()
+    public async Task Execute_RelativePath_IsResolvedAgainstTheWorkingDirectoryTheEnvironmentNames()
     {
-        _ = Run(new DoctorSettings { Path = "repo", Check = true });
+        _ = await Run(new DoctorSettings { Path = "repo", Check = true });
 
         DoctorRun run = Assert.Single(_doctor.Runs);
         Assert.Equal("/kw/work/repo", run.Root);
     }
 
     [Fact]
-    public void Execute_BareRunOnANonTerminal_ChecksAndPrintsTheHintBeforeTheReport()
+    public async Task Execute_BareRunOnANonTerminal_ChecksAndPrintsTheHintBeforeTheReport()
     {
         _terminal = false;
 
-        int exit = Run(new DoctorSettings { Path = "." });
+        int exit = await Run(new DoctorSettings { Path = "." });
 
         Assert.Equal(0, exit);
         Assert.Equal(DoctorMode.Check, Assert.Single(_doctor.Runs).Mode);
@@ -75,31 +75,31 @@ public sealed class DoctorCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_BareRunOnATerminalWithCiSet_ChecksInsteadOfProvisioning()
+    public async Task Execute_BareRunOnATerminalWithCiSet_ChecksInsteadOfProvisioning()
     {
         _terminal = true;
         _variables["CI"] = "true";
 
-        _ = Run(new DoctorSettings { Path = "." });
+        _ = await Run(new DoctorSettings { Path = "." });
 
         Assert.Equal(DoctorMode.Check, Assert.Single(_doctor.Runs).Mode);
     }
 
     [Fact]
-    public void Execute_BareRunOnATerminal_Provisions()
+    public async Task Execute_BareRunOnATerminal_Provisions()
     {
         _terminal = true;
 
-        _ = Run(new DoctorSettings { Path = "." });
+        _ = await Run(new DoctorSettings { Path = "." });
 
         Assert.Equal(DoctorMode.Provision, Assert.Single(_doctor.Runs).Mode);
         Assert.DoesNotContain(DoctorCommand.NonInteractiveHint, _console.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_JsonReport_IsWrittenToTheConsoleWithoutTheHint()
+    public async Task Execute_JsonReport_IsWrittenToTheConsoleWithoutTheHint()
     {
-        int exit = Run(new DoctorSettings { Path = ".", Json = true });
+        int exit = await Run(new DoctorSettings { Path = ".", Json = true });
 
         Assert.Equal(0, exit);
         Assert.StartsWith("{", _console.Output.TrimStart(), StringComparison.Ordinal);
@@ -107,12 +107,17 @@ public sealed class DoctorCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NoExecutorGiven_RunsTheChildrenThroughTheProcessSeamBoundedByTheIndexTimeout()
+    public async Task Execute_NoExecutorGiven_RunsTheChildrenThroughTheProcessSeamBoundedByTheIndexTimeout()
     {
-        _ = Run(new DoctorSettings { Path = ".", Check = true, IndexTimeoutSeconds = 7 });
+        _ = await Run(new DoctorSettings { Path = ".", Check = true, IndexTimeoutSeconds = 7 });
 
         DoctorRun run = Assert.Single(_doctor.Runs);
-        _ = run.Executor.Run(new ProcessStartInfo("codegraph"), "in");
+        // The doctor drives its children through RunAsync, so the bound is asserted there: a request that names
+        // no timeout gets the index timeout.
+        IProcessRunner runner = Assert.IsAssignableFrom<IProcessRunner>(run.Executor);
+        _ = await runner.RunAsync(
+            new ProcessRunRequest { Program = "codegraph", Arguments = [], StandardInput = "in" },
+            CancellationToken.None);
 
         (ProcessStartInfo start, string input, TimeSpan timeout) = Assert.Single(_processes.Calls);
         Assert.Equal("codegraph", start.FileName);
@@ -121,16 +126,16 @@ public sealed class DoctorCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ReportExitCode_IsReturned()
+    public async Task Execute_ReportExitCode_IsReturned()
     {
         FakeRepositoryDoctor doctor = new() { Report = new DoctorReport(".", DoctorMode.Check, 3, []) };
 
-        int exit = Run(new DoctorSettings { Path = ".", Check = true }, doctor);
+        int exit = await Run(new DoctorSettings { Path = ".", Check = true }, doctor);
 
         Assert.Equal(3, exit);
     }
 
-    private int Run(DoctorSettings settings, FakeRepositoryDoctor? doctor = null)
+    private async Task<int> Run(DoctorSettings settings, FakeRepositoryDoctor? doctor = null)
     {
         FakeProcessEnvironment environment = new(
             currentDirectory: WorkingDirectory,
@@ -142,10 +147,10 @@ public sealed class DoctorCommandSeamTests : IDisposable
             _console,
             new FakePathResolver(_files),
             _processes);
-        return command.Execute(null!, settings, CancellationToken.None);
+        return await command.ExecuteAsync(null!, settings, CancellationToken.None);
     }
 
-    private sealed class RecordingBoundedExecutor : IBoundedProcessExecutor
+    private sealed class RecordingBoundedExecutor : IProcessRunner
     {
         public List<(ProcessStartInfo Start, string Input, TimeSpan Timeout)> Calls { get; } = [];
 
@@ -154,5 +159,28 @@ public sealed class DoctorCommandSeamTests : IDisposable
             Calls.Add((startInfo, standardInput, timeout));
             return new ProcessResult(0, string.Empty, string.Empty);
         }
+
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            ProcessStartInfo startInfo = new(request.Program)
+            {
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = request.WorkingDirectory ?? string.Empty
+            };
+            foreach (string argument in request.Arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            Calls.Add((startInfo, request.StandardInput ?? string.Empty, request.Timeout ?? TimeSpan.Zero));
+            return Task.FromResult(new ProcessRunResult(0, string.Empty, TimedOut: false));
+        }
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

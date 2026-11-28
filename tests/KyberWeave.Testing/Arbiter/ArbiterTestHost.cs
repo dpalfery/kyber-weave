@@ -73,6 +73,10 @@ internal sealed class FakeGitCommandRunner(Func<string, IReadOnlyList<string>, G
 {
     /// <inheritdoc />
     public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments) => run(workingDirectory, arguments);
+
+    /// <inheritdoc />
+    public Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+        Task.FromResult(run(workingDirectory, arguments));
 }
 
 /// <summary>A credential store that forwards to whichever store a test currently holds.</summary>
@@ -80,11 +84,14 @@ internal sealed class FakeGitCommandRunner(Func<string, IReadOnlyList<string>, G
 internal sealed class ForwardingCredentialStore(Func<ICredentialStore> current) : ICredentialStore
 {
     /// <inheritdoc />
-    public string? Read(string origin) => current().Read(origin);
+    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default) =>
+        current().ReadAsync(origin, cancellationToken);
 
     /// <inheritdoc />
-    public void Write(string origin, string key) => current().Write(origin, key);
+    public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default) =>
+        current().WriteAsync(origin, key, cancellationToken);
 
     /// <inheritdoc />
-    public void Delete(string origin) => current().Delete(origin);
+    public ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default) =>
+        current().DeleteAsync(origin, cancellationToken);
 }

@@ -31,4 +31,16 @@ public interface IArbiterRepositoryLocator
     /// <param name="start">The directory to start from.</param>
     /// <returns>The root, or the full start path when there is none.</returns>
     string FindGitRoot(string start);
+
+    /// <summary>Resolves the repository root without blocking a thread while git runs.</summary>
+    /// <param name="path">The working path.</param>
+    /// <param name="cancellationToken">Cancels the git run and kills the process tree.</param>
+    /// <returns>The root, or the full path when none is found.</returns>
+    Task<string> ResolveRepositoryRootAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>Resolves the arbiter state directory without blocking a thread while git runs.</summary>
+    /// <param name="path">The working path.</param>
+    /// <param name="cancellationToken">Cancels the git run and kills the process tree.</param>
+    /// <returns>The arbiter state directory.</returns>
+    Task<string> ResolveArbiterDirectoryAsync(string path, CancellationToken cancellationToken = default);
 }

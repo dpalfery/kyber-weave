@@ -9,12 +9,11 @@ namespace KyberWeave.Core.Arbiter;
 public sealed class OllamaProbe(IArbiterHttpHandlers handlers) : IOllamaProbe
 {
     /// <inheritdoc />
-    public bool TryDetect(Uri versionUri, out string? version)
+    public async Task<OllamaProbeResult> TryDetectAsync(Uri versionUri, CancellationToken cancellationToken)
     {
-        version = null;
         ArgumentNullException.ThrowIfNull(versionUri);
         if (versionUri.Scheme != Uri.UriSchemeHttp && versionUri.Scheme != Uri.UriSchemeHttps)
-            return false;
+            return new OllamaProbeResult(false, null);
 
         try
         {
@@ -22,24 +21,23 @@ public sealed class OllamaProbe(IArbiterHttpHandlers handlers) : IOllamaProbe
             {
                 Timeout = TimeSpan.FromSeconds(5),
             };
-            using HttpResponseMessage response = client.GetAsync(versionUri).GetAwaiter().GetResult();
+            using HttpResponseMessage response = await client.GetAsync(versionUri, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return false;
+                return new OllamaProbeResult(false, null);
 
-            string body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             using JsonDocument document = JsonDocument.Parse(body);
             if (!document.RootElement.TryGetProperty("version", out JsonElement versionElement)
                 || versionElement.ValueKind != JsonValueKind.String)
             {
-                return false;
+                return new OllamaProbeResult(false, null);
             }
 
             string? found = versionElement.GetString();
             if (!ArbiterCliText.IsOllamaSupported(found))
-                return false;
+                return new OllamaProbeResult(false, null);
 
-            version = found;
-            return true;
+            return new OllamaProbeResult(true, found);
         }
         catch (Exception exception) when (exception is HttpRequestException
             or TaskCanceledException
@@ -48,7 +46,7 @@ public sealed class OllamaProbe(IArbiterHttpHandlers handlers) : IOllamaProbe
             or InvalidOperationException
             or ObjectDisposedException)
         {
-            return false;
+            return new OllamaProbeResult(false, null);
         }
     }
 }

@@ -72,9 +72,9 @@ public sealed class TaskGateTierResolutionTests : IDisposable
     [InlineData("dev-easy")]
     [InlineData("dev-medium")]
     [InlineData("dev-hard")]
-    public void EveryDeveloperTierRunsTheTasksTechnologyGatesWhileThePlanIsInReview(string agent)
+    public async Task EveryDeveloperTierRunsTheTasksTechnologyGatesWhileThePlanIsInReview(string agent)
     {
-        ReviewCommandResult result = Gates(agent);
+        ReviewCommandResult result = await GatesAsync(agent);
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(result.Epilogue);
@@ -83,14 +83,15 @@ public sealed class TaskGateTierResolutionTests : IDisposable
     }
 
     /// <summary>Runs the agent-gate path the CLI's <c>review gates --agent ... --task ...</c> hands its arguments to.</summary>
-    private ReviewCommandResult Gates(string agent) =>
-        _services.ReviewGates.Run(
+    private Task<ReviewCommandResult> GatesAsync(string agent) =>
+        _services.ReviewGates.RunAsync(
             new ReviewGatesRequest(
                 _repo, null, null, agent, null, [], [], All: false, Deadline: false, Council: false,
                 StopOnFailure: false, Full: false, TaskSlug: "T2", Fix: false, Red: false,
                 HumanOutput: true, Interactive: false),
-            new FakeProcessExecutor(),
-            TextWriter.Null);
+            new ScriptedProcessRunner(),
+            TextWriter.Null,
+            CancellationToken.None);
 
     /// <summary>Writes the fixture plan as a react plan carrying <paramref name="status"/> as its body status.</summary>
     private static void WritePlan(InMemoryReviewServices services, string status)

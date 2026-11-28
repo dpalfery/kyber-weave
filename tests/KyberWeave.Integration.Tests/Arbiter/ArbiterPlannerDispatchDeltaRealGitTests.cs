@@ -44,16 +44,16 @@ public sealed class ArbiterPlannerDispatchDeltaRealGitTests
     }
 
     [Fact]
-    public void HookGitFactsInsideARepositoryMeasuresPlannerDispatchDeltaNotWholeBranchDiff()
+    public async Task HookGitFactsInsideARepositoryMeasuresPlannerDispatchDeltaNotWholeBranchDiff()
     {
-        using RunStartProbe probe = RunStartProbe.Create();
+        using RunStartProbe probe = await RunStartProbe.CreateAsync();
         using TempDirectory home = new();
-        probe.Git("switch", "-c", "claude/feat/planner-delta", "origin/main");
+        await probe.GitAsync("switch", "-c", "claude/feat/planner-delta", "origin/main");
 
         // Commit an earlier implementation change on the branch and leave artifacts/ dirty.
         WriteRepoFile(probe.Root, "src/EarlierTask.cs", "// committed by an earlier task\n");
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", "feat: earlier task implementation");
+        await probe.GitAsync("add", "-A");
+        await probe.GitAsync("commit", "-m", "feat: earlier task implementation");
         WriteRepoFile(probe.Root, "artifacts/gates.json", "{}\n");
 
         HookGitFacts gitFacts = ArbiterTestServices.HookGitFacts(probe.Root, home.Path);

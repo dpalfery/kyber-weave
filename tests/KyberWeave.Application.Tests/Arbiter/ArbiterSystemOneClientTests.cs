@@ -105,7 +105,7 @@ public sealed class ArbiterSystemOneClientTests
         Uri? endpoint = null,
         string model = JevModel,
         int timeoutMs = 5000,
-        Func<Uri, string?>? keyResolver = null) =>
+        Func<Uri, CancellationToken, Task<string?>>? keyResolver = null) =>
         new(handler, endpoint ?? RemoteEndpoint, model, timeoutMs, TimeProvider.System, keyResolver);
 
     private static HttpResponseMessage JsonResponse(string json, HttpStatusCode status = HttpStatusCode.OK) =>
@@ -435,7 +435,7 @@ public sealed class ArbiterSystemOneClientTests
     {
         using StubHandler handler = new(JsonResponse(ChoiceBody()));
         using SystemOneClient client = Client(
-            handler, keyResolver: _ => "remote-key");
+            handler, keyResolver: (_, _) => Task.FromResult<string?>("remote-key"));
 
         await client.AskStep1Async([ChoiceRule()], Facts());
 
@@ -453,7 +453,7 @@ public sealed class ArbiterSystemOneClientTests
             handler,
             endpoint: new Uri("http://localhost:11434/v1"),
             model: "nimble",
-            keyResolver: _ => "must-never-be-sent");
+            keyResolver: (_, _) => Task.FromResult<string?>("must-never-be-sent"));
 
         await client.AskStep1Async([ChoiceRule()], Facts());
 
@@ -465,7 +465,7 @@ public sealed class ArbiterSystemOneClientTests
     public async Task Transport_NoKeyForOrigin_SendsNoAuthorization()
     {
         using StubHandler handler = new(JsonResponse(ChoiceBody()));
-        using SystemOneClient client = Client(handler, keyResolver: _ => null);
+        using SystemOneClient client = Client(handler, keyResolver: (_, _) => Task.FromResult<string?>(null));
 
         await client.AskStep1Async([ChoiceRule()], Facts());
 
@@ -705,7 +705,7 @@ public sealed class ArbiterSystemOneClientTests
     {
         const string sentinel = "SENTINEL-ARB-KEY-7Q9Z";
         using StubHandler handler = new(JsonResponse("{\"error\":\"denied\"}", HttpStatusCode.Unauthorized));
-        using SystemOneClient client = Client(handler, keyResolver: _ => sentinel);
+        using SystemOneClient client = Client(handler, keyResolver: (_, _) => Task.FromResult<string?>(sentinel));
 
         ArbiterStep1BatchResult result = await client.AskStep1Async([ChoiceRule()], Facts());
 

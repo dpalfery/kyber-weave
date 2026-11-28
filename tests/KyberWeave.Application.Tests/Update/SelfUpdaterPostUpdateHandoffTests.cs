@@ -37,7 +37,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// old image is what crashed with exit 1, and the child does both.
     /// </summary>
     [Fact]
-    public void ReleaseChangedUpdateHandsOffToTheInstalledBinaryAfterEveryCommit()
+    public async Task ReleaseChangedUpdateHandsOffToTheInstalledBinaryAfterEveryCommit()
     {
         InstallKyberDash();
         InstallArbiter();
@@ -45,7 +45,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(handler, host, new SelfUpdateOptions("0.2.0", false, false), record);
+        SelfUpdateOutcome outcome = await RunUpdateAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false), record);
 
         SeamCall handOff = Assert.Single(
             record.SeamCalls,
@@ -66,7 +66,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// the forwarding line the child re-renders hooks the owner opted out of, and no other test sees it.
     /// </summary>
     [Fact]
-    public void NoArbiterOptOutReachesTheFinishingProcessAndTheChildRefreshesNoHooks()
+    public async Task NoArbiterOptOutReachesTheFinishingProcessAndTheChildRefreshesNoHooks()
     {
         InstallKyberDash();
         InstallArbiter();
@@ -75,7 +75,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         HandOffRecord record = new();
         TrackingRefresher refresher = new(record);
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, NoArbiter: true),
@@ -100,7 +100,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// suppresses is real and reachable.
     /// </summary>
     [Fact]
-    public void WithoutNoArbiterTheHandOffCarriesNoOptOutAndTheChildRefreshesArbiterHooksOnce()
+    public async Task WithoutNoArbiterTheHandOffCarriesNoOptOutAndTheChildRefreshesArbiterHooksOnce()
     {
         InstallKyberDash();
         InstallArbiter();
@@ -109,7 +109,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         HandOffRecord record = new();
         TrackingRefresher refresher = new(record);
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false),
@@ -131,13 +131,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// discarded, so a broken installed binary is found before anything is replaced. The result is ignored.
     /// </summary>
     [Fact]
-    public void ExactlyOneEarlierSeamCallProbesTheOldImageBeforeAnyInstalledFileChanges()
+    public async Task ExactlyOneEarlierSeamCallProbesTheOldImageBeforeAnyInstalledFileChanges()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        RunUpdate(handler, host, new SelfUpdateOptions("0.2.0", false, false), record);
+        await RunUpdateAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false), record);
 
         SeamCall probe = Assert.Single(
             record.SeamCalls,
@@ -154,13 +154,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// that finishes the job. Nothing is rolled back.
     /// </summary>
     [Fact]
-    public void HandOffThatExitsOneReportsTheBinariesInstalledAndTheRetryCommand()
+    public async Task HandOffThatExitsOneReportsTheBinariesInstalledAndTheRetryCommand()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false),
@@ -180,13 +180,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// proves the flags do too.
     /// </summary>
     [Fact]
-    public void HandOffThatExitsOneCarriesTheForwardedOptOutsInTheRetryCommand()
+    public async Task HandOffThatExitsOneCarriesTheForwardedOptOutsInTheRetryCommand()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, NoArbiter: true, NoRestart: true),
@@ -209,14 +209,14 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// and the retry command, never the bare exception text, and never the project registry, which it did not touch.
     /// </summary>
     [Fact]
-    public void HandOffThatCannotStartReportsTheCauseAndTheRetryCommand()
+    public async Task HandOffThatCannotStartReportsTheCauseAndTheRetryCommand()
     {
         Win32Exception failure = new(5, "Access is denied.");
         using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false),
@@ -232,7 +232,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// is the same honest failure. The cause named is the component, not the registry.
     /// </summary>
     [Fact]
-    public void HandOffThatFailsToLoadAComponentReportsTheCauseAndTheRetryCommand()
+    public async Task HandOffThatFailsToLoadAComponentReportsTheCauseAndTheRetryCommand()
     {
         FileNotFoundException failure = new(
             "Could not load file or assembly",
@@ -241,7 +241,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false),
@@ -258,7 +258,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// never the bare wrapper text, and never a registry-failure claim.
     /// </summary>
     [Fact]
-    public void HandOffThatThrowsAnAggregateReportsTheBinariesInstalledAndTheRetryCommand()
+    public async Task HandOffThatThrowsAnAggregateReportsTheBinariesInstalledAndTheRetryCommand()
     {
         AggregateException failure = new(
             "one or more tree members refused to terminate",
@@ -267,7 +267,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false),
@@ -284,7 +284,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// </summary>
     /// <remarks>Passes today: the already-on path has always run both steps in-process.</remarks>
     [Fact]
-    public void AlreadyOnTheRequestedVersionRunsBothStepsInProcessAndNeverHandsOff()
+    public async Task AlreadyOnTheRequestedVersionRunsBothStepsInProcessAndNeverHandsOff()
     {
         InstallKyberDash();
         InstallArbiter();
@@ -292,7 +292,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(handler, host, new SelfUpdateOptions("0.2.0", false, false), record);
+        SelfUpdateOutcome outcome = await RunUpdateAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false), record);
 
         Assert.Empty(record.SeamCalls);
         Assert.Contains(record.Verbs, verb => verb.Arguments.Count > 0 && verb.Arguments[0] == "engine");
@@ -307,7 +307,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// then prints no outcome line.
     /// </summary>
     [Fact]
-    public void FinishUpdateOnTheInstalledVersionRunsTheStepsWithoutDownloadingOrPrintingAnOutcome()
+    public async Task FinishUpdateOnTheInstalledVersionRunsTheStepsWithoutDownloadingOrPrintingAnOutcome()
     {
         InstallKyberDash();
         InstallArbiter();
@@ -316,7 +316,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
@@ -339,13 +339,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// downloads or runs anything, and it names both versions so the owner can see which one is wrong.
     /// </summary>
     [Fact]
-    public void FinishUpdateWithAHostVersionThatDiffersRefusesAndRunsNothing()
+    public async Task FinishUpdateWithAHostVersionThatDiffersRefusesAndRunsNothing()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
@@ -365,13 +365,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// Finish mode has no release to look up. Without a version it refuses with the usage line, before any request.
     /// </summary>
     [Fact]
-    public void FinishUpdateWithoutAVersionRefusesWithAUsageHintAndNeverLooksUpARelease()
+    public async Task FinishUpdateWithoutAVersionRefusesWithAUsageHintAndNeverLooksUpARelease()
     {
         using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions(null, false, false, FinishUpdate: true),
@@ -388,7 +388,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// never says the project registry could not be read, because that was not the failure.
     /// </summary>
     [Fact]
-    public void FinishUpdateWarnsThatArbiterHooksWereNotRefreshedWhenAComponentCannotLoad()
+    public async Task FinishUpdateWarnsThatArbiterHooksWereNotRefreshedWhenAComponentCannotLoad()
     {
         InstallArbiter();
         using ReleaseMapHandler handler = new();
@@ -398,7 +398,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             "Could not load file or assembly 'YamlDotNet, Version=18.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e'.",
             "YamlDotNet, Version=18.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e");
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
@@ -418,26 +418,26 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
 
     /// <summary>A file that exists but cannot be loaded is a component failure, the same as a missing one.</summary>
     [Fact]
-    public void ArbiterRefreshClassifiesAFileLoadFailureAsAComponentLoadFailure()
+    public async Task ArbiterRefreshClassifiesAFileLoadFailureAsAComponentLoadFailure()
     {
         FileLoadException failure = new(
             "Could not load file or assembly 'YamlDotNet, Version=18.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e'.",
             "YamlDotNet, Version=18.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e");
 
-        HandOffRecord record = RunFinishWithRefresherFailure(failure);
+        HandOffRecord record = await RunFinishWithRefresherFailureAsync(failure);
 
         AssertComponentLoadWarning(record);
     }
 
     /// <summary>A binary built for another runtime is a component failure too.</summary>
     [Fact]
-    public void ArbiterRefreshClassifiesABadImageFormatAsAComponentLoadFailure()
+    public async Task ArbiterRefreshClassifiesABadImageFormatAsAComponentLoadFailure()
     {
         BadImageFormatException failure = new(
             "An attempt was made to load a program with an incorrect format.",
             "YamlDotNet, Version=18.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e");
 
-        HandOffRecord record = RunFinishWithRefresherFailure(failure);
+        HandOffRecord record = await RunFinishWithRefresherFailureAsync(failure);
 
         AssertComponentLoadWarning(record);
     }
@@ -448,13 +448,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// </summary>
     /// <remarks>Passes today: nothing classifies a component load yet, so every refresh failure is the generic warning.</remarks>
     [Fact]
-    public void ArbiterRefreshDoesNotClassifyAPlainPathNotFoundAsAComponentLoadFailure()
+    public async Task ArbiterRefreshDoesNotClassifyAPlainPathNotFoundAsAComponentLoadFailure()
     {
         FileNotFoundException failure = new(
             "Could not find file '/x/arbiter.yml'.",
             "/x/arbiter.yml");
 
-        HandOffRecord record = RunFinishWithRefresherFailure(failure);
+        HandOffRecord record = await RunFinishWithRefresherFailureAsync(failure);
 
         Assert.DoesNotContain(
             record.Log,
@@ -466,7 +466,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// </summary>
     /// <remarks>Passes today: the registry read has always been reported as its own warning.</remarks>
     [Fact]
-    public void FinishUpdateWarnsThatTheProjectRegistryCouldNotBeReadWhenItIsCorrupt()
+    public async Task FinishUpdateWarnsThatTheProjectRegistryCouldNotBeReadWhenItIsCorrupt()
     {
         InstallArbiter();
         FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "corrupt-home"));
@@ -479,7 +479,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
@@ -497,7 +497,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// hook is still rewritten, and the registry is the one thing named as not refreshed.
     /// </summary>
     [Fact]
-    public void FinishUpdateWithACorruptRegistryStillRefreshesTheGlobalHook()
+    public async Task FinishUpdateWithACorruptRegistryStillRefreshesTheGlobalHook()
     {
         InstallArbiter();
         FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "corrupt-with-globals"));
@@ -513,7 +513,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         HandOffRecord record = new();
         Func<string, string?> environment = HomeAndAppData(userPaths);
 
-        SelfUpdateOutcome outcome = RunUpdate(
+        SelfUpdateOutcome outcome = await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
@@ -618,14 +618,16 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
 
     private sealed class TrackingRefresher(HandOffRecord record, Exception? failure = null) : IArbiterHookRefresher
     {
-        public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
+        public Task<ArbiterHookRefreshResult> RefreshAsync(
+            IReadOnlyList<string> projectRoots,
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(projectRoots);
             record.Refreshes.Add(record.InHandOff);
             if (failure is not null)
                 throw failure;
 
-            return new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
+            return Task.FromResult(new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0));
         }
     }
 
@@ -633,7 +635,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// Runs one update through the seam. The default hand-off is the loopback child; a test that needs a different
     /// result passes its own <paramref name="handOff"/>. Every capture, spawn and refresh is recorded.
     /// </summary>
-    private SelfUpdateOutcome RunUpdate(
+    private async Task<SelfUpdateOutcome> RunUpdateAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
@@ -677,18 +679,18 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             arbiterHookRefresher: arbiter,
             arbiterTargets: _world.Targets(readEnvironment),
             finishingProcess: probe.Invoke);
-        return updater.Run(options);
+        return await updater.RunAsync(options).ConfigureAwait(false);
     }
 
     /// <summary>Runs a finish-mode update whose arbiter refresh throws the given failure, and returns what was recorded.</summary>
-    private HandOffRecord RunFinishWithRefresherFailure(Exception failure)
+    private async Task<HandOffRecord> RunFinishWithRefresherFailureAsync(Exception failure)
     {
         InstallArbiter();
         using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
-        RunUpdate(
+        await RunUpdateAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),

@@ -30,4 +30,30 @@ public interface IHookRunContextResolver
     /// <param name="planFile">The plan the text names, or null for none.</param>
     /// <param name="text">The text to read a named worktree from, when it names no plan.</param>
     HookRunContext SelectPlan(HookRunContext context, string? planFile, string? text);
+
+    /// <summary>
+    /// Resolves the context for one hook invocation, without blocking a thread. A plan, run record or task file that
+    /// cannot be read leaves the corresponding member null or false and adds a note naming the reason and the path
+    /// tried; it does not throw.
+    /// </summary>
+    /// <param name="request">What the typed hook event and the process report.</param>
+    /// <param name="cancellationToken">Cancels the git and branch reads.</param>
+    /// <returns>The context the invocation reads its paths from.</returns>
+    Task<HookRunContext> ResolveAsync(HookRunContextRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-reads the plan and task file of an already-validated context for a text whose plan differs from the
+    /// event's, without blocking a thread. No git or run record is read: only the context's validated worktrees are
+    /// consulted.
+    /// </summary>
+    /// <param name="context">The context the invocation already resolved.</param>
+    /// <param name="planFile">The plan the text names, or null for none.</param>
+    /// <param name="text">The text to read a named worktree from, when it names no plan.</param>
+    /// <param name="cancellationToken">Cancels the file reads.</param>
+    /// <returns>The context with the plan and task file of the text.</returns>
+    Task<HookRunContext> SelectPlanAsync(
+        HookRunContext context,
+        string? planFile,
+        string? text,
+        CancellationToken cancellationToken = default);
 }

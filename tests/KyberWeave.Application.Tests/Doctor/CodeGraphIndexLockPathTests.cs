@@ -17,24 +17,24 @@ public sealed class CodeGraphIndexLockPathTests
     private string LockDirectory => Path.Combine(_files.Root, "kw", "locks");
 
     [Fact]
-    public void Provision_TakesTheSameLockForARelativeRootAsForItsFullPath()
+    public async Task Provision_TakesTheSameLockForARelativeRootAsForItsFullPath()
     {
-        string relative = LockTakenFor("repo", currentDirectory: Work);
-        string full = LockTakenFor(Path.Combine(Work, "repo"), currentDirectory: Path.Combine(_files.Root, "elsewhere"));
+        string relative = await LockTakenFor("repo", currentDirectory: Work);
+        string full = await LockTakenFor(Path.Combine(Work, "repo"), currentDirectory: Path.Combine(_files.Root, "elsewhere"));
 
         Assert.Equal(full, relative);
         Assert.StartsWith(LockDirectory, relative, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Provision_TakesDifferentLocksForDifferentRoots()
+    public async Task Provision_TakesDifferentLocksForDifferentRoots()
     {
         Assert.NotEqual(
-            LockTakenFor(Path.Combine(Work, "one"), currentDirectory: Work),
-            LockTakenFor(Path.Combine(Work, "two"), currentDirectory: Work));
+            await LockTakenFor(Path.Combine(Work, "one"), currentDirectory: Work),
+            await LockTakenFor(Path.Combine(Work, "two"), currentDirectory: Work));
     }
 
-    private string LockTakenFor(string root, string currentDirectory)
+    private async Task<string> LockTakenFor(string root, string currentDirectory)
     {
         RecordingWorkspace workspace = new();
         CodeGraphIndexProvisioner provisioner = new(
@@ -44,7 +44,7 @@ public sealed class CodeGraphIndexLockPathTests
             new FakeProcessEnvironment(currentDirectory: currentDirectory),
             TimeProvider.System);
 
-        provisioner.Provision(
+        await provisioner.ProvisionAsync(
             root,
             DoctorOptions.Defaults,
             new ScriptedProcessExecutor(_ => throw new InvalidOperationException("The lock was refused, so no child runs.")),
@@ -59,11 +59,13 @@ public sealed class CodeGraphIndexLockPathTests
     {
         public List<string> Paths { get; } = [];
 
-        public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
+        public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+            string path,
+            TimeSpan wait,
+            CancellationToken cancellationToken = default)
         {
             Paths.Add(path);
-            failure = "refused for the test";
-            return null;
+            return Task.FromResult(new CodeGraphIndexLockAttempt(null, "refused for the test"));
         }
 
         public bool IsWritable(string directory) => false;

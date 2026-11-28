@@ -8,19 +8,26 @@ namespace KyberWeave.Contracts.Services;
 public interface IReviewDecisionModelFactory
 {
     /// <summary>
-    /// Creates the model the review commands ask, from the repository's <c>arbiter.provider</c>: the configured
-    /// provider, the decision log under the repository, and the cycle's answer file. It asks whether or not the
-    /// Arbiter's hooks are installed, because the review puts its questions to the model directly and needs no hook.
+    /// Creates the model the review commands ask, from the repository's <c>arbiter.provider</c>, without blocking a
+    /// thread: the configured provider, the decision log under the repository, and the cycle's answer file. It asks
+    /// whether or not the Arbiter's hooks are installed, because the review puts its questions to the model directly
+    /// and needs no hook.
     /// </summary>
     /// <param name="repositoryRoot">The repository root; the decision log is appended under <c>artifacts/arbiter</c> there.</param>
     /// <param name="config">The loaded configuration.</param>
     /// <param name="switchedOff">Whether <c>--no-decision-model</c> was given.</param>
     /// <param name="cachePath">The cycle's answer file, reused across the runs of one cycle; null keeps none.</param>
+    /// <param name="cancellationToken">Cancels the credential-store lookup.</param>
     /// <returns>
     /// The model. Switched off, or no provider named: one that asks nothing. A remote endpoint with no key, or an
     /// endpoint that is not a URL: one that asks nothing and says once why, so no request is sent only to be refused.
     /// </returns>
-    IReviewDecisionModel CreateForRepository(string repositoryRoot, KyberWeaveConfig config, bool switchedOff, string? cachePath);
+    Task<IReviewDecisionModel> CreateForRepositoryAsync(
+        string repositoryRoot,
+        KyberWeaveConfig config,
+        bool switchedOff,
+        string? cachePath,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Creates the model over a provider; a null provider is the model switched off.</summary>
     /// <param name="provider">The provider that answers; null when no decision model is configured.</param>

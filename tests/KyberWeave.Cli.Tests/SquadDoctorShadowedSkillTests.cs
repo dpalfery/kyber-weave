@@ -20,11 +20,11 @@ public sealed class SquadDoctorShadowedSkillTests
     private readonly InMemorySquadState _state = new();
 
     [Fact]
-    public void AProjectCopyWithDifferentContentIsAWarningNamingBothPathsAndTheFix()
+    public async Task AProjectCopyWithDifferentContentIsAWarningNamingBothPathsAndTheFix()
     {
         string workingDir = Deploy(".agents/skills/task-gate/SKILL.md", "---\nname: task-gate\n---\nRun the removed command.\n");
 
-        (int exitCode, string output) = RunDoctor(workingDir);
+        (int exitCode, string output) = await RunDoctor(workingDir);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("KW-SQUAD-SHADOW-001", output, StringComparison.Ordinal);
@@ -35,11 +35,11 @@ public sealed class SquadDoctorShadowedSkillTests
     }
 
     [Fact]
-    public void AProjectCopyWithTheSameBodyUnderAnotherHarnessFrontmatterIsNotReported()
+    public async Task AProjectCopyWithTheSameBodyUnderAnotherHarnessFrontmatterIsNotReported()
     {
         string workingDir = Deploy(".github/skills/task-gate/SKILL.md", "---\nname: task-gate\nextra: other-harness\n---\r\nRun the current command.\r\n");
 
-        (int exitCode, string output) = RunDoctor(workingDir);
+        (int exitCode, string output) = await RunDoctor(workingDir);
 
         Assert.Equal(0, exitCode);
         Assert.DoesNotContain("KW-SQUAD-SHADOW-001", output, StringComparison.Ordinal);
@@ -47,11 +47,11 @@ public sealed class SquadDoctorShadowedSkillTests
     }
 
     [Fact]
-    public void ASkillTheSquadNeverInstalledIsLeftAlone()
+    public async Task ASkillTheSquadNeverInstalledIsLeftAlone()
     {
         string workingDir = Deploy(".agents/skills/our-own-skill/SKILL.md", "---\nname: our-own-skill\n---\nOurs.\n");
 
-        (_, string output) = RunDoctor(workingDir);
+        (_, string output) = await RunDoctor(workingDir);
 
         Assert.DoesNotContain("KW-SQUAD-SHADOW-001", output, StringComparison.Ordinal);
     }
@@ -72,7 +72,7 @@ public sealed class SquadDoctorShadowedSkillTests
         return workingDir;
     }
 
-    private (int ExitCode, string Output) RunDoctor(string workingDir)
+    private async Task<(int ExitCode, string Output)> RunDoctor(string workingDir)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
@@ -81,9 +81,10 @@ public sealed class SquadDoctorShadowedSkillTests
             executor,
             workingDirectory: workingDir);
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> run = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
         return (run.Result, Normalize(run.Output));
     }
 

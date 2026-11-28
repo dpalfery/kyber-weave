@@ -27,7 +27,7 @@ public sealed class SquadArbiterCliTests
         _configs = new FileKyberWeaveConfigRepository(new FakeRepositoryTreeProbe(), _state.Files, _state.Paths, _state.Environment);
 
     [Fact]
-    public void Install_PassesArbiterSettingsIntoRenderRequest()
+    public async Task Install_PassesArbiterSettingsIntoRenderRequest()
     {
         string targetDir = NewDir("arbiter-install-wiring");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 1500);
@@ -36,7 +36,7 @@ public sealed class SquadArbiterCliTests
         FakeSquadRenderer renderer = _renderer;
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -46,7 +46,8 @@ public sealed class SquadArbiterCliTests
                 DryRun = false,
                 Adopt = false,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadRenderRequest request = Assert.Single(renderer.RenderRequests);
@@ -57,7 +58,7 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void Update_PassesArbiterSettingsIntoRenderRequest()
+    public async Task Update_PassesArbiterSettingsIntoRenderRequest()
     {
         string targetDir = NewDir("arbiter-update-wiring");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 1500);
@@ -69,7 +70,7 @@ public sealed class SquadArbiterCliTests
 
         SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -79,7 +80,8 @@ public sealed class SquadArbiterCliTests
                 DryRun = false,
                 ReplaceManaged = true,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadRenderRequest request = Assert.Single(renderer.RenderRequests);
@@ -89,7 +91,7 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void Install_WithArbiterEnabled_RecordsArbiterDegradationForFallbackTarget()
+    public async Task Install_WithArbiterEnabled_RecordsArbiterDegradationForFallbackTarget()
     {
         // Task 17.5: antigravity joined the hooked roster, so a project-scope install no
         // longer degrades it; the fallback-only target (warp) still records the code in
@@ -102,7 +104,7 @@ public sealed class SquadArbiterCliTests
         SquadStateStore stateStore = _state.Store;
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -112,7 +114,8 @@ public sealed class SquadArbiterCliTests
                 DryRun = false,
                 Adopt = false,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadReceipt? receipt = stateStore.ReadReceipt(targetDir, SquadDeploymentScope.Project);
@@ -152,33 +155,33 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void ArbiterProcessProbe_ParsesVersionOutput()
+    public async Task ArbiterProcessProbe_ParsesVersionOutput()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-arbiter", "kyber-weave-arbiter 1.2.3\n");
         var probe = SquadCommandComposition.ResolveArbiterProbe(executor, new FakeProcessEnvironment());
 
-        var result = probe.Probe();
+        var result = await probe.ProbeAsync();
 
         Assert.True(result.IsAvailable);
         Assert.Equal("1.2.3", result.Version);
     }
 
     [Fact]
-    public void ArbiterProcessProbe_WhenBinaryMissing_ReportsUnavailable()
+    public async Task ArbiterProcessProbe_WhenBinaryMissing_ReportsUnavailable()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithFailure("kyber-weave-arbiter", "missing");
         var probe = SquadCommandComposition.ResolveArbiterProbe(executor, new FakeProcessEnvironment());
 
-        var result = probe.Probe();
+        var result = await probe.ProbeAsync();
 
         Assert.False(result.IsAvailable);
         Assert.Null(result.Version);
     }
 
     [Fact]
-    public void Install_WithArbiterEnabled_NamesTheOpenCodeArbiterServerRegistration()
+    public async Task Install_WithArbiterEnabled_NamesTheOpenCodeArbiterServerRegistration()
     {
         string targetDir = NewDir("arbiter-install-opencode");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
@@ -187,7 +190,7 @@ public sealed class SquadArbiterCliTests
         FakeSquadRenderer renderer = _renderer;
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -197,7 +200,8 @@ public sealed class SquadArbiterCliTests
                 DryRun = false,
                 Adopt = false,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Register kw-arbiter in opencode.json", execution.Output, StringComparison.Ordinal);
@@ -215,7 +219,7 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void Install_PrintsTrustStepsForSelectedTargets()
+    public async Task Install_PrintsTrustStepsForSelectedTargets()
     {
         string targetDir = NewDir("arbiter-install-trust");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
@@ -224,7 +228,7 @@ public sealed class SquadArbiterCliTests
         FakeSquadRenderer renderer = _renderer;
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -234,7 +238,8 @@ public sealed class SquadArbiterCliTests
                 DryRun = false,
                 Adopt = false,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains(ArbiterHookWiring.TrustSteps[SquadTarget.Claude], execution.Output, StringComparison.Ordinal);
@@ -242,7 +247,7 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void Update_PrintsTrustStepsForSelectedTargets()
+    public async Task Update_PrintsTrustStepsForSelectedTargets()
     {
         string targetDir = NewDir("arbiter-update-trust");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
@@ -254,7 +259,7 @@ public sealed class SquadArbiterCliTests
 
         SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -264,14 +269,15 @@ public sealed class SquadArbiterCliTests
                 DryRun = false,
                 ReplaceManaged = true,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains(ArbiterHookWiring.TrustSteps[SquadTarget.Claude], execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_WhenArbiterEnabledAndProbeFails_ReportsKwArbBin001()
+    public async Task Doctor_WhenArbiterEnabledAndProbeFails_ReportsKwArbBin001()
     {
         string workingDir = NewDir("arbiter-doctor-missing");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
@@ -281,16 +287,17 @@ public sealed class SquadArbiterCliTests
             .WithFailure("kyber-weave-arbiter", "The 'kyber-weave-arbiter' executable is not available on PATH.");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_WhenArbiterEnabledAndVersionDiffers_ReportsKwArbBin001()
+    public async Task Doctor_WhenArbiterEnabledAndVersionDiffers_ReportsKwArbBin001()
     {
         string workingDir = NewDir("arbiter-doctor-mismatch");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
@@ -300,16 +307,17 @@ public sealed class SquadArbiterCliTests
             .WithProbeOutput("kyber-weave-arbiter", "kyber-weave-arbiter 0.0.0\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_WhenArbiterEnabledAndVersionMatches_Succeeds()
+    public async Task Doctor_WhenArbiterEnabledAndVersionMatches_Succeeds()
     {
         string workingDir = NewDir("arbiter-doctor-match");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
@@ -320,9 +328,10 @@ public sealed class SquadArbiterCliTests
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {cliVersion}\n");
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
@@ -333,7 +342,7 @@ public sealed class SquadArbiterCliTests
     /// trims the version on its own can drift and bring back <c>KW-ARB-BIN-001</c>.
     /// </summary>
     [Fact]
-    public void Doctor_WhenTheMatchingArbiterProbeIsStubbed_DoesNotReportKwArbBin001()
+    public async Task Doctor_WhenTheMatchingArbiterProbeIsStubbed_DoesNotReportKwArbBin001()
     {
         string workingDir = NewDir("arbiter-doctor-stub");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
@@ -343,9 +352,10 @@ public sealed class SquadArbiterCliTests
             .WithMatchingArbiterProbe();
         SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
@@ -353,7 +363,7 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void Doctor_OnZcodeRepoWithArbiterDisabled_DoesNotRequireTheArbiterServer()
+    public async Task Doctor_OnZcodeRepoWithArbiterDisabled_DoesNotRequireTheArbiterServer()
     {
         // A repo with .zcode/ whose source toolchain declares kw-arbiter: with the
         // Arbiter disabled the render grants no arbiter tools, so doctor must not require
@@ -372,16 +382,17 @@ public sealed class SquadArbiterCliTests
             globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
             configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("kyber-weave-arbiter", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_OnZcodeRepoWithArbiterEnabled_RequiresTheArbiterServer()
+    public async Task Doctor_OnZcodeRepoWithArbiterEnabled_RequiresTheArbiterServer()
     {
         string workingDir = NewDir("arbiter-doctor-zcode-on");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
@@ -400,9 +411,10 @@ public sealed class SquadArbiterCliTests
             globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
             configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("ZCode MCP servers not configured", execution.Output, StringComparison.Ordinal);
@@ -410,7 +422,7 @@ public sealed class SquadArbiterCliTests
     }
 
     [Fact]
-    public void Doctor_OnZcodeRepoWithArbiterEnabledAndGlobalReceipt_DoesNotRequireTheArbiterServer()
+    public async Task Doctor_OnZcodeRepoWithArbiterEnabledAndGlobalReceipt_DoesNotRequireTheArbiterServer()
     {
         // The render grants the Arbiter server only to a project-scope wiring, so a
         // global-scope deployment must not be told to configure a server it never granted.
@@ -433,16 +445,17 @@ public sealed class SquadArbiterCliTests
             globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
             configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = true }));
+            new SquadDoctorSettings { Path = workingDir, Global = true },
+            CancellationToken.None));
 
         Assert.DoesNotContain("ZCode MCP servers not configured", execution.Output, StringComparison.Ordinal);
         Assert.Equal(0, execution.ExitCode);
     }
 
     [Fact]
-    public void Doctor_OnZcodeRepoWithArbiterEnabledAndProjectReceipt_RequiresTheArbiterServer()
+    public async Task Doctor_OnZcodeRepoWithArbiterEnabledAndProjectReceipt_RequiresTheArbiterServer()
     {
         string workingDir = NewDir("arbiter-doctor-zcode-project-receipt");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
@@ -463,9 +476,10 @@ public sealed class SquadArbiterCliTests
             globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
             configs: _configs);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("ZCode MCP servers not configured", execution.Output, StringComparison.Ordinal);
@@ -586,9 +600,9 @@ public sealed class SquadArbiterCliTests
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private static CommandExecution Capture(Func<int> execute)
+    private static async Task<CommandExecution> Capture(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 }

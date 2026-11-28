@@ -6,17 +6,9 @@ using KyberWeave.Core.Processes;
 namespace KyberWeave.Data.Hooks;
 
 /// <summary>Runs programs through the kernel's deadlock-safe process runner and answers process and path questions.</summary>
-internal sealed class KernelProcessRunner : IProcessRunner
+public sealed class KernelProcessRunner : IProcessRunner
 {
     private const int MissingExecutableErrorCode = 2;
-
-    /// <inheritdoc />
-    public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.Program);
-        return Task.Run(() => Run(request, cancellationToken), cancellationToken);
-    }
 
     /// <inheritdoc />
     public bool IsAlive(int processId) => ProcessRunner.IsAlive(processId);
@@ -24,8 +16,12 @@ internal sealed class KernelProcessRunner : IProcessRunner
     /// <inheritdoc />
     public string? FindOnPath(string program) => ProcessRunner.FindOnPath(program);
 
-    private static ProcessRunResult Run(ProcessRunRequest request, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public async Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Program);
+
         if (request.WorkingDirectory is { Length: > 0 } workingDirectory && !Directory.Exists(workingDirectory))
         {
             throw WorkingDirectoryNotFound(workingDirectory);
@@ -58,12 +54,13 @@ internal sealed class KernelProcessRunner : IProcessRunner
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(
+            ProcessResult result = await ProcessRunner.RunAsync(
                 startInfo,
                 request.StandardInput ?? string.Empty,
                 request.Timeout,
                 request.MaxOutputBytes,
-                cancellationToken);
+                time: null,
+                cancellationToken).ConfigureAwait(false);
 
             return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)
             {

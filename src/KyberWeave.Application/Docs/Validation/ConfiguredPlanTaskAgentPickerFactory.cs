@@ -17,17 +17,16 @@ public sealed class ConfiguredPlanTaskAgentPickerFactory(
     IEmbeddedResources resources) : IPlanTaskAgentPickerFactory
 {
     /// <inheritdoc />
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The provider's lifetime transfers to the returned picker, which holds it for the task-file run.")]
-    public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config)
+    public async Task<IPlanTaskAgentPicker?> ForConfigAsync(
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         string home = environment.HomeDirectory;
         if (string.IsNullOrWhiteSpace(home))
             return null;
-        IArbiterProvider? provider = providers.TryCreate(config.Arbiter.Provider, home);
+        IArbiterProvider? provider = await providers.TryCreateAsync(config.Arbiter.Provider, home, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         return provider is null
             ? null
             : new PlanTaskAgentPick(provider, PlanTaskAgentPick.ImplementationAgents(config.WorkerRoster), resources);

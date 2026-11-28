@@ -115,7 +115,7 @@ internal sealed class InMemoryArbiterState
         IArbiterModelTargetsReader? modelTargets = null) =>
         new(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             LedgerStore,
             DecisionLog,
             gitFacts ?? new ArbiterEvaluatorFixtures.PassThroughGitFacts(),

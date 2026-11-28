@@ -23,7 +23,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 ///     and <c>--replace-managed</c> never apply to a project. Selection is the operator's consent, so a selected
 ///     project is not confirmed a second time.
 /// </remarks>
-internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
+internal sealed class SquadUpdateCommand : AsyncCommand<SquadUpdateSettings>
 {
     private readonly ISquadLifecycleService _lifecycle;
     private readonly ISquadInstanceService _instances;
@@ -152,7 +152,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     }
 
 
-    public override int Execute(CommandContext context, SquadUpdateSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, SquadUpdateSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -245,16 +245,18 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             if (globalReceipt is not null)
             {
                 List<SquadTarget> deployed = [];
-                int exitCode = RunUpdate(run, stateStore, lifecycleService, interactive, cancellationToken, deployed);
+                int exitCode = await RunUpdateAsync(run, stateStore, lifecycleService, interactive, cancellationToken, deployed)
+                    .ConfigureAwait(false);
                 if (exitCode != 0) return exitCode;
 
                 // Runs after the global deployment has updated and cannot change this command's exit code.
-                KyberDashCapturePluginStep.RunForGlobal(
+                await KyberDashCapturePluginStep.RunForGlobalAsync(
                     _capturePluginStep,
                     deployed,
                     settings.NoCapturePlugin,
                     settings.DryRun,
-                    _globalRoots);
+                    _globalRoots,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             ISquadUserPaths paths = stateStore.UserPaths;
@@ -265,7 +267,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
             try
             {
-                _instances.RefreshAllAsync(cancellationToken).GetAwaiter().GetResult();
+                await _instances.RefreshAllAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (SquadDeploymentConflictException ex)
             {
@@ -279,7 +281,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 return 1;
             }
 
-            return UpdateSelectedProjects(
+            return await UpdateSelectedProjectsAsync(
                 settings,
                 pinnedVersion,
                 selection,
@@ -287,10 +289,11 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 stateStore,
                 lifecycleService,
                 interactive,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return RunUpdate(run, stateStore, lifecycleService, interactive, cancellationToken);
+        return await RunUpdateAsync(run, stateStore, lifecycleService, interactive, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -298,7 +301,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     ///     the ones the picker returns. Runs sequentially, continues past a failure, and prints a summary.
     /// </summary>
     /// <returns>Exit 1 when any selected project failed; otherwise 0.</returns>
-    private int UpdateSelectedProjects(
+    private async Task<int> UpdateSelectedProjectsAsync(
         SquadUpdateSettings settings,
         string? pinnedVersion,
         SquadProjectSelection selection,
@@ -355,7 +358,8 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 false,
                 settings.DryRun,
                 true);
-            int code = RunUpdate(projectRun, stateStore, lifecycleService, interactive, cancellationToken);
+            int code = await RunUpdateAsync(projectRun, stateStore, lifecycleService, interactive, cancellationToken)
+                .ConfigureAwait(false);
             outcomes.Add(new ProjectOutcome(path, code == 0 ? ProjectState.Updated : ProjectState.Failed));
         }
 
@@ -391,7 +395,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// </summary>
     /// <param name="deployed">Receives the resolved targets when the update succeeds, so a global caller can act on them.</param>
     /// <returns>0 on success, 2 when the operator declined or the resolution refused, and 1 on failure.</returns>
-    private int RunUpdate(
+    private async Task<int> RunUpdateAsync(
         UpdateRun run,
         ISquadStateStore stateStore,
         ISquadLifecycleService lifecycleService,
@@ -465,8 +469,8 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.UpdateAsync(updateRequest, cancellationToken).GetAwaiter()
-                .GetResult();
+            SquadLifecycleResult result = await lifecycleService.UpdateAsync(updateRequest, cancellationToken)
+                .ConfigureAwait(false);
             if (result.Success)
             {
                 WriteUpdateSuccess(result, run, decision, arbiterWiring, deployed);
@@ -582,12 +586,6 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // Until trust is granted the hooks stay off (§10.7), so the update names
         // each selected target's trust gate where the audit cannot observe the gap.
         SquadInstallCommand.WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
-    }
-
-    /// <summary>Runs the update without a cancellation token, for callers that have none to pass.</summary>
-    public int Execute(CommandContext context, SquadUpdateSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     /// <summary>One deployment update: the root it writes, what it targets, and what consent it carries.</summary>

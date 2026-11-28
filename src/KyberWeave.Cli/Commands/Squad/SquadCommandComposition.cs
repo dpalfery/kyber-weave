@@ -3,6 +3,7 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Composition;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
@@ -165,14 +166,14 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
-    public static McpProcessProbe ResolveProbe(IProcessExecutor? executor, IProcessEnvironment environment)
+    public static McpProcessProbe ResolveProbe(IProcessRunner? executor, IProcessEnvironment environment)
     {
-        return new McpProcessProbe(executor ?? ProcessExecutor.Instance, environment);
+        return new McpProcessProbe(executor ?? new KernelProcessRunner(), environment);
     }
 
     /// <summary>Resolves the Kyber-Weave Arbiter process probe using the specified process executor.</summary>
-    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessExecutor? executor, IProcessEnvironment environment) =>
-        new(executor ?? ProcessExecutor.Instance, environment);
+    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessRunner? executor, IProcessEnvironment environment) =>
+        new(executor ?? new KernelProcessRunner(), environment);
 
     /// <summary>
     /// Carries the host's Arbiter settings into a render: the enabled flag verbatim and the

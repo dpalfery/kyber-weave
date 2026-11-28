@@ -68,7 +68,7 @@ public sealed class SquadOwnedBlockUnreadableFileTests
 
     [Fact]
     [UnsupportedOSPlatform("windows")]
-    public void Doctor_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
+    public async Task Doctor_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
     {
         Assert.SkipWhen(
             OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
@@ -96,13 +96,13 @@ public sealed class SquadOwnedBlockUnreadableFileTests
                 .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
             SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
 
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+            CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
                 null!,
                 new SquadDoctorSettings
                 {
                     Path = fixture.Path,
                     Global = false,
-                }));
+                }, CancellationToken.None));
 
             Assert.Equal(1, execution.Result);
             Assert.Contains("unreadable", execution.Output, StringComparison.OrdinalIgnoreCase);

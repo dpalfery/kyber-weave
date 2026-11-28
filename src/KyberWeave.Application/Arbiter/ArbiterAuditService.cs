@@ -60,6 +60,35 @@ public sealed class ArbiterAuditService(
         ArgumentNullException.ThrowIfNull(report);
 
         string arbiterDirectory = locator.ResolveArbiterDirectory(repositoryPath);
+        return Analyze(arbiterDirectory, config, since, session, matchesPlan, report);
+    }
+
+    /// <inheritdoc />
+    public async Task<ArbiterAuditReport?> AuditAsync(
+        string repositoryPath,
+        KyberWeaveConfig config,
+        DateTimeOffset? since,
+        string? session,
+        Func<string?, bool>? matchesPlan,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(report);
+
+        string arbiterDirectory = await locator.ResolveArbiterDirectoryAsync(repositoryPath, cancellationToken).ConfigureAwait(false);
+        return Analyze(arbiterDirectory, config, since, session, matchesPlan, report);
+    }
+
+    /// <summary>The audit the two entries share: reads the log under <paramref name="arbiterDirectory"/> and runs every check.</summary>
+    private ArbiterAuditReport? Analyze(
+        string arbiterDirectory,
+        KyberWeaveConfig config,
+        DateTimeOffset? since,
+        string? session,
+        Func<string?, bool>? matchesPlan,
+        DiagnosticReport report)
+    {
         IArbiterLedger ledger = state.OpenLedger(arbiterDirectory);
         IArbiterDecisionLog decisions = state.OpenDecisionLog(arbiterDirectory);
 

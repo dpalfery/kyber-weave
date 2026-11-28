@@ -102,10 +102,10 @@ public sealed class DoctorEnsureRealLockFileTests : IDisposable
     /// rebuild while another live process holds CodeGraph's lock file.
     /// </summary>
     [Fact]
-    public void EnsureNeverRebuildsWhileAnotherLiveProcessHoldsTheCodeGraphLock()
+    public async Task EnsureNeverRebuildsWhileAnotherLiveProcessHoldsTheCodeGraphLock()
     {
         Directory.CreateDirectory(IndexDirectory);
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(IndexDirectory, "codegraph.lock"),
             Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -114,7 +114,7 @@ public sealed class DoctorEnsureRealLockFileTests : IDisposable
                 : arguments.Contains("explore", StringComparer.Ordinal) ? new ProcessResult(1, string.Empty, "no answer")
                 : DoctorHarness.Ok());
 
-        DoctorReport report = RunEnsureWithoutWaiting(executor);
+        DoctorReport report = await RunEnsureWithoutWaitingAsync(executor);
 
         DoctorHarness.AssertNoCall(executor, "index");
         Assert.Contains(report.Checks, check => check.Id == "codegraph.explore" && !check.Passed);
@@ -135,8 +135,8 @@ public sealed class DoctorEnsureRealLockFileTests : IDisposable
 
     private string IndexDirectory => Path.Combine(Root, ".codegraph");
 
-    private DoctorReport RunEnsureWithoutWaiting(ScriptedProcessExecutor executor) =>
-        DoctorTestServices.Doctor.Run(
+    private Task<DoctorReport> RunEnsureWithoutWaitingAsync(ScriptedProcessExecutor executor) =>
+        DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)) with

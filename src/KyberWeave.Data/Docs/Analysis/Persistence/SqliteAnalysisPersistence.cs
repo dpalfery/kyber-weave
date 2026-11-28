@@ -42,20 +42,14 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     private readonly string _repositoryRoot;
     private readonly IWritableFileSystem _files;
 
-    /// <summary>Opens the cache under <paramref name="repositoryRoot"/>, creating it when the repository's state is safe to cache in.</summary>
-    /// <param name="repositoryRoot">The repository root.</param>
-    /// <param name="files">Creates the cache folder and inspects the path components for links.</param>
-    /// <param name="paths">Resolves the repository root to a full path.</param>
-    /// <param name="environment">Supplies the directory a relative root resolves against.</param>
-    /// <param name="processes">Retained so existing composition roots and seam tests keep compiling; the cache no longer starts a process.</param>
-    /// <param name="safety">Decides whether the cache is protected from accidental commits.</param>
-    public SqliteAnalysisPersistence(
+    internal SqliteAnalysisPersistence(
         string repositoryRoot,
         IWritableFileSystem files,
         IPathResolver paths,
         IProcessEnvironment environment,
-        IBoundedProcessExecutor processes,
-        AnalysisCacheSafety safety)
+        IProcessRunner processes,
+        AnalysisCacheSafety safety,
+        bool cacheSafe)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(files);
@@ -74,7 +68,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             "docs-analysis.sqlite3");
 
         EnsureSafePersistencePath(fullRoot, DatabasePath);
-        if (!safety.IsSafe(fullRoot) || !CanStartSqlite()) return;
+        if (!cacheSafe || !CanStartSqlite()) return;
 
         string databaseDirectory = Path.GetDirectoryName(DatabasePath)
             ?? throw new InvalidOperationException("The analysis database path must have a directory.");

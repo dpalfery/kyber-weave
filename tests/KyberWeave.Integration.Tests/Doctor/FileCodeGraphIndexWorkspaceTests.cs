@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Doctor;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -10,16 +11,17 @@ public sealed class FileCodeGraphIndexWorkspaceTests
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     [Fact]
-    public void FreeLock_IsTakenAtOnceWithoutTheClockMoving()
+    public async Task FreeLock_IsTakenAtOnceWithoutTheClockMoving()
     {
         using TempDirectory fixture = new();
         FakeTimeProvider time = new();
         FileCodeGraphIndexWorkspace workspace = new(time);
 
-        using IDisposable? held = workspace.TryAcquireLock(Path.Combine(fixture.Path, "index.lock"), Wait, out string? failure);
+        CodeGraphIndexLockAttempt attempt = await workspace.TryAcquireLockAsync(Path.Combine(fixture.Path, "index.lock"), Wait);
+        using IDisposable? held = attempt.Lock;
 
         Assert.NotNull(held);
-        Assert.Null(failure);
+        Assert.Null(attempt.Failure);
     }
 
     [Fact]
@@ -41,7 +43,9 @@ public sealed class FileCodeGraphIndexWorkspaceTests
             }
         });
 
-        IDisposable? held = workspace.TryAcquireLock(lockPath, Wait, out string? failure);
+        CodeGraphIndexLockAttempt attempt = await workspace.TryAcquireLockAsync(lockPath, Wait, CancellationToken.None);
+        IDisposable? held = attempt.Lock;
+        string? failure = attempt.Failure;
         await stop.CancelAsync();
         await clockDriver;
 

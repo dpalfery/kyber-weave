@@ -14,13 +14,26 @@ public sealed class SqliteAnalysisPersistenceFactory(
     IWritableFileSystem files,
     IPathResolver paths,
     IProcessEnvironment environment,
-    IBoundedProcessExecutor processes,
+    IProcessRunner processes,
     AnalysisCacheSafety safety) : IAnalysisPersistenceFactory
 {
     /// <inheritdoc />
-    public bool IsCacheSafe(string repositoryRoot) => safety.IsSafe(repositoryRoot);
+    public Task<bool> IsCacheSafeAsync(string repositoryRoot, CancellationToken cancellationToken = default) =>
+        safety.IsSafeAsync(repositoryRoot, cancellationToken);
 
     /// <inheritdoc />
-    public IAnalysisPersistence Open(string repositoryRoot) =>
-        new SqliteAnalysisPersistence(repositoryRoot, files, paths, environment, processes, safety);
+    public async Task<IAnalysisPersistence> OpenAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default)
+    {
+        bool cacheSafe = await safety.IsSafeAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        return new SqliteAnalysisPersistence(
+            repositoryRoot,
+            files,
+            paths,
+            environment,
+            processes,
+            safety,
+            cacheSafe);
+    }
 }

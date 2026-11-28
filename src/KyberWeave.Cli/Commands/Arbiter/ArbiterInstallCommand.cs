@@ -29,10 +29,10 @@ internal sealed class ArbiterInstallCommand(
     SquadConsoleOptions squadConsole,
     IAnsiConsole console,
     SquadConsole output,
-    SquadTargetRootConfirmation confirmation) : Command<ArbiterInstallSettings>
+    SquadTargetRootConfirmation confirmation) : AsyncCommand<ArbiterInstallSettings>
 {
     /// <inheritdoc />
-    public override int Execute(CommandContext context, ArbiterInstallSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterInstallSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -73,7 +73,7 @@ internal sealed class ArbiterInstallCommand(
             return 2;
         }
 
-        ArbiterInstallPrepared prepared = installer.Prepare(new ArbiterInstallRequest(
+        ArbiterInstallPrepared prepared = await installer.PrepareAsync(new ArbiterInstallRequest(
             settings.Path,
             settings.PathOption,
             settings.Project,
@@ -82,7 +82,7 @@ internal sealed class ArbiterInstallCommand(
             settings.Provider,
             settings.ArbiterKey,
             settings.KeyStdin,
-            settings.DryRun));
+            settings.DryRun), cancellationToken).ConfigureAwait(false);
 
         Print(prepared.Events, plan: null);
         if (prepared.Plan is not { } plan)
@@ -100,15 +100,9 @@ internal sealed class ArbiterInstallCommand(
             return 2;
         }
 
-        ArbiterInstallApplied applied = installer.Apply(plan, cancellationToken);
+        ArbiterInstallApplied applied = await installer.ApplyAsync(plan, cancellationToken).ConfigureAwait(false);
         Print(applied.Events, plan.Target);
         return applied.ExitCode;
-    }
-
-    /// <summary>Runs the command without cancellation; the entry point tests use this.</summary>
-    public int Execute(CommandContext context, ArbiterInstallSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     private void Print(IReadOnlyList<ArbiterInstallEvent> events, SquadTarget? plan)

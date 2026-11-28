@@ -15,7 +15,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// <summary>
 /// Deploys canonical agents and skills to coding harness directories.
 /// </summary>
-internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
+internal sealed class SquadInstallCommand : AsyncCommand<SquadInstallSettings>
 {
     private readonly ISquadLifecycleService _lifecycle;
     private readonly ISquadStateStore _stateStore;
@@ -83,7 +83,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadInstallSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, SquadInstallSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -180,11 +180,20 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.InstallAsync(installRequest, cancellationToken).GetAwaiter()
-                .GetResult();
+            SquadLifecycleResult result = await lifecycleService.InstallAsync(installRequest, cancellationToken)
+                .ConfigureAwait(false);
             if (result.Success)
             {
-                WriteInstallSuccess(result, settings, scope, targetRoot, decision, deployedTargets, arbiterWiring);
+                await WriteInstallSuccessAsync(
+                        result,
+                        settings,
+                        scope,
+                        targetRoot,
+                        decision,
+                        deployedTargets,
+                        arbiterWiring,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 return 0;
             }
 
@@ -209,11 +218,6 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             _output.WriteFailure(ex);
             return 1;
         }
-    }
-
-    public int Execute(CommandContext context, SquadInstallSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     /// <summary>
@@ -310,14 +314,15 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
     }
 
-    private void WriteInstallSuccess(
+    private async Task WriteInstallSuccessAsync(
         SquadLifecycleResult result,
         SquadInstallSettings settings,
         SquadDeploymentScope scope,
         string targetRoot,
         SquadTargetResolutionDecision decision,
         IReadOnlyList<SquadTarget> deployedTargets,
-        SquadArbiterWiring arbiterWiring)
+        SquadArbiterWiring arbiterWiring,
+        CancellationToken cancellationToken)
     {
         if (settings.DryRun)
         {
@@ -346,7 +351,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         if (arbiterWiring.Enabled && scope == SquadDeploymentScope.Project && decision.Targets.Contains(SquadTarget.OpenCode)
             && OpenCodeArbiterRegistrationStep(scope) is { } openCodeStep)
         {
-            _output.Out.WriteLine(openCodeStep);
+            await _output.Out.WriteLineAsync(openCodeStep.AsMemory(), cancellationToken).ConfigureAwait(false);
         }
 
         if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
@@ -357,7 +362,8 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             string configPath = targetToken == HarnessRegistry.WarpToken
                 ? "~/.warp/.mcp.json"
                 : "~/.zcode/.mcp.json";
-            _output.Out.WriteLine(RegistrationStepMessage(configPath));
+            await _output.Out.WriteLineAsync(RegistrationStepMessage(configPath).AsMemory(), cancellationToken)
+                .ConfigureAwait(false);
         }
 
         _output.WriteTransactionWarnings(result.Warnings);
@@ -372,12 +378,13 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // The capture plugin is global, so only a global deployment reaches it. It runs after the
         // deployment has succeeded and cannot change this command's exit code.
         if (scope == SquadDeploymentScope.Global)
-            KyberDashCapturePluginStep.RunForGlobal(
+            await KyberDashCapturePluginStep.RunForGlobalAsync(
                 _capturePluginStep,
                 decision.Targets,
                 settings.NoCapturePlugin,
                 settings.DryRun,
-                _globalRoots);
+                _globalRoots,
+                cancellationToken).ConfigureAwait(false);
     }
 
     private static string RegistrationStepMessage(string configPath)

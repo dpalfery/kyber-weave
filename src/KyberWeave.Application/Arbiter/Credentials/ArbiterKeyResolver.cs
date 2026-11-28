@@ -23,7 +23,7 @@ public static class ArbiterKeyResolver
     public const string MissingKeyCode = "KW-ARB-KEY-001";
 
     /// <summary>
-    /// Resolves the key for <paramref name="endpoint"/>, reading the environment through
+    /// Resolves the key for <paramref name="endpoint"/> without blocking, reading the environment through
     /// <paramref name="environment"/> for testability.
     /// </summary>
     /// <param name="endpoint">The provider endpoint URL.</param>
@@ -33,12 +33,14 @@ public static class ArbiterKeyResolver
     /// The user override's <c>provider.endpoint</c>, when one names a non-TypeSafe origin
     /// the environment key may serve.
     /// </param>
+    /// <param name="cancellationToken">Cancels the credential-store lookup.</param>
     /// <returns>The key, or null when none resolves or the endpoint is loopback.</returns>
-    public static string? Resolve(
+    public static async Task<string?> ResolveAsync(
         string endpoint,
         ICredentialStore? store,
         Func<string, string?> environment,
-        string? userOverrideEndpoint = null)
+        string? userOverrideEndpoint = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
         ArgumentNullException.ThrowIfNull(environment);
@@ -60,7 +62,9 @@ public static class ArbiterKeyResolver
             return envKey;
         }
 
-        string? stored = store?.Read(origin);
+        string? stored = store is null
+            ? null
+            : await store.ReadAsync(origin, cancellationToken).ConfigureAwait(false);
         return string.IsNullOrWhiteSpace(stored) ? null : stored;
     }
 

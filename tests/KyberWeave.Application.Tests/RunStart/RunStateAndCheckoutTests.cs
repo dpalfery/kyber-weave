@@ -110,6 +110,12 @@ public sealed class RunStateAndCheckoutTests
     {
         public string? Read(string worktree) => branches.GetValueOrDefault(worktree);
 
+        public Task<string?> ReadAsync(string worktree, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Read(worktree));
+
         public bool? IsAncestor(string workingDirectory, string ancestor, string descendant) => null;
+
+        public Task<bool?> IsAncestorAsync(string workingDirectory, string ancestor, string descendant, CancellationToken cancellationToken = default) =>
+            Task.FromResult(IsAncestor(workingDirectory, ancestor, descendant));
     }
 }

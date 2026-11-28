@@ -31,7 +31,7 @@ public sealed class ArbiterGlobalWarpFallbackTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void GlobalWarpInstall_WritesNothingAndReportsMcpRegistration(bool withForeignConfig)
+    public async Task GlobalWarpInstall_WritesNothingAndReportsMcpRegistration(bool withForeignConfig)
     {
         string home = _state.Layout.PhysicalOf(_state.Layout.Home);
         string warpRoot = Path.Combine(home, ".warp");
@@ -68,7 +68,7 @@ public sealed class ArbiterGlobalWarpFallbackTests
             globalRoots: new FixedGlobalRoots(home),
             isInteractive: false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -76,7 +76,8 @@ public sealed class ArbiterGlobalWarpFallbackTests
                 Targets = ["warp"],
                 Global = true,
                 Yes = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("~/.warp/.mcp.json", execution.Output, StringComparison.Ordinal);
@@ -92,9 +93,9 @@ public sealed class ArbiterGlobalWarpFallbackTests
         }
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private static async Task<CommandExecution> Capture(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

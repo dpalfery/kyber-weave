@@ -9,11 +9,15 @@ namespace KyberWeave.Contracts.Services;
 public interface IReviewGateCatalogue
 {
     /// <summary>
-    /// Renders the catalogue for <paramref name="declaredTechnologies"/>, detecting each
+    /// Renders the catalogue for <paramref name="declaredTechnologies"/> without blocking a thread, detecting each
     /// family's project roots under <paramref name="repoRoot"/> by that family's own rules.
     /// </summary>
     /// <param name="repoRoot">The repository whose project roots are detected.</param>
     /// <param name="declaredTechnologies">The technology slugs the repository declares.</param>
+    /// <param name="cancellationToken">Cancels the repository file listing.</param>
     /// <returns>The rendered block and whether there is anything to write.</returns>
-    ReviewGatesPlan Plan(string repoRoot, IReadOnlyList<string> declaredTechnologies);
+    Task<ReviewGatesPlan> PlanAsync(
+        string repoRoot,
+        IReadOnlyList<string> declaredTechnologies,
+        CancellationToken cancellationToken = default);
 }

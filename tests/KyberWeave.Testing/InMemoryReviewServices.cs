@@ -9,6 +9,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Data.Review;
 using KyberWeave.Kernel.FileSystem;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Doctor;
@@ -100,8 +101,7 @@ internal sealed class InMemoryReviewServices : IDisposable
         services.AddSingleton<IProcessEnvironment>(Environment);
         services.AddSingleton<IIdGenerator>(Ids);
         services.AddSingleton<IProcessRunner>(Processes);
-        services.AddSingleton<IProgramRunner>(Processes);
-        services.AddSingleton<IBoundedProcessExecutor>(Processes);
+        services.AddSingleton<IGitChangeReader>(new GitChangeReader(Processes, Processes.Run));
         services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
         services.AddSingleton<IArbiterLogStore>(Log);
         services.AddSingleton<TimeProvider>(Time);

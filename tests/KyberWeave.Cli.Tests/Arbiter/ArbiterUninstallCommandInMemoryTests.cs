@@ -126,7 +126,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// the owned assertion and still destroy the operator's own plugin.
     /// </summary>
     [Fact]
-    public void Uninstall_KiloTarget_RemovesOnlyReceiptOwnedPluginFile()
+    public async Task Uninstall_KiloTarget_RemovesOnlyReceiptOwnedPluginFile()
     {
         string host = NewDir("uninstall-owned");
         string owned = Path.Combine(host, ".kilo", "plugin", "kyber-arbiter.ts");
@@ -136,9 +136,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
         WriteProjectReceipt(host, OwnedFile(".kilo/plugin/kyber-arbiter.ts", "kilo"));
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.False(_files.FileExists(owned), "receipt-owned kyber-arbiter.ts must be removed");
@@ -150,54 +151,57 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// Silently deleting a credential on uninstall would be hard to reverse (D6).
     /// </summary>
     [Fact]
-    public void Uninstall_WithoutRemoveKey_LeavesCredentialStoreEntryUntouched()
+    public async Task Uninstall_WithoutRemoveKey_LeavesCredentialStoreEntryUntouched()
     {
         const string origin = "https://api.typesafe.ai";
         const string key = "TS-UNINSTALL-KEEP-7f3a9c1e";
-        _store.Write(origin, key);
+        await _store.WriteAsync(origin, key);
         string host = NewDir("uninstall-keep-key");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Equal(key, _store.Read(origin));
+        Assert.Equal(key, await _store.ReadAsync(origin));
     }
 
     /// <summary>
     /// With <c>--remove-key</c> the injected fake-store entry is deleted.
     /// </summary>
     [Fact]
-    public void Uninstall_WithRemoveKey_DeletesCredentialStoreEntry()
+    public async Task Uninstall_WithRemoveKey_DeletesCredentialStoreEntry()
     {
         const string origin = "https://api.typesafe.ai";
         const string key = "TS-UNINSTALL-DROP-1a2b3c4d";
-        _store.Write(origin, key);
+        await _store.WriteAsync(origin, key);
         string host = NewDir("uninstall-drop-key");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Null(_store.Read(origin));
+        Assert.Null(await _store.ReadAsync(origin));
     }
 
     /// <summary>
     /// An unknown target is client input, not a crash: exit 2 naming the roster.
     /// </summary>
     [Fact]
-    public void Uninstall_InvalidTarget_ExitsTwoNamingTheRoster()
+    public async Task Uninstall_InvalidTarget_ExitsTwoNamingTheRoster()
     {
         string host = NewDir("uninstall-bad-target");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "hal9000" }));
+            new ArbiterUninstallSettings { Path = host, Target = "hal9000" },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("hal9000", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -208,14 +212,15 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// No deployment is a no-op: exit 0 with a "nothing to uninstall" status.
     /// </summary>
     [Fact]
-    public void Uninstall_NoDeployment_ExitsZeroAsNoOp()
+    public async Task Uninstall_NoDeployment_ExitsZeroAsNoOp()
     {
         string host = NewDir("uninstall-empty");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         string status = string.Join(' ', execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
@@ -228,7 +233,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// could not read, so the command must fail and leave the file alone.
     /// </summary>
     [Fact]
-    public void Uninstall_UnreadableReceipt_FailsWithoutDeletingTheOperatorFile()
+    public async Task Uninstall_UnreadableReceipt_FailsWithoutDeletingTheOperatorFile()
     {
         string host = NewDir("uninstall-corrupt-receipt");
         string operatorFile = Path.Combine(host, ".kilo", "plugin", "kyber-arbiter.ts");
@@ -238,9 +243,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
             "{ this is not a receipt");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo" },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.True(
@@ -254,22 +260,23 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// the command guessing the default origin.
     /// </summary>
     [Fact]
-    public void Uninstall_RemoveKeyWithUnreadableConfig_FailsAndKeepsTheKey()
+    public async Task Uninstall_RemoveKeyWithUnreadableConfig_FailsAndKeepsTheKey()
     {
         const string origin = "https://api.typesafe.ai";
         const string key = "TS-UNINSTALL-BAD-CONFIG-2b3c4d5e";
-        _store.Write(origin, key);
+        await _store.WriteAsync(origin, key);
         string host = NewDir("uninstall-bad-config");
         WriteFile(Path.Combine(host, ".kyber-weave", "kyber-weave.yml"), "arbiter: [unclosed\n");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("could not be loaded", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(key, _store.Read(origin));
+        Assert.Equal(key, await _store.ReadAsync(origin));
     }
 
     /// <summary>
@@ -277,11 +284,11 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// is still deployed removes that target's auth too, so the operator is warned.
     /// </summary>
     [Fact]
-    public void Uninstall_RemoveKeyWithAnotherTargetDeployed_WarnsThatTheKeyIsShared()
+    public async Task Uninstall_RemoveKeyWithAnotherTargetDeployed_WarnsThatTheKeyIsShared()
     {
         const string origin = "https://api.typesafe.ai";
         const string key = "TS-UNINSTALL-SHARED-3c4d5e6f";
-        _store.Write(origin, key);
+        await _store.WriteAsync(origin, key);
         string host = NewDir("uninstall-shared-key");
         WriteProjectReceipt(
             host,
@@ -289,13 +296,14 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
             OwnedFile(".opencode/plugins/kyber-arbiter.ts", "opencode"));
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true }));
+            new ArbiterUninstallSettings { Path = host, Target = "kilo", RemoveKey = true },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("shared", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(_store.Read(origin));
+        Assert.Null(await _store.ReadAsync(origin));
     }
 
     /// <summary>
@@ -305,7 +313,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// installer splices beside it are arranged here, in memory.
     /// </summary>
     [Fact]
-    public void Uninstall_GlobalCodexHook_RemovesOnlyOwnedBlockAndPreservesForeignBytes()
+    public async Task Uninstall_GlobalCodexHook_RemovesOnlyOwnedBlockAndPreservesForeignBytes()
     {
         string home = _home;
         string hooksPath = Path.Combine(home, ".codex", "hooks.json");
@@ -317,9 +325,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
         Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => uninstall.Execute(
+        CommandExecution execution = await CaptureAsync(() => uninstall.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = home, Target = "codex" }));
+            new ArbiterUninstallSettings { Path = home, Target = "codex" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         string after = _files.ReadAllText(hooksPath);
@@ -335,7 +344,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// operator's own stop hook in place.
     /// </summary>
     [Fact]
-    public void Uninstall_GlobalFactoryHook_RemovesSubagentStopAndKeepsTheUsersOwn()
+    public async Task Uninstall_GlobalFactoryHook_RemovesSubagentStopAndKeepsTheUsersOwn()
     {
         string home = _home;
         string hooksPath = Path.Combine(home, ".factory", "hooks.json");
@@ -350,9 +359,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
         Assert.Contains("user-own-stop-notifier", installed, StringComparison.Ordinal);
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => uninstall.Execute(
+        CommandExecution execution = await CaptureAsync(() => uninstall.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = home, Target = "factory" }));
+            new ArbiterUninstallSettings { Path = home, Target = "factory" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         string after = _files.ReadAllText(hooksPath);
@@ -366,7 +376,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// the actual plugin file and leave the home-owned operator file alone.
     /// </summary>
     [Fact]
-    public void Uninstall_GlobalOpenCodePlugin_RemovesOwnedFileUnderTheRealGlobalRoot()
+    public async Task Uninstall_GlobalOpenCodePlugin_RemovesOwnedFileUnderTheRealGlobalRoot()
     {
         string home = _home;
         string globalRoot = _globalRoots.ResolveGlobalRoot(SquadTarget.OpenCode);
@@ -379,9 +389,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
             files: [OwnedFile("plugins/kyber-arbiter.ts", "opencode")]);
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => uninstall.Execute(
+        CommandExecution execution = await CaptureAsync(() => uninstall.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = home, Target = "opencode" }));
+            new ArbiterUninstallSettings { Path = home, Target = "opencode" },
+            CancellationToken.None));
 
         Assert.True(execution.ExitCode == 0, execution.Output);
         Assert.False(_files.FileExists(owned), "the installed OpenCode shim must be deleted under the real global root");
@@ -394,7 +405,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// that target's entry.
     /// </summary>
     [Fact]
-    public void Uninstall_OneGlobalTarget_LeavesOtherGlobalTargetsInstalled()
+    public async Task Uninstall_OneGlobalTarget_LeavesOtherGlobalTargetsInstalled()
     {
         string home = _home;
         new FileUserHostConfigStore(_files).WriteGlobalTargets(home, ["claude", "codex"]);
@@ -407,9 +418,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
             blocks: [OwnedBlock("settings.json", "claude"), OwnedBlock("hooks.json", "codex")]);
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => uninstall.Execute(
+        CommandExecution execution = await CaptureAsync(() => uninstall.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = home, Target = "claude" }));
+            new ArbiterUninstallSettings { Path = home, Target = "claude" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         IReadOnlyList<string> targets = new FileUserHostConfigStore(_files).ReadGlobalTargets(home);
@@ -423,14 +435,15 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// should reject it before touching anything.
     /// </summary>
     [Fact]
-    public void Uninstall_PathWithoutProject_ExitsTwoWithScopeError()
+    public async Task Uninstall_PathWithoutProject_ExitsTwoWithScopeError()
     {
         string home = NewDir("uninstall-path-without-project");
 
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Target = "claude", PathOption = home }));
+            new ArbiterUninstallSettings { Target = "claude", PathOption = home },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("--project", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -442,12 +455,13 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// scope. The command must fail with the install-rule id rather than silently picking one.
     /// </summary>
     [Fact]
-    public void Uninstall_GlobalAndProject_ExitsTwoWithKwArbInstall001()
+    public async Task Uninstall_GlobalAndProject_ExitsTwoWithKwArbInstall001()
     {
         ArbiterUninstallCommand command = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Target = "claude", Global = true, Project = true }));
+            new ArbiterUninstallSettings { Target = "claude", Global = true, Project = true },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("KW-ARB-INSTALL-001", execution.Output, StringComparison.Ordinal);
@@ -461,7 +475,7 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
     /// it would look for the block where it is not.
     /// </summary>
     [Fact]
-    public void Uninstall_GlobalCodex_RemovesOnlyTheCodexBlockAndKeepsTheCursorBlock()
+    public async Task Uninstall_GlobalCodex_RemovesOnlyTheCodexBlockAndKeepsTheCursorBlock()
     {
         string home = _home;
         string cursorHooks = Path.Combine(home, ".cursor", "hooks.json");
@@ -477,9 +491,10 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
             ReadGlobalReceipt(home).Blocks.Select(block => block.Target).Order(StringComparer.Ordinal).ToArray());
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => uninstall.Execute(
+        CommandExecution execution = await CaptureAsync(() => uninstall.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = home, Target = "codex" }));
+            new ArbiterUninstallSettings { Path = home, Target = "codex" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains(
@@ -570,9 +585,9 @@ public sealed class ArbiterUninstallCommandInMemoryTests : IDisposable
         return dir;
     }
 
-    private CommandExecution Capture(Func<int> execute)
+    private async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
     {
-        int exitCode = execute();
+        int exitCode = await execute();
         return new CommandExecution(exitCode, _console.Output);
     }
 

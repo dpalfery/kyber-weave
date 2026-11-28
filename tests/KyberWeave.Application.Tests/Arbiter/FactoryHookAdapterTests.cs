@@ -70,6 +70,23 @@ public sealed class FactoryHookAdapterTests
 
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private sealed class ContextualEngine : IContextualHookDecisionEngine
@@ -143,6 +160,53 @@ public sealed class FactoryHookAdapterTests
             SeenPostSessionId = sessionId;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
     }
 
     /// <summary>Records what a stop event asks recovery to close, and decides nothing else.</summary>
@@ -194,6 +258,63 @@ public sealed class FactoryHookAdapterTests
             RecoveredNames = agentNames;
             return 0;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
+        /// <inheritdoc/>
+        public Task<int> RecoverLostReturnAsync(
+            string harness,
+            string? sessionId,
+            IReadOnlyList<string> agentNames,
+            HookContext context,
+            string? agentId = null,
+            string? stopEvent = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RecoverLostReturn(harness, sessionId, agentNames, context, agentId, stopEvent));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
@@ -203,7 +324,7 @@ public sealed class FactoryHookAdapterTests
     private static string Fixture(string name) =>
         ArbiterHookFixtures.Factory(name);
 
-    private (int Exit, string Stdout, string Log) Run(
+    private async Task<(int Exit, string Stdout, string Log)> Run(
         string stdin,
         string? caller,
         IHookDecisionEngine engine,
@@ -215,18 +336,18 @@ public sealed class FactoryHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(FactoryHookAdapter.Token, caller, stdin, stdout, log);
+        int exit = await command.RunAsync(FactoryHookAdapter.Token, caller, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
     [Fact]
-    public void PreDispatch_Deny_WritesDenyShape()
+    public async Task PreDispatch_Deny_WritesDenyShape()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -237,9 +358,9 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
+    public async Task PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
     {
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("pre-task-dispatch.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -257,12 +378,12 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
+    public async Task PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-task-dispatch.json").Replace(
             "\"subagent_type\": \"dev-medium\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
-        (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(stdin, null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
 
@@ -272,7 +393,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_AllowWithRewrite_WritesRewrittenInput()
+    public async Task PreDispatch_AllowWithRewrite_WritesRewrittenInput()
     {
         const string rewritten = """{"prompt":"Hello.","subagent_type":"dev-medium"}""";
         ScriptedEngine engine = new()
@@ -280,7 +401,7 @@ public sealed class FactoryHookAdapterTests
             PreResult = new HookOutcome(HookOutcomeKind.AllowWithRewrite, RewrittenInputJson: rewritten),
         };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -289,11 +410,11 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_TargetAndPrompt_ComeFromSubagentTypeAndPrompt()
+    public async Task PreDispatch_TargetAndPrompt_ComeFromSubagentTypeAndPrompt()
     {
         ContextualEngine engine = new();
 
-        (int exit, _, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, _, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(FactoryHookAdapter.Token, engine.SeenPreHarness);
@@ -303,7 +424,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_MissingTarget_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_MissingTarget_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ContextualEngine engine = new();
@@ -316,7 +437,7 @@ public sealed class FactoryHookAdapterTests
 
         // An event with no sub-agent target passes through untouched (design 1.7):
         // empty stdout, exit 0, and no configuration load.
-        int exit = command.Run(FactoryHookAdapter.Token, null, Fixture("pre-task-no-target.json"), stdout, log);
+        int exit = await command.RunAsync(FactoryHookAdapter.Token, null, Fixture("pre-task-no-target.json"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -325,7 +446,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_NonDispatchTool_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_NonDispatchTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ContextualEngine engine = new();
@@ -338,7 +459,7 @@ public sealed class FactoryHookAdapterTests
 
         // Plan reads stay advisory on Factory: the Read guard does not apply, and
         // a non-Task tool passes through before configuration loads.
-        int exit = command.Run(FactoryHookAdapter.Token, null, Fixture("pre-non-dispatch.json"), stdout, log);
+        int exit = await command.RunAsync(FactoryHookAdapter.Token, null, Fixture("pre-non-dispatch.json"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -346,7 +467,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_LowercaseTaskTool_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_LowercaseTaskTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ContextualEngine engine = new();
@@ -360,7 +481,7 @@ public sealed class FactoryHookAdapterTests
         using StringWriter log = new();
 
         // The dispatch tool matches exactly: lowercase "task" is not a dispatch.
-        int exit = command.Run(FactoryHookAdapter.Token, null, stdin, stdout, log);
+        int exit = await command.RunAsync(FactoryHookAdapter.Token, null, stdin, stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -368,13 +489,13 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Block_WritesAdditionalContext()
+    public async Task PostDispatch_Block_WritesAdditionalContext()
     {
         const string note =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -384,13 +505,13 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Deny_AlsoWritesAdditionalContext()
+    public async Task PostDispatch_Deny_AlsoWritesAdditionalContext()
     {
         const string note =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.Deny, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -400,12 +521,12 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Annotation_WritesAdditionalContext()
+    public async Task PostDispatch_Annotation_WritesAdditionalContext()
     {
         const string note = "The dispatch returned without its report section.";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -415,20 +536,20 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Allow_WritesNothing()
+    public async Task PostDispatch_Allow_WritesNothing()
     {
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void BackgroundLaunch_RecordsNoReturn()
+    public async Task BackgroundLaunch_RecordsNoReturn()
     {
         ContextualEngine engine = new();
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-launched.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-task-launched.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -450,17 +571,17 @@ public sealed class FactoryHookAdapterTests
     [InlineData("\uFEFF")]
     [InlineData("\u2003\u00A0")]
     [InlineData(" \uFEFF ")]
-    public void BackgroundLaunch_AfterLeadingNoise_RecordsNoReturn(string noise)
+    public async Task BackgroundLaunch_AfterLeadingNoise_RecordsNoReturn(string noise)
     {
         ContextualEngine engine = new();
 
-        Run(LaunchReporting(JsonValue.Create(noise + LaunchText())), null, engine);
+        await Run(LaunchReporting(JsonValue.Create(noise + LaunchText())), null, engine);
 
         Assert.Equal(0, engine.PostCalls);
     }
 
     [Fact]
-    public void BackgroundLaunch_InsideAJsonEnvelope_RecordsNoReturn()
+    public async Task BackgroundLaunch_InsideAJsonEnvelope_RecordsNoReturn()
     {
         ContextualEngine engine = new();
         JsonObject envelope = new()
@@ -468,13 +589,13 @@ public sealed class FactoryHookAdapterTests
             ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = LaunchText() }),
         };
 
-        Run(LaunchReporting(envelope), null, engine);
+        await Run(LaunchReporting(envelope), null, engine);
 
         Assert.Equal(0, engine.PostCalls);
     }
 
     [Fact]
-    public void ForegroundReport_ThatQuotesTheLaunchNotice_IsRecorded()
+    public async Task ForegroundReport_ThatQuotesTheLaunchNotice_IsRecorded()
     {
         ContextualEngine engine = new();
         JsonObject envelope = new()
@@ -485,7 +606,7 @@ public sealed class FactoryHookAdapterTests
                 new JsonObject { ["type"] = "text", ["text"] = LaunchText() }),
         };
 
-        Run(LaunchReporting(envelope), null, engine);
+        await Run(LaunchReporting(envelope), null, engine);
 
         Assert.Equal(1, engine.PostCalls);
     }
@@ -510,14 +631,14 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WhenLaunchesNameDifferentTasks_RecordsNothing()
+    public async Task SubagentStop_WhenLaunchesNameDifferentTasks_RecordsNothing()
     {
         string transcript = TwoLaunches("T8", "T9");
         try
         {
             ContextualEngine engine = new();
 
-            Run(SubagentStop(transcript), null, engine);
+            await Run(SubagentStop(transcript), null, engine);
 
             Assert.Equal(0, engine.PostCalls);
         }
@@ -528,7 +649,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WhenHeaderlessLaunchesDiffer_RecordsNothing()
+    public async Task SubagentStop_WhenHeaderlessLaunchesDiffer_RecordsNothing()
     {
         string withHeaders = TwoLaunches("T8", "T9");
         string transcript = TemporaryTranscript(
@@ -540,7 +661,7 @@ public sealed class FactoryHookAdapterTests
             Assert.DoesNotContain("KYBER-ARBITER", _files.ReadAllText(transcript), StringComparison.Ordinal);
             ContextualEngine engine = new();
 
-            Run(SubagentStop(transcript), null, engine);
+            await Run(SubagentStop(transcript), null, engine);
 
             Assert.Equal(0, engine.PostCalls);
         }
@@ -552,14 +673,14 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WhenATaskWasRetried_TakesTheLatestLaunch()
+    public async Task SubagentStop_WhenATaskWasRetried_TakesTheLatestLaunch()
     {
         string transcript = TwoLaunches("T9", "T9");
         try
         {
             ContextualEngine engine = new();
 
-            Run(SubagentStop(transcript), null, engine);
+            await Run(SubagentStop(transcript), null, engine);
 
             Assert.Equal(1, engine.PostCalls);
             Assert.Contains("Second attempt", engine.SeenPostPrompt, StringComparison.Ordinal);
@@ -571,27 +692,27 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WithAnEmptyResult_ReadsTheError()
+    public async Task SubagentStop_WithAnEmptyResult_ReadsTheError()
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
         root["task_result"] = string.Empty;
         root["task_error"] = "RED_EVIDENCE: from-error";
 
-        Run(root.ToJsonString(), null, engine);
+        await Run(root.ToJsonString(), null, engine);
 
         Assert.Equal("RED_EVIDENCE: from-error", engine.SeenPostOutput);
     }
 
     [Fact]
-    public void SubagentStop_OnAFileThatIsNotATranscript_RecordsNothing()
+    public async Task SubagentStop_OnAFileThatIsNotATranscript_RecordsNothing()
     {
         string notTranscript = TemporaryTranscript(ArbiterHookFixtures.Factory(TranscriptFixtureName), ".txt");
         try
         {
             ContextualEngine engine = new();
 
-            Run(SubagentStop(notTranscript), null, engine);
+            await Run(SubagentStop(notTranscript), null, engine);
 
             Assert.Equal(0, engine.PostCalls);
         }
@@ -604,13 +725,13 @@ public sealed class FactoryHookAdapterTests
     [Theory]
     [InlineData("task_name")]
     [InlineData("transcript_path")]
-    public void SubagentStop_WithAWrongTypeField_AllowsAndLogs(string field)
+    public async Task SubagentStop_WithAWrongTypeField_AllowsAndLogs(string field)
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
         root[field] = 5;
 
-        (int exit, string stdout, string log) = Run(root.ToJsonString(), null, engine);
+        (int exit, string stdout, string log) = await Run(root.ToJsonString(), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -621,13 +742,13 @@ public sealed class FactoryHookAdapterTests
     [Theory]
     [InlineData("task_name")]
     [InlineData("transcript_path")]
-    public void SubagentStop_MissingWhatItNeeds_PassesThroughWithoutConfig(string field)
+    public async Task SubagentStop_MissingWhatItNeeds_PassesThroughWithoutConfig(string field)
     {
         ContextualEngine engine = new();
         JsonObject root = JsonNode.Parse(SubagentStop(TranscriptFixture()))!.AsObject();
         root.Remove(field);
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             root.ToJsonString(),
             null,
             engine,
@@ -649,11 +770,11 @@ public sealed class FactoryHookAdapterTests
     private string TranscriptFixture() => TemporaryTranscript(ArbiterHookFixtures.Factory(TranscriptFixtureName));
 
     [Fact]
-    public void SubagentStop_RecordsTheReportAgainstItsDispatch()
+    public async Task SubagentStop_RecordsTheReportAgainstItsDispatch()
     {
         ContextualEngine engine = new();
 
-        (int exit, string stdout, _) = Run(SubagentStop(TranscriptFixture()), null, engine);
+        (int exit, string stdout, _) = await Run(SubagentStop(TranscriptFixture()), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -665,7 +786,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_StripsHeadersForASpecialist_AsItsDispatchRan()
+    public async Task SubagentStop_StripsHeadersForASpecialist_AsItsDispatchRan()
     {
         string transcript = TemporaryTranscript(
             ArbiterHookFixtures.Factory(TranscriptFixtureName).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
@@ -673,7 +794,7 @@ public sealed class FactoryHookAdapterTests
         {
             ContextualEngine engine = new();
 
-            Run(SubagentStop(transcript), null, engine);
+            await Run(SubagentStop(transcript), null, engine);
 
             Assert.Equal("dev-medium", engine.SeenPostTarget);
             Assert.DoesNotContain("KYBER-ARBITER", engine.SeenPostPrompt, StringComparison.Ordinal);
@@ -686,11 +807,11 @@ public sealed class FactoryHookAdapterTests
 
     [Theory]
     [InlineData("no such description")]
-    public void SubagentStop_WithNoMatchingLaunch_RecordsNothing(string taskName)
+    public async Task SubagentStop_WithNoMatchingLaunch_RecordsNothing(string taskName)
     {
         ContextualEngine engine = new();
 
-        (int exit, string stdout, _) = Run(SubagentStop(TranscriptFixture(), taskName), null, engine);
+        (int exit, string stdout, _) = await Run(SubagentStop(TranscriptFixture(), taskName), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
@@ -698,7 +819,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WithNoLaunch_RecoversByTheTranscriptsTargetAgent()
+    public async Task SubagentStop_WithNoLaunch_RecoversByTheTranscriptsTargetAgent()
     {
         // task_name is a description, not an agent. The dispatch's target is what a stop event can identify, and
         // the transcript's Task call is where the dispatch path reads it from too.
@@ -707,7 +828,7 @@ public sealed class FactoryHookAdapterTests
         {
             RecoveryEngine engine = new();
 
-            Run(SubagentStop(transcript), null, engine);
+            await Run(SubagentStop(transcript), null, engine);
 
             Assert.Equal("factory", engine.RecoveredHarness);
             Assert.Equal("session-factory-capture", engine.RecoveredSession);
@@ -720,14 +841,14 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WithADescriptionNoTaskUses_RecoversNothing()
+    public async Task SubagentStop_WithADescriptionNoTaskUses_RecoversNothing()
     {
         string transcript = TemporaryTranscript(FirstTranscriptLine());
         try
         {
             RecoveryEngine engine = new();
 
-            Run(SubagentStop(transcript, "no such description"), null, engine);
+            await Run(SubagentStop(transcript, "no such description"), null, engine);
 
             Assert.Empty(engine.RecoveredNames);
         }
@@ -745,18 +866,18 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void SubagentStop_WithAnUnreadableTranscript_RecordsNothing()
+    public async Task SubagentStop_WithAnUnreadableTranscript_RecordsNothing()
     {
         ContextualEngine engine = new();
 
-        (int exit, _, _) = Run(SubagentStop("/nonexistent/transcript.jsonl"), null, engine);
+        (int exit, _, _) = await Run(SubagentStop("/nonexistent/transcript.jsonl"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(0, engine.PostCalls);
     }
 
     [Fact]
-    public void Pairing_NoCallId_PassesNullCallIdForDigestPairing()
+    public async Task Pairing_NoCallId_PassesNullCallIdForDigestPairing()
     {
         ContextualEngine engine = new();
 
@@ -764,8 +885,8 @@ public sealed class FactoryHookAdapterTests
         // the engine receives a null call id for both phases and the ledger
         // pairs the return to its dispatch by pair-digest. The documented
         // session_id rides along for the ledger's scoping.
-        (int preExit, _, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
-        (int postExit, _, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int preExit, _, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int postExit, _, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, preExit);
         Assert.Equal(0, postExit);
@@ -777,11 +898,11 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_AllowsAndLogs()
+    public async Task InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, string log) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -790,11 +911,11 @@ public sealed class FactoryHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_OnReturn_AlsoAllowsAndLogs()
+    public async Task InternalError_OnReturn_AlsoAllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPost = true };
 
-        (int exit, string stdout, string log) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, string log) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);

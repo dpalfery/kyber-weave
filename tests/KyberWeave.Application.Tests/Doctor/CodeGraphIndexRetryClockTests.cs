@@ -18,24 +18,29 @@ public sealed class CodeGraphIndexRetryClockTests
 
     private string LockDirectory => Path.Combine(_files.Root, "kw", "locks");
 
-    private static readonly ProcessResult HeldIndexLock = new(
-        1,
-        "Syncing CodeGraph\n",
-        "Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
-        + "CodeGraph database is locked by another process (PID 91106).\n");
-
     [Fact]
     public async Task ARetryWaitsOnTheTimeProviderNotOnTheWallClock()
     {
         FakeTimeProvider clock = new();
         int syncs = 0;
-        ScriptedProcessExecutor executor = new(info =>
-        {
-            if (info.FileName == "codegraph" && info.ArgumentList.Contains("sync"))
-                return ++syncs == 1 ? HeldIndexLock : new ProcessResult(0, string.Empty, string.Empty);
+        ScriptedProcessRunner executor = new ScriptedProcessRunner()
+            .Script("codegraph", request =>
+            {
+                if (request.Arguments.Contains("sync"))
+                {
+                    return ++syncs == 1
+                        ? new ProcessRunResult(1, string.Empty, TimedOut: false)
+                        {
+                            StandardOutput = "Syncing CodeGraph\n",
+                            StandardError = "Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
+                                + "CodeGraph database is locked by another process (PID 91106).\n"
+                        }
+                        : new ProcessRunResult(0, string.Empty, TimedOut: false);
+                }
 
-            return new ProcessResult(0, string.Empty, string.Empty);
-        });
+                return new ProcessRunResult(0, string.Empty, TimedOut: false);
+            })
+            .Script("git", new ProcessRunResult(0, string.Empty, TimedOut: false));
         CodeGraphIndexProvisioner provisioner = new(
             new FakeDoctorFileSystem().WithDirectory(Path.Combine(Root, ".codegraph")),
             new FreeWorkspace(),
@@ -44,7 +49,7 @@ public sealed class CodeGraphIndexRetryClockTests
             clock);
         DoctorOptions options = DoctorOptions.Defaults with { HeldLockRetryPauses = [TimeSpan.FromMinutes(5)] };
 
-        Task<CodeGraphOutcome> run = Task.Run(() => provisioner.Run(Root, DoctorMode.Ensure, options, executor, LockDirectory));
+        Task<CodeGraphOutcome> run = provisioner.RunAsync(Root, DoctorMode.Ensure, options, executor, LockDirectory);
         await WaitUntilAsync(() => Volatile.Read(ref syncs) == 1);
         await Task.Delay(100);
 
@@ -69,11 +74,11 @@ public sealed class CodeGraphIndexRetryClockTests
 
     private sealed class FreeWorkspace : ICodeGraphIndexWorkspace
     {
-        public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
-        {
-            failure = null;
-            return new Handle();
-        }
+        public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+            string path,
+            TimeSpan wait,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CodeGraphIndexLockAttempt(new Handle(), null));
 
         public bool IsWritable(string directory) => true;
 

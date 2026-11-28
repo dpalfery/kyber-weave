@@ -42,11 +42,11 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     public void Dispose() => _console.Dispose();
 
     [Fact]
-    public void Execute_ScaffoldFailure_ReportsItAndReturnsOne()
+    public async Task Execute_ScaffoldFailure_ReportsItAndReturnsOne()
     {
         _scaffolder.Failure = new InvalidDataException("KW-CONFIG-001 broken");
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoSkill = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoSkill = true });
 
         Assert.Equal(1, exit);
         Assert.Equal("Could not scaffold: KW-CONFIG-001 broken\n", Output());
@@ -54,9 +54,9 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ScaffoldWithoutSkillOrWiringCheck_PrintsTheReportAndTheNextSteps()
+    public async Task Execute_ScaffoldWithoutSkillOrWiringCheck_PrintsTheReportAndTheNextSteps()
     {
-        int exit = Run(new DocsInitSettings { Path = Root, NoSkill = true, NoMcpCheck = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoSkill = true, NoMcpCheck = true });
 
         Assert.Equal(0, exit);
         Assert.Equal(
@@ -73,20 +73,20 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_RelativePath_IsResolvedAgainstTheWorkingDirectoryTheEnvironmentNames()
+    public async Task Execute_RelativePath_IsResolvedAgainstTheWorkingDirectoryTheEnvironmentNames()
     {
-        _ = Run(new DocsInitSettings { Path = "repo", NoSkill = true, NoMcpCheck = true, Provision = true });
+        _ = await RunAsync(new DocsInitSettings { Path = "repo", NoSkill = true, NoMcpCheck = true, Provision = true });
 
         DoctorRun run = Assert.Single(_doctor.Runs);
         Assert.Equal(Root, run.Root);
     }
 
     [Fact]
-    public void Execute_Skill_RunsApmInTheRepositoryRootWithTheFiveMinuteBound()
+    public async Task Execute_Skill_RunsApmInTheRepositoryRootWithTheFiveMinuteBound()
     {
         _ = _processes.Script("apm", new ProcessRunResult(0, string.Empty, TimedOut: false), "install", "dpalfery/kyber-weave", "--target", "CLAUDE");
 
-        int exit = Run(new DocsInitSettings { Path = "repo", Target = "CLAUDE", NoMcpCheck = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = "repo", Target = "CLAUDE", NoMcpCheck = true });
 
         Assert.Equal(0, exit);
         ProcessRunRequest call = Assert.Single(_processes.Calls);
@@ -97,14 +97,14 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ApmExitsNonZero_ReportsItAsSkippedWithTheManualCommand()
+    public async Task Execute_ApmExitsNonZero_ReportsItAsSkippedWithTheManualCommand()
     {
         _ = _processes.Script(
             "apm",
             new ProcessRunResult(3, "out", TimedOut: false) { StandardOutput = "out", StandardError = " boom " },
             "install", "dpalfery/kyber-weave", "--target", "CLAUDE");
 
-        int exit = Run(new DocsInitSettings { Path = Root, Target = "CLAUDE", NoMcpCheck = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, Target = "CLAUDE", NoMcpCheck = true });
 
         Assert.Equal(0, exit);
         Assert.Contains("skipped  kyber-docs-authoring skill — apm exited 3: boom.", Output(), StringComparison.Ordinal);
@@ -112,34 +112,34 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ApmNotInstalled_ReportsItAsSkipped()
+    public async Task Execute_ApmNotInstalled_ReportsItAsSkipped()
     {
         _ = _processes.WithMissingProgram("apm");
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoMcpCheck = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoMcpCheck = true });
 
         Assert.Equal(0, exit);
         Assert.Contains("APM is not installed or not on PATH.", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_ApmTimesOut_ReportsItAsSkipped()
+    public async Task Execute_ApmTimesOut_ReportsItAsSkipped()
     {
         _ = _processes.ScriptTimeout("apm");
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoMcpCheck = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoMcpCheck = true });
 
         Assert.Equal(0, exit);
         Assert.Contains("apm did not finish and was stopped after the time limit.", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_RetiredSkillDirectory_IsWarnedAboutOncePerTarget()
+    public async Task Execute_RetiredSkillDirectory_IsWarnedAboutOncePerTarget()
     {
         _files.CreateDirectory("/kw/work/repo/.claude/skills/kyber-weave-docs");
         _files.CreateDirectory("/kw/work/repo/.agents/skills/doc-corpus-integrity-review");
 
-        int exit = Run(new DocsInitSettings { Path = Root, Target = "claude,agent-skills,other", NoSkill = true, NoMcpCheck = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, Target = "claude,agent-skills,other", NoSkill = true, NoMcpCheck = true });
 
         Assert.Equal(0, exit);
         string output = Output();
@@ -149,48 +149,49 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NoRetiredSkillDirectory_PrintsNoWarning()
+    public async Task Execute_NoRetiredSkillDirectory_PrintsNoWarning()
     {
-        _ = Run(new DocsInitSettings { Path = Root, Target = "CLAUDE", NoSkill = true, NoMcpCheck = true });
+        _ = await RunAsync(new DocsInitSettings { Path = Root, Target = "CLAUDE", NoSkill = true, NoMcpCheck = true });
 
         Assert.DoesNotContain("Retired skill", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_Provision_HandsTheDoctorTheEnvironmentsVariablesAndAProcessSeamBoundedAtTenMinutes()
+    public async Task Execute_Provision_HandsTheDoctorTheEnvironmentsVariablesAndAProcessSeamBoundedAtTenMinutes()
     {
         _variables["KW_PROBE"] = "from-the-fake";
         _ = _processes.Script("probe", new ProcessRunResult(0, string.Empty, TimedOut: false));
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoSkill = true, NoMcpCheck = true, Provision = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoSkill = true, NoMcpCheck = true, Provision = true });
 
         Assert.Equal(0, exit);
         DoctorRun run = Assert.Single(_doctor.Runs);
         Assert.Equal(DoctorMode.Provision, run.Mode);
         Assert.Equal("from-the-fake", run.Environment("KW_PROBE"));
         Assert.Null(run.Environment("KW_ABSENT"));
-        _ = run.Executor.Run(new ProcessStartInfo("probe"), string.Empty);
+        IProcessRunner runner = Assert.IsAssignableFrom<IProcessRunner>(run.Executor);
+        _ = await runner.RunAsync(new ProcessRunRequest { Program = "probe", Arguments = [] }, CancellationToken.None);
         ProcessRunRequest call = Assert.Single(_processes.Calls);
         Assert.Equal(TimeSpan.FromSeconds(600), call.Timeout);
     }
 
     [Fact]
-    public void Execute_BrokenConfiguration_ReturnsOneAfterTheScaffold()
+    public async Task Execute_BrokenConfiguration_ReturnsOneAfterTheScaffold()
     {
         WriteConfig("ontology: [not, a, mapping");
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoSkill = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoSkill = true });
 
         Assert.Equal(1, exit);
         Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_DeclaredServersWithNoFix_PrintsTheWiringSectionAndReturnsZero()
+    public async Task Execute_DeclaredServersWithNoFix_PrintsTheWiringSectionAndReturnsZero()
     {
         WriteConfig(McpDeclarationBlockWriter.DeclarationYaml);
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoSkill = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoSkill = true });
 
         Assert.Equal(0, exit);
         Assert.Contains("MCP wiring:", Output(), StringComparison.Ordinal);
@@ -199,12 +200,12 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void Execute_FixesOnAConsoleThatCannotBeAsked_PrintsTheReportAndWritesNothing()
+    public async Task Execute_FixesOnAConsoleThatCannotBeAsked_PrintsTheReportAndWritesNothing()
     {
         WriteConfig(McpDeclarationBlockWriter.DeclarationYaml);
         _wiring.Fixes = [new McpWiringFix("claude", "/kw/work/repo/.mcp.json", ["kyber-weave"], Create: true)];
 
-        int exit = Run(new DocsInitSettings { Path = Root, NoSkill = true });
+        int exit = await RunAsync(new DocsInitSettings { Path = Root, NoSkill = true });
 
         Assert.Equal(0, exit);
         Assert.False(_wiring.Repaired);
@@ -234,13 +235,13 @@ public sealed class DocsInitCommandSeamTests : IDisposable
         _files.WriteAllText("/kw/work/repo/.kyber-weave/kyber-weave.yml", yaml);
     }
 
-    private int Run(DocsInitSettings settings)
+    private Task<int> RunAsync(DocsInitSettings settings)
     {
         FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory, readVariable: name => _variables.GetValueOrDefault(name));
         FakePathResolver paths = new(_files);
         FileKyberWeaveConfigRepository configs = new(new FileRepositoryTreeProbe(_files, paths, environment), _files, paths, environment);
         DocsInitCommand command = new(_wiring, _scaffolder, _doctor, configs, _console, _files, paths, environment, _processes);
-        return command.Execute(null!, settings, CancellationToken.None);
+        return command.ExecuteAsync(null!, settings, CancellationToken.None);
     }
 
     private string Output() => _console.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -249,17 +250,25 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     {
         public Exception? Failure { get; set; }
 
-        public ScaffoldResult Scaffold(
+        public Task<ScaffoldResult> ScaffoldAsync(
             string repoRoot,
             string? docsRoot = null,
             string owner = "unassigned",
             bool force = false,
             bool kyberStandards = false,
             bool reviewGates = true,
-            IReadOnlyList<string>? standards = null) =>
-            Failure is not null
-                ? throw Failure
-                : new ScaffoldResult("docs", DocsRootSource.Configuration, [new ScaffoldedFile("docs/catalog.md", ScaffoldOutcome.Created)]);
+            IReadOnlyList<string>? standards = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Failure is not null)
+                throw Failure;
+
+            return Task.FromResult(new ScaffoldResult(
+                "docs",
+                DocsRootSource.Configuration,
+                [new ScaffoldedFile("docs/catalog.md", ScaffoldOutcome.Created)]));
+        }
     }
 
     private sealed class StubWiring : IMcpWiringService

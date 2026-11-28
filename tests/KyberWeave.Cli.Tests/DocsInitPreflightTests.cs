@@ -20,17 +20,20 @@ public sealed class DocsInitPreflightTests
     [Theory]
     [InlineData(null)]
     [InlineData("handbook")]
-    public void CliReturnsOneAndTheConfigDiagnosticWithoutWriting(string? docsRoot)
+    public async Task CliReturnsOneAndTheConfigDiagnosticWithoutWriting(string? docsRoot)
     {
         const string yaml = "ontology: [unclosed";
         _host.Write(".kyber-weave/kyber-weave.yml", yaml);
 
-        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = DocsInitCommand.TryScaffold(_host.Scaffolder, new DocsInitSettings
-        {
-            Path = _host.Root,
-            DocsRoot = docsRoot,
-            NoSkill = true
-        });
+        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = await DocsInitCommand.TryScaffoldAsync(
+            _host.Scaffolder,
+            new DocsInitSettings
+            {
+                Path = _host.Root,
+                DocsRoot = docsRoot,
+                NoSkill = true
+            },
+            CancellationToken.None);
 
         Assert.Equal(1, attempt.ExitCode);
         Assert.Null(attempt.Result);

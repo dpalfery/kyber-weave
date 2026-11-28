@@ -100,9 +100,10 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     private readonly IFileSystem _files;
     private readonly IProcessEnvironment _environment;
     private readonly IProcessRunner _processes;
-    private readonly IProcessExecutor _executor;
-    private readonly Action<TimeSpan> _pause;
-    private readonly Lock _gate = new();
+    private readonly IProcessRunner _executor;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pause;
+    /// <summary>1 while this process runs a refresh; a second caller sees it set and answers with the last verdict.</summary>
+    private int _refreshing;
 
     private DateTimeOffset? _lastAttempt;
     private CodeGraphGate _last = CodeGraphGate.Clear;
@@ -129,8 +130,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// whichever binary this machine happens to have installed.
     /// </param>
     /// <param name="pause">
-    /// Waits between two sync attempts when CodeGraph's own lock is held, or null to block the
-    /// calling thread on <paramref name="time"/>. A test supplies one so it does not wait at all.
+    /// Waits between two sync attempts when CodeGraph's own lock is held, or null to wait on
+    /// <paramref name="time"/>. A test supplies one so it does not wait at all.
     /// </param>
     public CodeGraphFreshness(
         string repositoryRoot,
@@ -142,9 +143,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         IPathResolver paths,
         IProcessEnvironment environment,
         IProcessRunner processes,
-        IBoundedProcessExecutor bounded,
-        IProcessExecutor? executor = null,
-        Action<TimeSpan>? pause = null)
+        IProcessRunner? executor = null,
+        Func<TimeSpan, CancellationToken, Task>? pause = null)
     {
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(config);
@@ -153,7 +153,6 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(processes);
-        ArgumentNullException.ThrowIfNull(bounded);
         _repositoryRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _refreshEnabled = refreshEnabled;
         _provisioner = provisioner;
@@ -162,8 +161,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         _files = files;
         _environment = environment;
         _processes = processes;
-        _executor = executor ?? new BoundedExecutor(bounded, RefreshBound);
-        _pause = pause ?? (wait => Task.Delay(wait, time).GetAwaiter().GetResult());
+        _executor = executor ?? processes;
+        _pause = pause ?? ((wait, cancellationToken) => Task.Delay(wait, time, cancellationToken));
     }
 
     /// <summary>
@@ -171,7 +170,10 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// CodeGraph failed in a way the caller has to be told about.
     /// </summary>
     /// <param name="resolverFactory">Builds the CodeGraph port the docs tools answer from.</param>
-    public CodeGraphGate Evaluate(Func<ICodeGraphResolver> resolverFactory)
+    /// <param name="cancellationToken">Cancels the wait for this process's own refresh and the CodeGraph child.</param>
+    public async Task<CodeGraphGate> EvaluateAsync(
+        Func<ICodeGraphResolver> resolverFactory,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(resolverFactory);
 
@@ -180,7 +182,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         // A refresh already under way in this process is answered the way one under way in
         // another process is: with the last verdict, rather than by waiting on this process's own
         // index work before the caller can have its answer.
-        if (!_gate.TryEnter()) return _last;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0) return _last;
 
         try
         {
@@ -190,7 +193,8 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
 
             try
             {
-                _last = Refresh(resolverFactory, out bool lockWasHeld);
+                (CodeGraphGate verdict, bool lockWasHeld) = await RefreshAsync(resolverFactory, cancellationToken).ConfigureAwait(false);
+                _last = verdict;
 
                 // A verdict that only says another process held the index is not one to keep: the lock may be
                 // gone by the next call, so that call looks again.
@@ -206,7 +210,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         }
         finally
         {
-            _gate.Exit();
+            Volatile.Write(ref _refreshing, 0);
         }
     }
 
@@ -227,12 +231,14 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         }
     }
 
-    private CodeGraphGate Refresh(Func<ICodeGraphResolver> resolverFactory, out bool lockWasHeld)
+    private async Task<(CodeGraphGate Verdict, bool LockWasHeld)> RefreshAsync(
+        Func<ICodeGraphResolver> resolverFactory,
+        CancellationToken cancellationToken)
     {
-        lockWasHeld = false;
+        bool lockWasHeld = false;
         KyberWeaveConfigLoadResult loaded = _config.TryLoad(_repositoryRoot);
         if (loaded is not { Success: true, Config: not null })
-            return CodeGraphGate.Clear;
+            return (CodeGraphGate.Clear, lockWasHeld);
 
         // The refresh and the failure apply only where the repository declares CodeGraph. The
         // scaffolded declaration leaves the CodeGraph entry commented out, so a repository that
@@ -240,41 +246,41 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         // had before this refresh existed — no index lock, no TOOL_FAILURE, no warning line — and
         // other repositories keep working.
         if (!loaded.Config.Mcp.DeclaresCodeGraph)
-            return CodeGraphGate.Clear;
+            return (CodeGraphGate.Clear, lockWasHeld);
 
         bool stops = loaded.Config.StopsOnToolFailure;
         string lockDirectory = _environment.TempDirectory;
 
-        if (!WaitForNoIndexLockFile())
+        if (!await WaitForNoIndexLockFileAsync(cancellationToken).ConfigureAwait(false))
         {
             lockWasHeld = true;
-            return IndexLockFileRemained(stops);
+            return (IndexLockFileRemained(stops), lockWasHeld);
         }
 
         DoctorOptions options = new(RefreshBound, RefreshBound, CodeGraphExecutable, "kyber-weave-mcp");
-        DoctorCheck provisioned = ProvisionPastAHeldIndexLock(options, lockDirectory);
+        DoctorCheck provisioned = await ProvisionPastAHeldIndexLockAsync(options, lockDirectory, cancellationToken).ConfigureAwait(false);
 
         if (!provisioned.Passed)
         {
             if (CodeGraphIndexRules.IsBusy(provisioned))
             {
                 lockWasHeld = true;
-                return CodeGraphGate.Advisory(BusyNote);
+                return (CodeGraphGate.Advisory(BusyNote), lockWasHeld);
             }
 
             if (CodeGraphIndexRules.IsIndexLockHeld(provisioned))
             {
                 lockWasHeld = true;
-                return CodeGraphGate.Advisory(IndexLockHeldNote);
+                return (CodeGraphGate.Advisory(IndexLockHeldNote), lockWasHeld);
             }
 
-            return Failure(stops, provisioned.Reason, provisioned.Fix);
+            return (Failure(stops, provisioned.Reason, provisioned.Fix), lockWasHeld);
         }
 
         ICodeGraphResolver resolver = resolverFactory();
-        return resolver.IsAvailable
+        return (resolver.IsAvailable
             ? CodeGraphGate.Clear
-            : Failure(stops, resolver.UnavailableReason, null);
+            : Failure(stops, resolver.UnavailableReason, null), lockWasHeld);
     }
 
     /// <summary>
@@ -283,7 +289,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// whether the process it names is running.
     /// </summary>
     /// <returns>True as soon as a look finds no lock file; false when the last look still finds it.</returns>
-    private bool WaitForNoIndexLockFile()
+    private async Task<bool> WaitForNoIndexLockFileAsync(CancellationToken cancellationToken)
     {
         string lockFile = CodeGraphIndexRules.IndexLockPathFor(_repositoryRoot);
         foreach (TimeSpan wait in CodeGraphIndexRules.LockFileWaits)
@@ -291,7 +297,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             if (!_files.FileExists(lockFile))
                 return true;
 
-            _pause(wait);
+            await _pause(wait, cancellationToken).ConfigureAwait(false);
         }
 
         return !_files.FileExists(lockFile);
@@ -362,25 +368,37 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// thing wrong is that CodeGraph's own index lock is held. Any other result is returned at once.
     /// A retry looks for the lock file first, like every sync, and does not sync while it exists.
     /// </summary>
-    private DoctorCheck ProvisionPastAHeldIndexLock(DoctorOptions options, string lockDirectory)
+    private async Task<DoctorCheck> ProvisionPastAHeldIndexLockAsync(
+        DoctorOptions options,
+        string lockDirectory,
+        CancellationToken cancellationToken)
     {
         string lockFile = CodeGraphIndexRules.IndexLockPathFor(_repositoryRoot);
-        DoctorCheck provisioned = Provision(options, lockDirectory);
+        DoctorCheck provisioned = await ProvisionAsync(options, lockDirectory, cancellationToken).ConfigureAwait(false);
         foreach (TimeSpan pause in options.HeldLockRetryPauses)
         {
             if (!CodeGraphIndexRules.IsIndexLockHeld(provisioned))
                 break;
 
-            _pause(pause);
+            await _pause(pause, cancellationToken).ConfigureAwait(false);
             if (!_files.FileExists(lockFile))
-                provisioned = Provision(options, lockDirectory);
+                provisioned = await ProvisionAsync(options, lockDirectory, cancellationToken).ConfigureAwait(false);
         }
 
         return provisioned;
     }
 
-    private DoctorCheck Provision(DoctorOptions options, string lockDirectory) =>
-        _provisioner.Provision(_repositoryRoot, options, _executor, lockDirectory, TimeSpan.Zero);
+    private async Task<DoctorCheck> ProvisionAsync(
+        DoctorOptions options,
+        string lockDirectory,
+        CancellationToken cancellationToken) =>
+        await _provisioner.ProvisionAsync(
+            _repositoryRoot,
+            options,
+            _executor,
+            lockDirectory,
+            TimeSpan.Zero,
+            cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// The failure a tool reports under <paramref name="stops"/>, and the warning it carries
@@ -419,16 +437,4 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         fix.Contains("kyber-weave doctor", StringComparison.Ordinal)
             ? fix
             : fix + "; or run: " + DoctorRemedy;
-
-    /// <summary>
-    /// Runs one CodeGraph child, bounded by the refresh budget, through the repository's
-    /// deadlock-safe runner. The provisioner takes a process executor so a caller can bound and
-    /// fake it; the production implementation the CLI uses is the CLI's, so this server carries
-    /// the same three-line shape rather than a second way to start a process.
-    /// </summary>
-    private sealed class BoundedExecutor(IBoundedProcessExecutor bounded, TimeSpan timeout) : IProcessExecutor
-    {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            bounded.Run(startInfo, standardInput, timeout);
-    }
 }

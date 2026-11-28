@@ -18,12 +18,13 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refute.spawn refutations. Pass the trigger the event classifies as and the asserted facts: target, plan-file, task, prompt, the lens names as lens, the findings to be refuted as finding, the phase and the output. A lens call or a finding call needs no target: the tool routes both to review-lens and synthesizes the routing header block (KYBER-ARBITER, LENS, REFUTE) itself, exactly as the hook path would see it. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
         """)]
-    public string Evaluate(
+    public async Task<string> EvaluateAsync(
         [Description("The trigger the event classifies as, for example delegate, delegate.returned, lens.spawn, refute.spawn or investigate.")]
         string trigger,
         [Description("The asserted facts of the event.")]
-        ArbiterFacts facts)
-        => service.Evaluate(trigger, facts);
+        ArbiterFacts facts,
+        CancellationToken cancellationToken = default)
+        => await service.EvaluateAsync(trigger, facts, cancellationToken).ConfigureAwait(false);
 
     [McpServerTool(Name = "arbiter_list_effective_rules_by_trigger", ReadOnly = true, OpenWorld = false)]
     [Description("""
@@ -38,8 +39,8 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Reports whether the Arbiter is ready for this repository: the root it answers for, the rule-set hash and rule count, the provider, and whether its key resolves. Use when checking configuration before relying on arbiter_evaluate_agent_dispatch_or_return, or when a dispatch failed closed on a configuration or key error. The key value is never reported, only whether one was found.
         """)]
-    public string Status()
-        => service.Status();
+    public Task<string> StatusAsync(CancellationToken cancellationToken = default)
+        => service.StatusAsync(cancellationToken);
 
     /// <summary>
     /// Lists the sections of one repository document a task needs. Returns JSON with <c>sections</c>, <c>failedSafe</c>
@@ -52,14 +53,15 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Lists the sections of one repository markdown document that a task needs, each with its id, title and line range, so a worker reads only the sections that bear on the task. Fails safe: when the Arbiter is not configured, unsure, or its provider fails, every section is listed. Returns JSON; a missing document is an error.
         """)]
-    public string SelectRelevantDocumentSections(
+    public async Task<string> SelectRelevantDocumentSectionsAsync(
         [Description("The repository-relative path of the markdown document.")]
         string path,
         [Description("The task the worker is about to do, in plain words.")]
         string task,
         [Description("The most sections to list. Omit to list every selected section.")]
-        int? maxSections = null)
-        => service.SelectRelevantDocumentSections(path, task, maxSections);
+        int? maxSections = null,
+        CancellationToken cancellationToken = default)
+        => await service.SelectRelevantDocumentSectionsAsync(path, task, maxSections, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Classifies one bot review comment as <c>real</c>, <c>nitpick</c> or <c>already-fixed</c> against the code at the
@@ -77,7 +79,7 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Classifies one bot review comment as real, nitpick or already-fixed, judging the code at the cited line as it is now. Use before fixing a bot review comment, to skip one that is already fixed or a nitpick. Fails safe to real: any answer that is unsure, below the floor, or not obtained keeps the comment real. Each call records a decision and returns its id. While the rule is in shadow (log-only), class is always real and wouldClass gives the class the model would have returned; shadow true says so. With summary true, the body is a bot's PR-level summary and each row of its findings table is classified; the answer carries items, each with the same fields. Returns JSON.
         """)]
-    public string ClassifyBotReviewComment(
+    public async Task<string> ClassifyBotReviewCommentAsync(
         [Description("The repository-relative path the comment cites. Ignored when summary is true.")]
         string path,
         [Description("The 1-based line the comment cites. Ignored when summary is true.")]
@@ -89,6 +91,7 @@ public sealed class ArbiterTools(IArbiterServeService service)
         [Description("True when the body is a PR-level summary with a findings table.")]
         bool summary = false,
         [Description("The login that posted the summary, when known.")]
-        string? author = null)
-        => service.ClassifyBotReviewComment(path, line, body, commitSha, summary, author);
+        string? author = null,
+        CancellationToken cancellationToken = default)
+        => await service.ClassifyBotReviewCommentAsync(path, line, body, commitSha, summary, author, cancellationToken).ConfigureAwait(false);
 }

@@ -80,7 +80,7 @@ public sealed class McpDocsGateToolsTests
         MethodInfo method = FindMcpTool(toolName);
         McpServerToolAttribute attribute = method.GetCustomAttribute<McpServerToolAttribute>()!;
 
-        Assert.Equal(typeof(string), method.ReturnType);
+        Assert.Equal(typeof(Task<string>), method.ReturnType);
         Assert.True(attribute.ReadOnly, $"{toolName} must declare ReadOnly so clients see readOnlyHint.");
         Assert.False(attribute.OpenWorld, $"{toolName} reads a local corpus and must not claim an open world.");
 
@@ -123,15 +123,15 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void DocsValidateFailsOnUngovernedMarkdownWithSpec001AndFixtureProvenance()
+    public async Task DocsValidateFailsOnUngovernedMarkdownWithSpec001AndFixtureProvenance()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         _host.Files.WriteAllText(
             Path.Combine(root, "docs", "ungoverned.md"),
             "# No frontmatter\n\nThis file is not governed.\n");
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeValidate(tools, false, charBudget: DocumentIndex.DefaultCharBudget);
+        string response = await InvokeValidateAsync(tools, false, charBudget: DocumentIndex.DefaultCharBudget);
 
         ProvenanceLine provenance = ParseProvenance(response);
         Assert.Equal(Path.GetFullPath(root), Path.GetFullPath(provenance.Root));
@@ -140,13 +140,13 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void DocsValidatePassesConformantCorpusWhenMergeReadyIsFalse()
+    public async Task DocsValidatePassesConformantCorpusWhenMergeReadyIsFalse()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         AddActivePlan(root);
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeValidate(tools, false, charBudget: DocumentIndex.DefaultCharBudget);
+        string response = await InvokeValidateAsync(tools, false, charBudget: DocumentIndex.DefaultCharBudget);
 
         Assert.Equal(Path.GetFullPath(root), Path.GetFullPath(ParseProvenance(response).Root));
         Assert.StartsWith("result: pass", ResultLine(response), StringComparison.Ordinal);
@@ -154,14 +154,14 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void DocsValidateReportsLifecycle003OnlyWhenMergeReadyIsTrue()
+    public async Task DocsValidateReportsLifecycle003OnlyWhenMergeReadyIsTrue()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         AddActivePlan(root);
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
-        string withoutMergeReady = InvokeValidate(tools, false, charBudget: DocumentIndex.DefaultCharBudget);
-        string withMergeReady = InvokeValidate(tools, true, charBudget: DocumentIndex.DefaultCharBudget);
+        string withoutMergeReady = await InvokeValidateAsync(tools, false, charBudget: DocumentIndex.DefaultCharBudget);
+        string withMergeReady = await InvokeValidateAsync(tools, true, charBudget: DocumentIndex.DefaultCharBudget);
 
         Assert.DoesNotContain(OpenWorkValidator.OpenWork, withoutMergeReady, StringComparison.Ordinal);
         Assert.StartsWith("result: pass", ResultLine(withoutMergeReady), StringComparison.Ordinal);
@@ -175,14 +175,14 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void DocsDriftFailsOnUnresolvedCodeRefWithPathAndHint()
+    public async Task DocsDriftFailsOnUnresolvedCodeRefWithPathAndHint()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         const string relativePath = "docs/reference/drift-target.md";
         WriteDriftDocument(root, relativePath, "MissingSymbolForDriftGate", null);
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeDrift(tools, DocumentIndex.DefaultCharBudget);
+        string response = await InvokeDriftAsync(tools, DocumentIndex.DefaultCharBudget);
 
         Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
         Assert.Contains(DocDriftLinter.UnresolvedCodeRef, response, StringComparison.Ordinal);
@@ -191,13 +191,13 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void DocsDriftFailsWhenResolverIsUnavailableRatherThanPassing()
+    public async Task DocsDriftFailsWhenResolverIsUnavailableRatherThanPassing()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         WriteDriftDocument(root, "docs/reference/drift-target.md", "AnySymbol", null);
 
         DocsTools tools = CreateTools(root, () => new UnavailableCodeGraphResolver());
-        string response = InvokeDrift(tools, DocumentIndex.DefaultCharBudget);
+        string response = await InvokeDriftAsync(tools, DocumentIndex.DefaultCharBudget);
 
         Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
         Assert.Contains("Drift cannot be verified", response, StringComparison.Ordinal);
@@ -205,9 +205,9 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void DocsDriftPassesWithWarning003StillPresent()
+    public async Task DocsDriftPassesWithWarning003StillPresent()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         const string sourceRoot = "1-Presentation/Api";
         _host.Files.CreateDirectory(Path.Combine(root, sourceRoot.Replace('/', Path.DirectorySeparatorChar)));
         WriteDriftDocument(
@@ -220,16 +220,16 @@ public sealed class McpDocsGateToolsTests
             ("IndexedSymbol", CodeGraphPortTestsNode("IndexedSymbol", "2-Application/Elsewhere/Svc.cs", 1)));
 
         DocsTools tools = CreateTools(root, () => resolver);
-        string response = InvokeDrift(tools, DocumentIndex.DefaultCharBudget);
+        string response = await InvokeDriftAsync(tools, DocumentIndex.DefaultCharBudget);
 
         Assert.StartsWith("result: pass", ResultLine(response), StringComparison.Ordinal);
         Assert.Contains("KW-DOC-DRIFT-003", response, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TruncatedGateResponseLeadsWithProvenanceAndResultThenErrorsBeforeWarnings()
+    public async Task TruncatedGateResponseLeadsWithProvenanceAndResultThenErrorsBeforeWarnings()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         for (int index = 0; index < 6; index++)
             WriteDriftDocument(
                 root,
@@ -246,7 +246,7 @@ public sealed class McpDocsGateToolsTests
             ("KnownSymbol", CodeGraphPortTestsNode("KnownSymbol", "src/KnownSymbol.cs", 1)));
 
         DocsTools tools = CreateTools(root, () => resolver);
-        string response = InvokeDrift(tools, 1500);
+        string response = await InvokeDriftAsync(tools, 1500);
 
         ParseProvenance(response);
         string resultLine = ResultLine(response);
@@ -292,16 +292,16 @@ public sealed class McpDocsGateToolsTests
     }
 
     [Fact]
-    public void MinimumCharBudgetStillShowsFirstFindingRuleIdAndOmittedCount()
+    public async Task MinimumCharBudgetStillShowsFirstFindingRuleIdAndOmittedCount()
     {
-        string root = CreateScaffoldedRoot();
+        string root = await CreateScaffoldedRootAsync();
         const string relativePath = "docs/reference/budget-floor.md";
         string longSymbol = new('M', 900);
         WriteDriftDocument(root, relativePath, longSymbol, null);
         WriteDriftDocument(root, "docs/reference/budget-floor-second.md", "SecondMissingSymbol", null);
 
         DocsTools tools = CreateTools(root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeDrift(tools, charBudget: 1000);
+        string response = await InvokeDriftAsync(tools, charBudget: 1000);
 
         ParseProvenance(response);
         Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
@@ -320,10 +320,10 @@ public sealed class McpDocsGateToolsTests
             StringComparison.Ordinal);
     }
 
-    private string CreateScaffoldedRoot()
+    private async Task<string> CreateScaffoldedRootAsync()
     {
         string root = _host.Repo;
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(root, owner: "gate-fixture");
+        await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(root, owner: "gate-fixture");
         return root;
     }
 

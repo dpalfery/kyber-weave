@@ -28,7 +28,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
     private static readonly string ConductorSkill = Path.Combine(".claude", "skills", "conductor", "SKILL.md");
 
     [Fact]
-    public void GlobalScope_WhenProjectEnablesArbiterWithoutClaudeHook_EvaluatesUnderProjectConfig()
+    public async Task GlobalScope_WhenProjectEnablesArbiterWithoutClaudeHook_EvaluatesUnderProjectConfig()
     {
         // Before this change the user-level hook deferred to any project that enabled the Arbiter,
         // so a project with no project Claude hook was never gated. It now evaluates under the
@@ -37,8 +37,8 @@ public sealed class ArbiterGlobalHookRuntimeTests
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
         string twinPayload = ArbiterGlobalHookScenario.Dispatch(scenario.TwinRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
-        HookRun twin = scenario.RunTwin(twinPayload);
-        HookRun global = scenario.RunGlobal(payload);
+        HookRun twin = await scenario.RunTwin(twinPayload);
+        HookRun global = await scenario.RunGlobal(payload);
 
         int twinLines = ArbiterGlobalHookScenario.DecisionLines(scenario.Twin);
         Assert.True(twinLines > 0, "The project-scope twin must write at least one decision for an unmarked architect dispatch.");
@@ -55,13 +55,13 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenProjectConfigMissing_UsesUserHomeConfigAndWritesLedgerUnderHome()
+    public async Task GlobalScope_WhenProjectConfigMissing_UsesUserHomeConfigAndWritesLedgerUnderHome()
     {
         using InMemoryArbiterHost host = InMemoryArbiterHost.Create();
         string projectRoot = host.RepoRoot;
         _ = host.Write(UserHostConfigPath.Of(host.HomeDirectory), "arbiter:\n  enabled: true\n");
 
-        HookRun run = ArbiterGlobalHookScenario.Run(
+        HookRun run = await ArbiterGlobalHookScenario.Run(
             host,
             ArbiterGlobalHookScenario.Harness,
             null,
@@ -82,11 +82,11 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenUserConfigIsMissingOrMalformed_FailsClosedWithHomeConfigPath()
+    public async Task GlobalScope_WhenUserConfigIsMissingOrMalformed_FailsClosedWithHomeConfigPath()
     {
         using InMemoryArbiterHost host = InMemoryArbiterHost.Create();
 
-        HookRun run = ArbiterGlobalHookScenario.Run(
+        HookRun run = await ArbiterGlobalHookScenario.Run(
             host,
             ArbiterGlobalHookScenario.Harness,
             null,
@@ -103,7 +103,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenMainThreadArchitectDispatchIsUnmarked_DecidesAsTheProjectHookDoes()
+    public async Task GlobalScope_WhenMainThreadArchitectDispatchIsUnmarked_DecidesAsTheProjectHookDoes()
     {
         // The unmarked architect dispatch is judged by KW-ARB-PLANNER-001 in project scope: with no model it is
         // undecidable and proceeds (ADR 0072). The user-level hook must give the same decision document and
@@ -112,8 +112,8 @@ public sealed class ArbiterGlobalHookRuntimeTests
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
         string twinPayload = ArbiterGlobalHookScenario.Dispatch(scenario.TwinRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
-        HookRun twin = scenario.RunTwin(twinPayload);
-        HookRun global = scenario.RunGlobal(payload);
+        HookRun twin = await scenario.RunTwin(twinPayload);
+        HookRun global = await scenario.RunGlobal(payload);
 
         int twinLines = ArbiterGlobalHookScenario.DecisionLines(scenario.Twin);
         Assert.True(twinLines > 0, "The project-scope twin must write at least one decision for an unmarked architect dispatch.");
@@ -125,14 +125,14 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenMainThreadExploreDispatchIsUnmarked_PassesThroughAsTheProjectHookDoes()
+    public async Task GlobalScope_WhenMainThreadExploreDispatchIsUnmarked_PassesThroughAsTheProjectHookDoes()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "Explore", "Map the repository.");
         string twinPayload = ArbiterGlobalHookScenario.Dispatch(scenario.TwinRoot, ToolUseId, null, "Explore", "Map the repository.");
 
-        HookRun twin = scenario.RunTwin(twinPayload);
-        HookRun global = scenario.RunGlobal(payload);
+        HookRun twin = await scenario.RunTwin(twinPayload);
+        HookRun global = await scenario.RunGlobal(payload);
 
         Assert.Equal(0, global.Exit);
         Assert.True(string.IsNullOrWhiteSpace(global.Stdout),
@@ -146,12 +146,12 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenProjectOptsOutWithArbiterEnabledFalse_DefersNamingTheOptOut()
+    public async Task GlobalScope_WhenProjectOptsOutWithArbiterEnabledFalse_DefersNamingTheOptOut()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create(projectEnabled: false);
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
-        HookRun global = scenario.RunGlobal(payload);
+        HookRun global = await scenario.RunGlobal(payload);
 
         Assert.Equal(0, global.Exit);
         Assert.True(string.IsNullOrWhiteSpace(global.Stdout),
@@ -164,7 +164,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenProjectSkillHookNeverFires_EvaluatesAfterTheClaimWindow()
+    public async Task GlobalScope_WhenProjectSkillHookNeverFires_EvaluatesAfterTheClaimWindow()
     {
         // The project skill carries the dispatch hook, but no claim ever appears. The user-level hook
         // polls for the claim for the full window (1500 ms) and then evaluates, naming the candidate.
@@ -175,7 +175,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
         DateTimeOffset started = clock.GetUtcNow();
-        HookRun global = clock.RunAdvancingOnParks(
+        HookRun global = await clock.RunAdvancingOnParksAsync(
             () => scenario.RunGlobal(payload),
             TimeSpan.FromMilliseconds(50),
             int.MaxValue,
@@ -191,7 +191,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_WhenProjectHookRunsFirstOnPreDispatch_UserHookDefersToItsClaim()
+    public async Task GlobalScope_WhenProjectHookRunsFirstOnPreDispatch_UserHookDefersToItsClaim()
     {
         // Sequential: the project hook claims and evaluates first. The user-level hook then finds the
         // claim at once and defers, so the decision count matches the twin's single project run.
@@ -200,12 +200,12 @@ public sealed class ArbiterGlobalHookRuntimeTests
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
         string twinPayload = ArbiterGlobalHookScenario.Dispatch(scenario.TwinRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
-        _ = scenario.RunTwin(twinPayload, "conductor");
+        _ = await scenario.RunTwin(twinPayload, "conductor");
         int twinLines = ArbiterGlobalHookScenario.DecisionLines(scenario.Twin);
         Assert.True(twinLines > 0, "The project-scope twin must write at least one decision for an unmarked architect dispatch.");
 
-        _ = scenario.RunProject(payload, "conductor");
-        HookRun global = scenario.RunGlobal(payload);
+        _ = await scenario.RunProject(payload, "conductor");
+        HookRun global = await scenario.RunGlobal(payload);
 
         Assert.Equal(twinLines, ArbiterGlobalHookScenario.DecisionLines(scenario.Project));
         Assert.Contains(DeferredLog, global.Stderr, StringComparison.Ordinal);
@@ -213,7 +213,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void ProjectScope_WhenRunTwiceOnOnePayload_EvaluatesEachTimeAndClaimsProject()
+    public async Task ProjectScope_WhenRunTwiceOnOnePayload_EvaluatesEachTimeAndClaimsProject()
     {
         // An existing project claim does not stop the project hook, so two project runs each evaluate,
         // as they did before claims existed. The first run must still leave its project claim behind.
@@ -221,19 +221,19 @@ public sealed class ArbiterGlobalHookRuntimeTests
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
         string twinPayload = ArbiterGlobalHookScenario.Dispatch(scenario.TwinRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
-        _ = scenario.RunTwin(twinPayload);
+        _ = await scenario.RunTwin(twinPayload);
         int twinLines = ArbiterGlobalHookScenario.DecisionLines(scenario.Twin);
         Assert.True(twinLines > 0, "The project-scope twin must write at least one decision for an unmarked architect dispatch.");
 
-        _ = scenario.RunProject(payload);
-        _ = scenario.RunProject(payload);
+        _ = await scenario.RunProject(payload);
+        _ = await scenario.RunProject(payload);
 
         Assert.Equal(twinLines * 2, ArbiterGlobalHookScenario.DecisionLines(scenario.Project));
         AssertClaimedBy(scenario, "pre", "project");
     }
 
     [Fact]
-    public void ProjectScope_WhenGlobalClaimAlreadyExists_AllowsSilentlyWithoutEvaluating()
+    public async Task ProjectScope_WhenGlobalClaimAlreadyExists_AllowsSilentlyWithoutEvaluating()
     {
         // The user-level hook already evaluated this dispatch. The project hook must allow with no
         // decision document and must not write a second decision for it.
@@ -241,7 +241,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
         scenario.WriteClaim(ToolUseId, "pre", "global");
         string payload = ArbiterGlobalHookScenario.Dispatch(scenario.ProjectRoot, ToolUseId, null, "architect", UnmarkedPrompt);
 
-        HookRun project = scenario.RunProject(payload);
+        HookRun project = await scenario.RunProject(payload);
 
         Assert.Equal(0, project.Exit);
         Assert.True(string.IsNullOrWhiteSpace(project.Stdout),
@@ -251,13 +251,13 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void ProjectScope_WhenReadDispatchIsNotAClaimEvent_LeavesNoClaimsFolder()
+    public async Task ProjectScope_WhenReadDispatchIsNotAClaimEvent_LeavesNoClaimsFolder()
     {
         // Only Agent and Task dispatch events claim. A Read passes through without creating claims.
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         string payload = ArbiterGlobalHookScenario.ReadPayload(scenario.ProjectRoot, "toolu-read-global-1");
 
-        HookRun project = scenario.RunProject(payload);
+        HookRun project = await scenario.RunProject(payload);
 
         Assert.Equal(0, project.Exit);
         Assert.False(scenario.ClaimsFolderExists(),
@@ -268,11 +268,11 @@ public sealed class ArbiterGlobalHookRuntimeTests
     // against the same allowlist as the project hook, under the same configuration rules.
 
     [Fact]
-    public void GlobalScope_ArchitectBashOutsideTheList_DeniesUnderTheProjectConfig_WithoutAClaim()
+    public async Task GlobalScope_ArchitectBashOutsideTheList_DeniesUnderTheProjectConfig_WithoutAClaim()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
 
-        HookRun global = scenario.RunGlobal(ArbiterGlobalHookScenario.ShellPayload(scenario.ProjectRoot, "grep x | sed y"));
+        HookRun global = await scenario.RunGlobal(ArbiterGlobalHookScenario.ShellPayload(scenario.ProjectRoot, "grep x | sed y"));
 
         Assert.Equal(0, global.Exit);
         Assert.Contains(ShellRuleId, global.Stdout, StringComparison.Ordinal);
@@ -281,12 +281,12 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_ArchitectBashOutsideTheList_DeniesUnderTheUserConfigWhenTheProjectHasNone()
+    public async Task GlobalScope_ArchitectBashOutsideTheList_DeniesUnderTheUserConfigWhenTheProjectHasNone()
     {
         using InMemoryArbiterHost host = InMemoryArbiterHost.Create();
         _ = host.Write(UserHostConfigPath.Of(host.HomeDirectory), "arbiter:\n  enabled: true\n");
 
-        HookRun run = ArbiterGlobalHookScenario.Run(
+        HookRun run = await ArbiterGlobalHookScenario.Run(
             host,
             ArbiterGlobalHookScenario.Harness,
             null,
@@ -300,11 +300,11 @@ public sealed class ArbiterGlobalHookRuntimeTests
     }
 
     [Fact]
-    public void GlobalScope_ArchitectBashOutsideTheList_AllowsWithoutEvaluationWhenTheProjectOptsOut()
+    public async Task GlobalScope_ArchitectBashOutsideTheList_AllowsWithoutEvaluationWhenTheProjectOptsOut()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create(projectEnabled: false);
 
-        HookRun global = scenario.RunGlobal(ArbiterGlobalHookScenario.ShellPayload(scenario.ProjectRoot, "grep x | sed y"));
+        HookRun global = await scenario.RunGlobal(ArbiterGlobalHookScenario.ShellPayload(scenario.ProjectRoot, "grep x | sed y"));
 
         Assert.Equal(0, global.Exit);
         Assert.True(string.IsNullOrWhiteSpace(global.Stdout),

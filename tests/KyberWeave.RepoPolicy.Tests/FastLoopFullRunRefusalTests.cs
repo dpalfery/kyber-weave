@@ -40,12 +40,12 @@ public sealed class FastLoopFullRunRefusalTests
     /// council for every core, which is the load this refusal exists to stop.
     /// </remarks>
     [Fact]
-    public void FullModeStartedNonInteractivelyIsRefusedWithExit89BeforeAnyBuild()
+    public async Task FullModeStartedNonInteractivelyIsRefusedWithExit89BeforeAnyBuild()
     {
         SkipIfBashUnavailable();
         using FastLoopSandbox sandbox = new();
 
-        ProcessResult result = sandbox.RunFastLoop("--full");
+        ProcessResult result = await sandbox.RunFastLoopAsync("--full");
 
         Assert.Equal(RefusedExitCode, result.ExitCode);
         Assert.Contains("--class", result.StandardError, StringComparison.Ordinal);
@@ -60,12 +60,12 @@ public sealed class FastLoopFullRunRefusalTests
     /// <c>--scoped</c> runs the full product suite on a .NET change, so it is refused for the same reason as <c>--full</c>.
     /// </remarks>
     [Fact]
-    public void ScopedModeStartedNonInteractivelyIsRefusedWithExit89BeforeAnyBuild()
+    public async Task ScopedModeStartedNonInteractivelyIsRefusedWithExit89BeforeAnyBuild()
     {
         SkipIfBashUnavailable();
         using FastLoopSandbox sandbox = new();
 
-        ProcessResult result = sandbox.RunFastLoop("--scoped");
+        ProcessResult result = await sandbox.RunFastLoopAsync("--scoped");
 
         Assert.Equal(RefusedExitCode, result.ExitCode);
         Assert.Contains("--class", result.StandardError, StringComparison.Ordinal);
@@ -80,12 +80,12 @@ public sealed class FastLoopFullRunRefusalTests
     /// the alternatives.
     /// </remarks>
     [Fact]
-    public void HelpIsNeverRefusedAndPrintsUsage()
+    public async Task HelpIsNeverRefusedAndPrintsUsage()
     {
         SkipIfBashUnavailable();
         using FastLoopSandbox sandbox = new();
 
-        ProcessResult result = sandbox.RunFastLoop("--help");
+        ProcessResult result = await sandbox.RunFastLoopAsync("--help");
 
         Assert.NotEqual(RefusedExitCode, result.ExitCode);
         Assert.Equal(0, result.ExitCode);
@@ -102,12 +102,12 @@ public sealed class FastLoopFullRunRefusalTests
     [Theory]
     [InlineData("--class", "KyberWeave.Tests.FastLoopScriptTests", "-class KyberWeave.Tests.FastLoopScriptTests")]
     [InlineData("--method", "KyberWeave.Tests.FastLoopScriptTests.ChangedScript_RunsTheRepositoryPolicyTests", "-method KyberWeave.Tests.FastLoopScriptTests.ChangedScript_RunsTheRepositoryPolicyTests")]
-    public void ClassAndMethodFiltersAreNeverRefusedAndReachTheRunner(string flag, string value, string expectedArgument)
+    public async Task ClassAndMethodFiltersAreNeverRefusedAndReachTheRunner(string flag, string value, string expectedArgument)
     {
         SkipIfBashUnavailable();
         using FastLoopSandbox sandbox = new();
 
-        ProcessResult result = sandbox.RunFastLoop(flag, value);
+        ProcessResult result = await sandbox.RunFastLoopAsync(flag, value);
 
         Assert.NotEqual(RefusedExitCode, result.ExitCode);
         Assert.True(sandbox.Started, "The targeted run never reached the test runner.");
@@ -156,7 +156,7 @@ public sealed class FastLoopFullRunRefusalTests
         public string MarkerText => File.Exists(_markerPath) ? File.ReadAllText(_markerPath) : string.Empty;
 
         /// <summary>Runs <c>scripts/fast-loop.sh</c> in the fixture with the given arguments and stdin redirected from empty input.</summary>
-        public ProcessResult RunFastLoop(params string[] arguments)
+        public async Task<ProcessResult> RunFastLoopAsync(params string[] arguments)
         {
             ProcessStartInfo startInfo = new("/bin/bash")
             {
@@ -179,7 +179,7 @@ public sealed class FastLoopFullRunRefusalTests
             startInfo.Environment["TMPDIR"] = _temp.Path;
             startInfo.Environment["HOME"] = _temp.Path;
 
-            return ProcessRunner.Run(startInfo, string.Empty, LoopTimeout);
+            return await ProcessRunner.RunAsync(startInfo, string.Empty, LoopTimeout);
         }
 
         public void Dispose()

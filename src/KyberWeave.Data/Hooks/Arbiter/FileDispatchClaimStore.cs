@@ -86,7 +86,7 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
     }
 
     /// <inheritdoc/>
-    public bool WaitForClaim(string projectRoot, DispatchClaimKey key)
+    public async Task<bool> WaitForClaimAsync(string projectRoot, DispatchClaimKey key, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
         string path = ClaimPath(projectRoot, key);
@@ -98,7 +98,7 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
                 return false;
             }
 
-            Task.Delay(PollInterval, time).GetAwaiter().GetResult();
+            await Task.Delay(PollInterval, time, cancellationToken).ConfigureAwait(false);
         }
 
         return true;

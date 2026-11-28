@@ -57,7 +57,7 @@ public interface ICircuitBreaker
         CancellationToken cancellationToken = default);
 
     /// <summary>Manually closes the circuit breaker.</summary>
-    void Reset();
+    Task ResetAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>Polly v8 circuit breaker protecting <c>sqlite3</c> CLI and external calls.</summary>
@@ -147,8 +147,8 @@ public class SqliteCircuitBreaker : ICircuitBreaker
     }
 
     /// <inheritdoc />
-    public void Reset() =>
-        manualControl.CloseAsync().GetAwaiter().GetResult();
+    public async Task ResetAsync(CancellationToken cancellationToken = default) =>
+        await manualControl.CloseAsync(cancellationToken).ConfigureAwait(false);
 
     private static bool DefaultShouldHandle(Exception exception) =>
         exception is SqliteExecutionException or TimeoutException or IOException;

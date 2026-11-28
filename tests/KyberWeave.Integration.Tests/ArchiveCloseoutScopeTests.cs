@@ -20,29 +20,28 @@ internal sealed class CloseoutGitRepo : IDisposable
 {
     public string Root { get; }
 
-    public CloseoutGitRepo()
-        : this(Path.Combine(Path.GetTempPath(), "kw-closeout-" + Guid.NewGuid().ToString("N")), true)
+    /// <summary>Creates an empty repository directory and initializes git in it.</summary>
+    internal static async Task<CloseoutGitRepo> CreateAsync()
     {
+        CloseoutGitRepo repo = new(Path.Combine(Path.GetTempPath(), "kw-closeout-" + Guid.NewGuid().ToString("N")));
+        Directory.CreateDirectory(repo.Root);
+        await repo.GitAsync("init", "-b", "main");
+        return repo;
     }
 
-    private CloseoutGitRepo(string root, bool init)
+    private CloseoutGitRepo(string root)
     {
         Root = root;
-        if (init)
-        {
-            Directory.CreateDirectory(Root);
-            Git("init", "-b", "main");
-        }
     }
 
     /// <summary>Wraps an existing directory created outside this helper, such as a clone.</summary>
     internal static CloseoutGitRepo Open(string root)
     {
-        return new CloseoutGitRepo(root, false);
+        return new CloseoutGitRepo(root);
     }
 
     /// <summary>Runs git with argv and never a shell, pinned to local test identity.</summary>
-    internal static string RunGit(string workingDirectory, params string[] args)
+    internal static async Task<string> RunGit(string workingDirectory, params string[] args)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -66,7 +65,7 @@ internal sealed class CloseoutGitRepo : IDisposable
             startInfo.ArgumentList.Add(arg);
         }
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
@@ -76,9 +75,9 @@ internal sealed class CloseoutGitRepo : IDisposable
         return result.StandardOutput;
     }
 
-    public string Git(params string[] args)
+    public async Task<string> GitAsync(params string[] args)
     {
-        return RunGit(Root, args);
+        return await RunGit(Root, args);
     }
 
     public CloseoutGitRepo Write(string relativePath, string content)
@@ -96,10 +95,10 @@ internal sealed class CloseoutGitRepo : IDisposable
         return this;
     }
 
-    public void Commit(string message)
+    public async Task CommitAsync(string message)
     {
-        Git("add", "-A");
-        Git("commit", "-m", message);
+        await GitAsync("add", "-A");
+        await GitAsync("commit", "-m", message);
     }
 
     public void Dispose()
@@ -162,15 +161,15 @@ public sealed class ArchiveCloseoutScopeTests
     /// entry is in scope and fails closeout.
     /// </summary>
     [Fact]
-    public void AnUnchangedRenameIntoTheArchiveFailsCloseout()
+    public async Task AnUnchangedRenameIntoTheArchiveFailsCloseout()
     {
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write("6-Docs/plans/widget.md", UnclosedPlan("plans/widget"));
-        repo.Commit("base with an open plan");
+        await repo.CommitAsync("base with an open plan");
         repo.CreateDirectory("6-Docs/archive/plans");
-        repo.Git("mv", "6-Docs/plans/widget.md", PlanPath);
+        await repo.GitAsync("mv", "6-Docs/plans/widget.md", PlanPath);
 
         Diagnostic finding = Assert.Single(ValidateGate(repo, ChangedSince(repo, "HEAD")).Items);
 
@@ -184,12 +183,12 @@ public sealed class ArchiveCloseoutScopeTests
     /// condition passes, so the finding names only the live body status.
     /// </summary>
     [Fact]
-    public void APlanAddedWhileReadyFailsCloseoutConditionC2()
+    public async Task APlanAddedWhileReadyFailsCloseoutConditionC2()
     {
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument());
-        repo.Commit("base corpus");
+        await repo.CommitAsync("base corpus");
         repo.Write(PlanPath, CloseoutCorpus.PlanDocument(bodyStatus: "Ready"));
 
         Diagnostic finding = Assert.Single(ValidateGate(repo, ChangedSince(repo, "HEAD")).Items);
@@ -206,12 +205,12 @@ public sealed class ArchiveCloseoutScopeTests
     /// condition and the untracked marker.
     /// </summary>
     [Fact]
-    public void AnArchivedPlanWithAnUntrackedResidualFailsCloseoutConditionC9()
+    public async Task AnArchivedPlanWithAnUntrackedResidualFailsCloseoutConditionC9()
     {
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument());
-        repo.Commit("base corpus");
+        await repo.CommitAsync("base corpus");
         repo.Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
             CloseoutCorpus.DecisionsSection("D1")
             + CloseoutCorpus.CloseoutMappingSection(
@@ -232,14 +231,14 @@ public sealed class ArchiveCloseoutScopeTests
     /// checks it: the single finding belongs to the newly archived entry.
     /// </summary>
     [Fact]
-    public void AnUntouchedLegacyArchivedPlanIsNeverChecked()
+    public async Task AnUntouchedLegacyArchivedPlanIsNeverChecked()
     {
         const string LegacyPath = "6-Docs/archive/plans/2019-legacy.md";
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write(LegacyPath, UnclosedPlan("plans/2019-legacy"));
-        repo.Commit("legacy archive from years ago");
+        await repo.CommitAsync("legacy archive from years ago");
         repo.Write(PlanPath, UnclosedPlan("plans/2026-10-20-widget"));
 
         Diagnostic finding = Assert.Single(ValidateGate(repo, ChangedSince(repo, "HEAD")).Items);
@@ -253,15 +252,15 @@ public sealed class ArchiveCloseoutScopeTests
     /// its entry: only the newly archived entry reports.
     /// </summary>
     [Fact]
-    public void EditingALegacyArchiveWithoutAnImpactKeyIsNotChecked()
+    public async Task EditingALegacyArchiveWithoutAnImpactKeyIsNotChecked()
     {
         const string LegacyPath = "6-Docs/archive/plans/2019-legacy.md";
         string legacy = UnclosedPlan("plans/2019-legacy");
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write(LegacyPath, legacy);
-        repo.Commit("legacy archive from years ago");
+        await repo.CommitAsync("legacy archive from years ago");
         repo.Write(LegacyPath, legacy + "\n<!-- uncommitted touch -->\n");
         repo.Write(PlanPath, UnclosedPlan("plans/2026-10-20-widget"));
 
@@ -276,7 +275,7 @@ public sealed class ArchiveCloseoutScopeTests
     /// selects it: a modified closeout is re-checked.
     /// </summary>
     [Fact]
-    public void EditingAnArchiveThatDeclaresImpactIsChecked()
+    public async Task EditingAnArchiveThatDeclaresImpactIsChecked()
     {
         const string SpecPath = "6-Docs/archive/specs/tray/design.md";
         string spec = """
@@ -297,11 +296,11 @@ public sealed class ArchiveCloseoutScopeTests
 
                       **Status:** Draft
                       """;
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write(SpecPath, spec);
-        repo.Commit("archived spec with an impact declaration");
+        await repo.CommitAsync("archived spec with an impact declaration");
         repo.Write(SpecPath, spec + "\n<!-- uncommitted touch -->\n");
 
         Diagnostic finding = Assert.Single(ValidateGate(repo, ChangedSince(repo, "HEAD")).Items);
@@ -315,15 +314,15 @@ public sealed class ArchiveCloseoutScopeTests
     /// the newly archived entry still reports.
     /// </summary>
     [Fact]
-    public void ADeletedArchiveIsIgnored()
+    public async Task ADeletedArchiveIsIgnored()
     {
         const string GonePath = "6-Docs/archive/plans/gone.md";
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write(GonePath, UnclosedPlan("plans/gone"));
-        repo.Commit("archive that will be deleted");
-        repo.Git("rm", GonePath);
+        await repo.CommitAsync("archive that will be deleted");
+        await repo.GitAsync("rm", GonePath);
         repo.Write(PlanPath, UnclosedPlan("plans/2026-10-20-widget"));
 
         Diagnostic finding = Assert.Single(ValidateGate(repo, ChangedSince(repo, "HEAD")).Items);
@@ -337,16 +336,16 @@ public sealed class ArchiveCloseoutScopeTests
     /// untracked files are both in scope.
     /// </summary>
     [Fact]
-    public void UncommittedAndUntrackedMovesAreInScope()
+    public async Task UncommittedAndUntrackedMovesAreInScope()
     {
         const string TrackedPath = "6-Docs/reference/tracked.md";
         const string FreshPath = "6-Docs/archive/plans/fresh.md";
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write(TrackedPath, CloseoutCorpus.TargetDocument("reference/tracked"));
-        repo.Commit("base corpus");
+        await repo.CommitAsync("base corpus");
         repo.CreateDirectory("6-Docs/archive/reference");
-        repo.Git("mv", TrackedPath, "6-Docs/archive/reference/tracked.md");
+        await repo.GitAsync("mv", TrackedPath, "6-Docs/archive/reference/tracked.md");
         repo.Write(FreshPath, UnclosedPlan("plans/fresh"));
 
         List<string> paths = ChangedSince(repo, "HEAD").Select(change => change.Path).ToList();
@@ -360,21 +359,21 @@ public sealed class ArchiveCloseoutScopeTests
     /// branch point belongs to someone else's change and stays out of scope.
     /// </summary>
     [Fact]
-    public void ChangesOnTheBaseAfterTheBranchPointAreOutOfScope()
+    public async Task ChangesOnTheBaseAfterTheBranchPointAreOutOfScope()
     {
         const string BranchPath = "6-Docs/archive/plans/branch.md";
         const string MainSidePath = "6-Docs/archive/plans/main-side.md";
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument());
-        repo.Commit("common base");
-        repo.Git("checkout", "-b", "feature");
+        await repo.CommitAsync("common base");
+        await repo.GitAsync("checkout", "-b", "feature");
         repo.Write(BranchPath, UnclosedPlan("plans/branch"));
-        repo.Commit("archive a plan on the branch");
-        repo.Git("checkout", "main");
+        await repo.CommitAsync("archive a plan on the branch");
+        await repo.GitAsync("checkout", "main");
         repo.Write(MainSidePath, UnclosedPlan("plans/main-side"));
-        repo.Commit("archive a plan on main after the branch point");
-        repo.Git("checkout", "feature");
+        await repo.CommitAsync("archive a plan on main after the branch point");
+        await repo.GitAsync("checkout", "feature");
 
         List<string> paths = ChangedSince(repo, "main").Select(change => change.Path).ToList();
 
@@ -388,29 +387,29 @@ public sealed class ArchiveCloseoutScopeTests
     /// against origin/HEAD: only the default finds it.
     /// </summary>
     [Fact]
-    public void BaseDefaultsToTheRemoteDefaultBranch()
+    public async Task BaseDefaultsToTheRemoteDefaultBranch()
     {
         string originDir = Path.Combine(Path.GetTempPath(), "kw-closeout-origin-" + Guid.NewGuid().ToString("N"));
         string cloneDir = Path.Combine(Path.GetTempPath(), "kw-closeout-clone-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(originDir);
         try
         {
-            CloseoutGitRepo.RunGit(originDir, "init", "--bare");
-            CloseoutGitRepo.RunGit(originDir, "symbolic-ref", "HEAD", "refs/heads/main");
-            using (CloseoutGitRepo seed = new())
+            await CloseoutGitRepo.RunGit(originDir, "init", "--bare");
+            await CloseoutGitRepo.RunGit(originDir, "symbolic-ref", "HEAD", "refs/heads/main");
+            using (CloseoutGitRepo seed = await CloseoutGitRepo.CreateAsync())
             {
                 seed.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
                     .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument());
-                seed.Commit("seed the remote");
-                seed.Git("remote", "add", "origin", originDir);
-                seed.Git("push", "-u", "origin", "main");
+                await seed.CommitAsync("seed the remote");
+                await seed.GitAsync("remote", "add", "origin", originDir);
+                await seed.GitAsync("push", "-u", "origin", "main");
             }
 
-            CloseoutGitRepo.RunGit(Path.GetTempPath(), "clone", originDir, cloneDir);
+            await CloseoutGitRepo.RunGit(Path.GetTempPath(), "clone", originDir, cloneDir);
             using (CloseoutGitRepo clone = CloseoutGitRepo.Open(cloneDir))
             {
                 clone.Write(PlanPath, UnclosedPlan("plans/2026-10-20-widget"));
-                clone.Commit("archive the plan locally, ahead of origin");
+                await clone.CommitAsync("archive the plan locally, ahead of origin");
 
                 CapturedConsoleExecution<int> execution = RunValidate(cloneDir, true);
 
@@ -438,30 +437,30 @@ public sealed class ArchiveCloseoutScopeTests
     /// closed and tells the operator to fetch full history instead of passing silently.
     /// </summary>
     [Fact]
-    public void AShallowCloneWithoutAMergeBaseFailsClosedWithAFetchHint()
+    public async Task AShallowCloneWithoutAMergeBaseFailsClosedWithAFetchHint()
     {
         string originDir = Path.Combine(Path.GetTempPath(), "kw-closeout-origin-" + Guid.NewGuid().ToString("N"));
         string cloneDir = Path.Combine(Path.GetTempPath(), "kw-closeout-clone-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(originDir);
         try
         {
-            CloseoutGitRepo.RunGit(originDir, "init", "--bare");
-            CloseoutGitRepo.RunGit(originDir, "symbolic-ref", "HEAD", "refs/heads/main");
+            await CloseoutGitRepo.RunGit(originDir, "init", "--bare");
+            await CloseoutGitRepo.RunGit(originDir, "symbolic-ref", "HEAD", "refs/heads/main");
             string oldHash;
-            using (CloseoutGitRepo seed = new())
+            using (CloseoutGitRepo seed = await CloseoutGitRepo.CreateAsync())
             {
                 seed.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
                     .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument());
-                seed.Commit("first commit");
+                await seed.CommitAsync("first commit");
                 seed.Write("6-Docs/reference/extra.md", CloseoutCorpus.TargetDocument("reference/extra"));
-                seed.Commit("second commit");
-                oldHash = seed.Git("rev-parse", "HEAD~1").Trim();
-                seed.Git("branch", "old", oldHash);
-                seed.Git("remote", "add", "origin", originDir);
-                seed.Git("push", "origin", "main", "old");
+                await seed.CommitAsync("second commit");
+                oldHash = (await seed.GitAsync("rev-parse", "HEAD~1")).Trim();
+                await seed.GitAsync("branch", "old", oldHash);
+                await seed.GitAsync("remote", "add", "origin", originDir);
+                await seed.GitAsync("push", "origin", "main", "old");
             }
 
-            CloseoutGitRepo.RunGit(
+            await CloseoutGitRepo.RunGit(
                 Path.GetTempPath(),
                 "clone", "--depth", "1", "--single-branch", "--branch", "main",
                 "file://" + originDir, cloneDir);
@@ -537,12 +536,12 @@ public sealed class ArchiveCloseoutScopeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void MissingCloseoutEvidenceIsOnlyReportedWithMergeReady(bool mergeReady)
+    public async Task MissingCloseoutEvidenceIsOnlyReportedWithMergeReady(bool mergeReady)
     {
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         repo.Write("6-Docs/catalog.md", CloseoutCorpus.Catalog)
             .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument());
-        repo.Commit("base corpus");
+        await repo.CommitAsync("base corpus");
         repo.Write(PlanPath, UnclosedPlan("plans/2026-10-20-widget"));
 
         CapturedConsoleExecution<int> execution = RunValidate(repo.Root, mergeReady);

@@ -17,13 +17,19 @@ namespace KyberWeave.Mcp.Tests;
 /// The file is the whole delivery on a fallback harness, so it holds exactly the text the service built, one file
 /// per task, under the folder the repository already ignores.
 /// </remarks>
-public sealed class TaskPromptFileFallbackTests : IDisposable
+public sealed class TaskPromptFileFallbackTests : IAsyncLifetime
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private readonly DocFixture _fixture = DocsTaskPromptFixture.Ready();
+    private DocFixture _fixture = null!;
 
-    public void Dispose() => _fixture.Dispose();
+    public async ValueTask InitializeAsync() => _fixture = await DocsTaskPromptFixture.ReadyAsync();
+
+    public ValueTask DisposeAsync()
+    {
+        _fixture.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     private KyberWeaveConfig Config => DocsTaskPromptFixture.Config(_fixture);
 
@@ -32,7 +38,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
         Config);
 
     [Fact]
-    public void AFallbackHarnessWritesThePromptItBuiltToTheRunsScratchFolder()
+    public async Task AFallbackHarnessWritesThePromptItBuiltToTheRunsScratchFolder()
     {
         TaskPromptResult result = Build("warp");
 
@@ -49,7 +55,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     [InlineData("codex")]
     [InlineData("cursor")]
     [InlineData("opencode")]
-    public void ARewriteHarnessWritesNoFile(string harness)
+    public async Task ARewriteHarnessWritesNoFile(string harness)
     {
         TaskPromptResult result = Build(harness);
 
@@ -63,9 +69,9 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     /// Without it the dispatch would claim the hook inserts a prompt that no harness rewrites.
     /// </summary>
     [Fact]
-    public void ATechnologyOnlyDispatchOnAFallbackHarnessWritesItsPromptFile()
+    public async Task ATechnologyOnlyDispatchOnAFallbackHarnessWritesItsPromptFile()
     {
-        TaskPromptResult result = DocsTaskPromptFixture.Service(_fixture).Build(
+        TaskPromptResult result = await DocsTaskPromptFixture.Service(_fixture).BuildAsync(
             new TaskPromptRequest(_fixture.Root, TaskId: null, Technology: "csharp", Harness: "warp"),
             Config);
 
@@ -76,10 +82,10 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     }
 
     [Fact]
-    public void TheToolNamesTheFileForATechnologyOnlyDispatchOnAFallbackHarness()
+    public async Task TheToolNamesTheFileForATechnologyOnlyDispatchOnAFallbackHarness()
     {
-        string reply = DocsTaskPromptFixture.Tools(_fixture)
-            .BuildTaskPromptForClient("warp", taskId: null, technology: "csharp");
+        string reply = await DocsTaskPromptFixture.Tools(_fixture)
+            .BuildTaskPromptForClientAsync("warp", taskId: null, technology: "csharp");
 
         Assert.Contains(
             $"prompt file: {ScratchLayout.Root}/csharp/{TaskPromptService.PromptFileName}",
@@ -90,7 +96,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     }
 
     [Fact]
-    public void ACallerThatNamesNoHarnessWritesNoFile()
+    public async Task ACallerThatNamesNoHarnessWritesNoFile()
     {
         // docs packet and the dispatch hook build the same prompt and have no file to name.
         TaskPromptResult result = Build(harness: null);
@@ -101,9 +107,9 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     }
 
     [Fact]
-    public void TheToolGivesThePathOnAFallbackHarnessAndHoldsNoPromptText()
+    public async Task TheToolGivesThePathOnAFallbackHarnessAndHoldsNoPromptText()
     {
-        string reply = DocsTaskPromptFixture.Tools(_fixture).BuildTaskPromptForClient("warp", taskId: "T1");
+        string reply = await DocsTaskPromptFixture.Tools(_fixture).BuildTaskPromptForClientAsync("warp", taskId: "T1");
 
         Assert.Contains("prompt file: .agent_scratchpad/t1/prompt.md", reply, StringComparison.Ordinal);
         Assert.Contains("read it first", reply, StringComparison.Ordinal);
@@ -112,9 +118,9 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     }
 
     [Fact]
-    public void TheToolGivesNoPathOnARewriteHarness()
+    public async Task TheToolGivesNoPathOnARewriteHarness()
     {
-        string reply = DocsTaskPromptFixture.Tools(_fixture).BuildTaskPromptForClient("copilot-cli", taskId: "T1");
+        string reply = await DocsTaskPromptFixture.Tools(_fixture).BuildTaskPromptForClientAsync("copilot-cli", taskId: "T1");
 
         Assert.Contains("prompt file: none", reply, StringComparison.Ordinal);
         Assert.Contains("harness: copilot-cli (from MCP client 'copilot-cli')", reply, StringComparison.Ordinal);
@@ -123,7 +129,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     }
 
     [Fact]
-    public void AFileThatCannotBeWrittenIsARefusalNotAPromptTheConductorDispatches()
+    public async Task AFileThatCannotBeWrittenIsARefusalNotAPromptTheConductorDispatches()
     {
         // A file where the task folder must be created makes the write fail on every platform.
         _fixture.Write(ScratchLayout.Root, "not a folder");
@@ -136,7 +142,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     }
 
     [Fact]
-    public void TheFileIsWrittenUnderTheFolderTheRepositoryIgnores()
+    public async Task TheFileIsWrittenUnderTheFolderTheRepositoryIgnores()
     {
         TaskPromptResult result = Build("warp");
 

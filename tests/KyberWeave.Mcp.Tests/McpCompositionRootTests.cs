@@ -41,9 +41,9 @@ public sealed class McpCompositionRootTests
     /// type, instead of surfacing as an opaque invocation error on a client's first tool call.
     /// </remarks>
     [Fact]
-    public void EveryDocsToolTypeResolvesFromTheServerContainer()
+    public async Task EveryDocsToolTypeResolvesFromTheServerContainer()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
 
         ServiceCollection services = new();
         _host.Register(services);
@@ -59,9 +59,9 @@ public sealed class McpCompositionRootTests
     /// server's own root, and the instructions carry no any-repo paragraph.
     /// </summary>
     [Fact]
-    public void TheBoundContainerAnswersFromItsOwnRoot()
+    public async Task TheBoundContainerAnswersFromItsOwnRoot()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
 
         ServiceCollection services = new();
         _host.Register(services);
@@ -71,7 +71,7 @@ public sealed class McpCompositionRootTests
 
         DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
 
-        Assert.StartsWith("provenance: root=" + _host.Repo, tools.DocsStatus(), StringComparison.Ordinal);
+        Assert.StartsWith("provenance: root=" + _host.Repo, await tools.DocsStatusAsync(), StringComparison.Ordinal);
         McpServerOptions options = new();
         DocsServerInstructions.Configure(options, anyRepo: false);
         Assert.Equal(DocsServerInstructions.Text, options.ServerInstructions);
@@ -83,7 +83,7 @@ public sealed class McpCompositionRootTests
     /// a directory with no host configuration, and every tool it constructs refuses a call without <c>projectPath</c>.
     /// </summary>
     [Fact]
-    public void TheAnyRepoContainerBuildsWithoutARootAndEveryToolRefusesAMissingProjectPath()
+    public async Task TheAnyRepoContainerBuildsWithoutARootAndEveryToolRefusesAMissingProjectPath()
     {
         using ServiceProvider provider = AnyRepoContainer();
 
@@ -97,9 +97,10 @@ public sealed class McpCompositionRootTests
         Assert.NotEmpty(toolMethods);
         foreach (MethodInfo method in toolMethods)
         {
-            string answer = method.GetParameters().Any(parameter => parameter.ParameterType == typeof(McpServer))
-                ? tools.BuildTaskPromptForClient("claude-code", taskId: "T1")
-                : (string)method.Invoke(tools, method.GetParameters().Select(ArgumentFor).ToArray())!;
+            Task<string> call = method.GetParameters().Any(parameter => parameter.ParameterType == typeof(McpServer))
+                ? tools.BuildTaskPromptForClientAsync("claude-code", taskId: "T1")
+                : (Task<string>)method.Invoke(tools, method.GetParameters().Select(ArgumentFor).ToArray())!;
+            string answer = await call;
 
             Assert.Equal(MissingProjectPathRefusal, answer);
         }
@@ -107,24 +108,24 @@ public sealed class McpCompositionRootTests
 
     /// <summary>A call naming a directory inside an initialized repository answers with that repository's provenance.</summary>
     [Fact]
-    public void TheAnyRepoContainerAnswersForTheRepositoryAProjectPathNames()
+    public async Task TheAnyRepoContainerAnswersForTheRepositoryAProjectPathNames()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         using ServiceProvider provider = AnyRepoContainer();
 
         DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
 
-        Assert.StartsWith("provenance: root=" + _host.Repo, tools.DocsStatus(_host.Repo), StringComparison.Ordinal);
+        Assert.StartsWith("provenance: root=" + _host.Repo, await tools.DocsStatusAsync(_host.Repo), StringComparison.Ordinal);
     }
 
     /// <summary>A directory that is no initialized repository is refused with the any-repo provenance line.</summary>
     [Fact]
-    public void TheAnyRepoContainerRefusesAProjectPathWithItsReason()
+    public async Task TheAnyRepoContainerRefusesAProjectPathWithItsReason()
     {
         using ServiceProvider provider = AnyRepoContainer();
 
         DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);
-        string answer = tools.DocsStatus(_host.Repo);
+        string answer = await tools.DocsStatusAsync(_host.Repo);
 
         Assert.StartsWith("provenance: root=(none) mode=any-repo\nprojectPath was refused: ", answer, StringComparison.Ordinal);
         Assert.Contains("kyber-weave docs init", answer, StringComparison.Ordinal);
@@ -132,7 +133,7 @@ public sealed class McpCompositionRootTests
 
     /// <summary>The any-repo instructions append the paragraph that says every tool needs <c>projectPath</c>.</summary>
     [Fact]
-    public void TheAnyRepoInstructionsSayEveryToolRequiresAProjectPath()
+    public async Task TheAnyRepoInstructionsSayEveryToolRequiresAProjectPath()
     {
         McpServerOptions options = new();
 
@@ -165,6 +166,7 @@ public sealed class McpCompositionRootTests
     private static object? ArgumentFor(ParameterInfo parameter)
     {
         if (parameter.Name == "projectPath") return null;
+        if (parameter.ParameterType == typeof(CancellationToken)) return CancellationToken.None;
         if (parameter.HasDefaultValue) return parameter.DefaultValue;
         return parameter.ParameterType == typeof(string) ? "value" : null;
     }
@@ -172,11 +174,8 @@ public sealed class McpCompositionRootTests
     /// <summary>Every directory is the top level of one repository, whose git directory is under <c>root</c>.</summary>
     private sealed class OneRepository(string root) : IGitWorktreeIdentity
     {
-        public bool TryRoots(string directory, out string? topLevel, out string? commonDirectory, out string? failure)
-        {
-            (topLevel, commonDirectory, failure) = (root, Path.Combine(root, ".git"), null);
-            return true;
-        }
+        public Task<GitWorktreeRoots> TryRootsAsync(string directory, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GitWorktreeRoots(root, Path.Combine(root, ".git"), null));
     }
 
     /// <summary>Every advertised tool type in <paramref name="assembly"/> resolves, and there is at least one.</summary>

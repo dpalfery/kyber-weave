@@ -78,9 +78,9 @@ public sealed class PrNamingScriptTests
     /// <param name="token">A catalogue harness token, or <c>manual</c>.</param>
     [Theory]
     [MemberData(nameof(AcceptedTokens))]
-    public void AcceptsAConformingTitleAndBranchForEveryCatalogueToken(string token)
+    public async Task AcceptsAConformingTitleAndBranchForEveryCatalogueToken(string token)
     {
-        ProcessResult result = RunCheck(
+        ProcessResult result = await RunCheck(
             Title(token, "fix", "arbiter", "qualify global block identity by target"),
             Branch(token, "fix", "arbiter-global-block-identity"));
 
@@ -95,12 +95,12 @@ public sealed class PrNamingScriptTests
     ///     it and one without it are both accepted.
     /// </summary>
     [Fact]
-    public void AcceptsBothBranchesWithAndWithoutTheOwnerAgentPrefix()
+    public async Task AcceptsBothBranchesWithAndWithoutTheOwnerAgentPrefix()
     {
-        ProcessResult withPrefix = RunCheck(
+        ProcessResult withPrefix = await RunCheck(
             Title("commandcode", "fix", "arbiter", "qualify global block identity by target"),
             "dave.test-dev.commandcode/fix/arbiter-global-block-identity");
-        ProcessResult withoutPrefix = RunCheck(
+        ProcessResult withoutPrefix = await RunCheck(
             Title("commandcode", "fix", "arbiter", "qualify global block identity by target"),
             "commandcode/fix/arbiter-global-block-identity");
 
@@ -115,9 +115,9 @@ public sealed class PrNamingScriptTests
     /// <param name="type">One of <see cref="ConventionalTypes" />.</param>
     [Theory]
     [MemberData(nameof(ConventionalTypeRows))]
-    public void AcceptsEachConventionalCommitType(string type)
+    public async Task AcceptsEachConventionalCommitType(string type)
     {
-        ProcessResult result = RunCheck(
+        ProcessResult result = await RunCheck(
             Title("claude", type, "arbiter", "tighten the gate"),
             Branch("claude", type, "tighten-the-gate"));
 
@@ -147,9 +147,9 @@ public sealed class PrNamingScriptTests
     [InlineData("commandcode/fix", "no slug")]
     [InlineData("main", "the default branch shape")]
     [InlineData("commandcode/fix/arbiter-global-block-identity/extra", "one segment too many")]
-    public void RejectsABranchThatDoesNotFollowTheShape(string branch, string why)
+    public async Task RejectsABranchThatDoesNotFollowTheShape(string branch, string why)
     {
-        ProcessResult result = RunCheck(
+        ProcessResult result = await RunCheck(
             Title("commandcode", "fix", "arbiter", "qualify global block identity by target"),
             branch);
 
@@ -172,9 +172,9 @@ public sealed class PrNamingScriptTests
     [InlineData("[commandcode] fix(arbiter): qualify global block identity by target", "token is not at the end")]
     [InlineData("qualify global block identity by target [commandcode]", "no conventional-commit subject")]
     [InlineData("feature(arbiter): qualify global block identity by target [commandcode]", "not a conventional type")]
-    public void RejectsATitleThatDoesNotFollowTheShape(string title, string why)
+    public async Task RejectsATitleThatDoesNotFollowTheShape(string title, string why)
     {
-        ProcessResult result = RunCheck(title, Branch("commandcode", "fix", "arbiter-global-block-identity"));
+        ProcessResult result = await RunCheck(title, Branch("commandcode", "fix", "arbiter-global-block-identity"));
 
         Assert.True(
             result.ExitCode == 1,
@@ -191,9 +191,9 @@ public sealed class PrNamingScriptTests
     [Theory]
     [InlineData("Bump Newtonsoft.Json from 13.0.1 to 13.0.3", "dependabot/nuget/Newtonsoft.Json-13.0.3")]
     [InlineData("chore(deps-dev): bump vitest from 1.6.0 to 2.1.8", "dependabot/npm_and_yarn/vitest-2.1.8")]
-    public void ExemptsADependabotAuthor(string title, string branch)
+    public async Task ExemptsADependabotAuthor(string title, string branch)
     {
-        ProcessResult result = RunCheck(title, branch, DependabotAuthor);
+        ProcessResult result = await RunCheck(title, branch, DependabotAuthor);
 
         Assert.True(
             result.ExitCode == 0,
@@ -205,9 +205,9 @@ public sealed class PrNamingScriptTests
     ///     still judged, so renaming a branch to look generated buys nothing.
     /// </summary>
     [Fact]
-    public void DoesNotExemptADependabotShapedBranchFromAHumanAuthor()
+    public async Task DoesNotExemptADependabotShapedBranchFromAHumanAuthor()
     {
-        ProcessResult result = RunCheck(
+        ProcessResult result = await RunCheck(
             "Bump Newtonsoft.Json from 13.0.1 to 13.0.3",
             "dependabot/nuget/Newtonsoft.Json-13.0.3",
             "a-human");
@@ -232,7 +232,7 @@ public sealed class PrNamingScriptTests
     /// <summary>
     ///     Runs the check through <c>bash</c> with a bounded wait, and returns what it wrote.
     /// </summary>
-    private static ProcessResult RunCheck(string title, string branch, string? author = null)
+    private static async Task<ProcessResult> RunCheck(string title, string branch, string? author = null)
     {
         SkipIfBashUnavailable();
 
@@ -256,7 +256,7 @@ public sealed class PrNamingScriptTests
             startInfo.ArgumentList.Add(author);
         }
 
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
     /// <summary>The title shape, written from the constants so the two cannot drift apart.</summary>

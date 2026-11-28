@@ -63,9 +63,9 @@ public sealed class McpAgentCodingStandardsRepositoryTests
     /// many, which is the asymmetry that costs the section its place.
     /// </remarks>
     [Fact]
-    public void ATopicOfTwoWordsReachesTheSectionThatDiscussesThoseWords()
+    public async Task ATopicOfTwoWordsReachesTheSectionThatDiscussesThoseWords()
     {
-        string response = Ask(RepositorySurface.Value, "csharp", "error handling");
+        string response = await AskAsync(RepositorySurface.Value, "csharp", "error handling");
 
         Assert.Contains("## Errors and diagnostics", response, StringComparison.Ordinal);
         Assert.DoesNotContain("no section matches", response, StringComparison.Ordinal);
@@ -86,9 +86,9 @@ public sealed class McpAgentCodingStandardsRepositoryTests
     /// be built to be just as large.
     /// </remarks>
     [Fact]
-    public void AStandardLargerThanTheDefaultBudgetNamesTheCutAndSaysTheCutIsExpected()
+    public async Task AStandardLargerThanTheDefaultBudgetNamesTheCutAndSaysTheCutIsExpected()
     {
-        string response = Ask(RepositorySurface.Value, "test");
+        string response = await AskAsync(RepositorySurface.Value, "test");
 
         string omission = Assert.Single(OmissionLines(response));
 
@@ -113,13 +113,13 @@ public sealed class McpAgentCodingStandardsRepositoryTests
     }
 
     [Fact]
-    public void TheRepositoryBundleCarriesItsRulesAndItsKwSkillListForEveryInstalledTechnology()
+    public async Task TheRepositoryBundleCarriesItsRulesAndItsKwSkillListForEveryInstalledTechnology()
     {
         string[] installed = ["csharp", "test", "typescript", "react", "rust", "tauri", "github-actions"];
 
         foreach (string technology in installed)
         {
-            string response = Ask(RepositorySurface.Value, technology);
+            string response = await AskAsync(RepositorySurface.Value, technology);
 
             Assert.Contains($"## {technology} rules", response, StringComparison.Ordinal);
 
@@ -134,10 +134,10 @@ public sealed class McpAgentCodingStandardsRepositoryTests
 
         foreach (string withSkills in new[] { "rust", "tauri" })
         {
-            Assert.Contains("## KW skills", Ask(RepositorySurface.Value, withSkills), StringComparison.Ordinal);
+            Assert.Contains("## KW skills", await AskAsync(RepositorySurface.Value, withSkills), StringComparison.Ordinal);
         }
 
-        Assert.Contains("## Shared rules", Ask(RepositorySurface.Value, "csharp"), StringComparison.Ordinal);
+        Assert.Contains("## Shared rules", await AskAsync(RepositorySurface.Value, "csharp"), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -180,14 +180,16 @@ public sealed class McpAgentCodingStandardsRepositoryTests
         return lines;
     }
 
-    private static string Ask(
+    private static async Task<string> AskAsync(
         DocsTools tools,
         string technology,
         string? topic = null,
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
+        // The tool is async and takes the host's CancellationToken last; the MCP host awaits it the same way.
         MethodInfo tool = FindMcpTool();
-        return (string)tool.Invoke(tools, [technology, topic, charBudget, null])!;
+        Task<string> answer = (Task<string>)tool.Invoke(tools, [technology, topic, charBudget, null, CancellationToken.None])!;
+        return await answer;
     }
 
     private static MethodInfo FindMcpTool()

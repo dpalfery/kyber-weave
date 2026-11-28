@@ -40,7 +40,7 @@ public sealed class SquadInstanceCliTests
     ///     directory and state directory under ~/.kyber-weave/ while leaving target files in the main home intact (AC 7.8).
     /// </summary>
     [Fact]
-    public void InstanceRemoveDeletesInstanceDirectoryAndStateWhenYesFlagSpecified()
+    public async Task InstanceRemoveDeletesInstanceDirectoryAndStateWhenYesFlagSpecified()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
         string mainClaudeHome = Path.Combine(userPaths.HomeDirectory, ".claude");
@@ -62,14 +62,15 @@ public sealed class SquadInstanceCliTests
             userPaths,
             isInteractive: false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "claude",
                 Preset = "fast",
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.False(_state.Files.DirectoryExists(instanceRoot), "Instance directory must be deleted.");
@@ -82,7 +83,7 @@ public sealed class SquadInstanceCliTests
     ///     exiting with code 2 without mutating filesystem (similar to uninstall command).
     /// </summary>
     [Fact]
-    public void InstanceRemoveDeclinedConfirmationPreservesInstanceAndExitsTwo()
+    public async Task InstanceRemoveDeclinedConfirmationPreservesInstanceAndExitsTwo()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
@@ -97,14 +98,15 @@ public sealed class SquadInstanceCliTests
             isInteractive: true,
             readAnswer: static _ => false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "claude",
                 Preset = "fast",
                 Yes = false
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("Declined", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -117,7 +119,7 @@ public sealed class SquadInstanceCliTests
     ///     Verifies that accepting the interactive confirmation prompt removes the instance and exits 0.
     /// </summary>
     [Fact]
-    public void InstanceRemoveConfirmedPromptDeletesInstanceAndExitsZero()
+    public async Task InstanceRemoveConfirmedPromptDeletesInstanceAndExitsZero()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
@@ -132,14 +134,15 @@ public sealed class SquadInstanceCliTests
             isInteractive: true,
             readAnswer: static _ => true);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "claude",
                 Preset = "fast",
                 Yes = false
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.False(_state.Files.DirectoryExists(instanceRoot));
@@ -150,7 +153,7 @@ public sealed class SquadInstanceCliTests
     ///     Verifies that attempting to remove an unknown or uninstalled instance exits with code 2.
     /// </summary>
     [Fact]
-    public void InstanceRemoveExitsTwoWhenInstanceDoesNotExist()
+    public async Task InstanceRemoveExitsTwoWhenInstanceDoesNotExist()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
 
@@ -158,14 +161,15 @@ public sealed class SquadInstanceCliTests
             userPaths,
             isInteractive: false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "claude",
                 Preset = "nonexistent",
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("not found", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -175,7 +179,7 @@ public sealed class SquadInstanceCliTests
     ///     Verifies that passing an unknown or invalid target token exits with code 2 before any filesystem mutation.
     /// </summary>
     [Fact]
-    public void InstanceRemoveExitsTwoWhenTargetIsInvalid()
+    public async Task InstanceRemoveExitsTwoWhenTargetIsInvalid()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
 
@@ -183,14 +187,15 @@ public sealed class SquadInstanceCliTests
             userPaths,
             isInteractive: false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "invalid-target",
                 Preset = "fast",
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("Unknown Squad target", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -200,7 +205,7 @@ public sealed class SquadInstanceCliTests
     ///     Verifies that omitting the required preset parameter exits with code 2.
     /// </summary>
     [Fact]
-    public void InstanceRemoveExitsTwoWhenPresetIsMissing()
+    public async Task InstanceRemoveExitsTwoWhenPresetIsMissing()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
 
@@ -208,14 +213,15 @@ public sealed class SquadInstanceCliTests
             userPaths,
             isInteractive: false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "claude",
                 Preset = null,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("preset", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -228,7 +234,7 @@ public sealed class SquadInstanceCliTests
     [Theory]
     [InlineData("../../etc")]
     [InlineData("../traversal")]
-    public void InstanceRemoveRejectsPathTraversalAttemptExitingTwoWithoutTouchingExternalDirectories(
+    public async Task InstanceRemoveRejectsPathTraversalAttemptExitingTwoWithoutTouchingExternalDirectories(
         string invalidPreset)
     {
         ISquadUserPaths userPaths = _state.UserPaths;
@@ -241,14 +247,15 @@ public sealed class SquadInstanceCliTests
             userPaths,
             isInteractive: false);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadInstanceRemoveSettings
             {
                 Target = "claude",
                 Preset = invalidPreset,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.True(_state.Files.DirectoryExists(outsideDir));
@@ -349,7 +356,7 @@ public sealed class SquadInstanceCliTests
     ///     updating their files and state safely without affecting files in the main home (AC 7.3, AC 7.8).
     /// </summary>
     [Fact]
-    public void UpdateGlobalRefreshesDeployedInstances()
+    public async Task UpdateGlobalRefreshesDeployedInstances()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
 
@@ -358,13 +365,14 @@ public sealed class SquadInstanceCliTests
 
         SquadUpdateCommand command = UpdateCommand();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
                 Global = true,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
 
@@ -378,7 +386,7 @@ public sealed class SquadInstanceCliTests
     ///     exists at the root home (AC 7.3).
     /// </summary>
     [Fact]
-    public void UpdateGlobalRefreshesDeployedInstancesEvenWithoutGlobalDeployment()
+    public async Task UpdateGlobalRefreshesDeployedInstancesEvenWithoutGlobalDeployment()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
 
@@ -388,13 +396,14 @@ public sealed class SquadInstanceCliTests
 
         SquadUpdateCommand command = UpdateCommand();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
                 Global = true,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
     }
@@ -403,7 +412,7 @@ public sealed class SquadInstanceCliTests
     ///     Verifies that any failure during instance refresh causes <c>squad update --global</c> to exit with code 1.
     /// </summary>
     [Fact]
-    public void UpdateGlobalExitsOneWhenInstanceRefreshFails()
+    public async Task UpdateGlobalExitsOneWhenInstanceRefreshFails()
     {
         ISquadUserPaths userPaths = _state.UserPaths;
 
@@ -415,13 +424,14 @@ public sealed class SquadInstanceCliTests
 
         SquadUpdateCommand command = UpdateCommand();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
                 Global = true,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
     }
@@ -566,6 +576,12 @@ public sealed class SquadInstanceCliTests
     private static CommandExecution Capture(Func<int> execute)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        return new CommandExecution(execution.Result, execution.Output);
+    }
+
+    private static async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
+    {
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

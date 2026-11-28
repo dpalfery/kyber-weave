@@ -30,7 +30,7 @@ public sealed class ArbiterServeContextFactory(
             engine,
             log,
             root => hostConfig.Load(root),
-            KeyResolved,
+            KeyResolvedAsync,
             EffectiveProvider);
     }
 
@@ -39,7 +39,7 @@ public sealed class ArbiterServeContextFactory(
     private ArbiterProviderConfig EffectiveProvider(KyberWeaveConfig config) =>
         userSettings.ApplyTo(config.Arbiter.Provider, process.HomeDirectory);
 
-    private bool KeyResolved(KyberWeaveConfig config)
+    private async Task<bool> KeyResolvedAsync(KyberWeaveConfig config, CancellationToken cancellationToken)
     {
         try
         {
@@ -48,7 +48,9 @@ public sealed class ArbiterServeContextFactory(
             string? userOverride = string.Equals(effective.Endpoint, repository.Endpoint, StringComparison.Ordinal)
                 ? null
                 : effective.Endpoint;
-            return ArbiterKeyResolver.Resolve(effective.Endpoint, credentials, process.GetVariable, userOverride) is not null;
+            string? key = await ArbiterKeyResolver.ResolveAsync(
+                effective.Endpoint, credentials, process.GetVariable, userOverride, cancellationToken).ConfigureAwait(false);
+            return key is not null;
         }
         catch (Exception ex) when (FileFailure.Is(ex)
             || ex is YamlDotNet.Core.YamlException or InvalidOperationException or Win32Exception)

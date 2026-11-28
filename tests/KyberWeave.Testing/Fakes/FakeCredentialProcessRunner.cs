@@ -20,12 +20,16 @@ internal sealed class FakeCredentialProcessRunner : ICredentialProcessRunner
     public ProcessResult NextResult { get; set; } = new(0, string.Empty, string.Empty);
 
     /// <inheritdoc />
-    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+    public Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
+        cancellationToken.ThrowIfCancellationRequested();
         string[] argv = [.. startInfo.ArgumentList];
         Calls.Add(new CapturedCredentialCall(startInfo.FileName, argv, standardInput));
-        return NextResult;
+        return Task.FromResult(NextResult);
     }
 }

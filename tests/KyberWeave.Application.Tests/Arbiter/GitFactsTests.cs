@@ -17,7 +17,7 @@ public sealed class GitFactsTests
     private readonly ScriptedProcessRunner _git = new();
     private readonly InMemoryFileSystem _files = new();
 
-    private GitFacts Facts() => new(_git, _files);
+    private GitFacts Facts() => new(_git, _files, _git.Run);
 
     /// <summary>Scripts the two reads a change measurement makes before it looks at untracked files.</summary>
     private void ScriptEmptyDiffAndUntracked(params string[] untracked)

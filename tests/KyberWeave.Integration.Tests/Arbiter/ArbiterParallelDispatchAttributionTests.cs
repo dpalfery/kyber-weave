@@ -25,7 +25,7 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// are subtracted before the rule reads them. What cannot be attributed allows. The evidence is a real repository,
 /// the hook's own snapshots, the ledger and a model that would call any stranger's file outside the task.
 /// </summary>
-public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
+public sealed class ArbiterParallelDispatchAttributionTests : IAsyncLifetime
 {
     private const string RuleId = "KW-ARB-DIFF-001";
     private const string PlannerDiffRuleId = "KW-ARB-PLANNER-DIFF-001";
@@ -53,33 +53,38 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
     public ArbiterParallelDispatchAttributionTests()
     {
         _arbiter = Path.Combine(_repo.Path, "artifacts", "arbiter");
-        Git("init", "-q", "-b", "main");
-        Git("config", "user.email", "arbiter@example.com");
-        Git("config", "user.name", "Arbiter");
         File.WriteAllText(Path.Combine(_repo.Path, ".gitignore"), "artifacts/\n");
         Directory.CreateDirectory(Path.Combine(_repo.Path, "src"));
         Directory.CreateDirectory(Path.Combine(_repo.Path, "docs", "plans"));
         File.WriteAllText(Path.Combine(_repo.Path, "src", "Program.cs"), "class Program {}\n");
         File.WriteAllText(Path.Combine(_repo.Path, "docs", "plans", "widget.md"), PlanText);
-        Git("add", ".");
-        Git("commit", "-q", "-m", "initial");
+    }
+
+    public async ValueTask InitializeAsync()
+    {
+        await Git("init", "-q", "-b", "main");
+        await Git("config", "user.email", "arbiter@example.com");
+        await Git("config", "user.name", "Arbiter");
+        await Git("add", ".");
+        await Git("commit", "-q", "-m", "initial");
 
         // A run branched in place, so the writer dispatches are not refused for want of one (KW-ARB-RUN-001).
-        Git("switch", "-q", "-c", "claude/feat/widget");
+        await Git("switch", "-q", "-c", "claude/feat/widget");
         RunStartTestServices.RunStateStore().Write(
             _home.Path,
             "claude/feat/widget",
             "main",
             new RunStartPlace(
-                RealGitFacts.Create().GetCommonDirectory(_repo.Path) ?? throw new InvalidOperationException("no git dir"),
+                await RealGitFacts.Create().GetCommonDirectoryAsync(_repo.Path) ?? throw new InvalidOperationException("no git dir"),
                 _repo.Path,
                 DateTimeOffset.UtcNow));
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _home.Dispose();
         _repo.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
@@ -241,7 +246,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
 
     private ArbiterEvaluator Evaluator() => new(
         new OutsideTaskProvider(),
-        _ => null,
+        (_, _) => Task.FromResult<string?>(null),
         RealArbiterState.Ledger(_arbiter),
         RealArbiterState.Decisions(_arbiter),
         ArbiterTestServices.HookGitFacts(_repo.Path, _home.Path, _arbiter),
@@ -308,7 +313,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
     private void Write(string relativePath) =>
         File.WriteAllText(Path.Combine(_repo.Path, relativePath), $"// {relativePath}\n");
 
-    private void Git(params string[] arguments)
+    private async Task Git(params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -321,7 +326,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
         };
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
     }
 

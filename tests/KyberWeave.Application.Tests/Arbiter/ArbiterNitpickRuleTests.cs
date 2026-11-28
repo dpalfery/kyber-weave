@@ -164,7 +164,7 @@ public sealed class ArbiterNitpickRuleTests
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             _arbiter.LedgerStore,
             _arbiter.DecisionLog,
             new PassThroughGitFacts(),

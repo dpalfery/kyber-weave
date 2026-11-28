@@ -55,12 +55,12 @@ public sealed class McpDocsToolsRefreshOptInTests
     /// tool availability error, and a caller reading it cannot tell a broken corpus from a broken index.
     /// </remarks>
     [Fact]
-    public void DocsToolsBuiltWithoutARefreshScheduleAnswerFromTheDocumentsOnDisk()
+    public async Task DocsToolsBuiltWithoutARefreshScheduleAnswerFromTheDocumentsOnDisk()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
-        string response = ToolsWithoutARefreshSchedule(_host.Repo).Explore(ScaffoldedDocumentId);
+        string response = await ToolsWithoutARefreshSchedule(_host.Repo).ExploreAsync(ScaffoldedDocumentId);
 
         Assert.DoesNotContain(ToolFailure, response, StringComparison.Ordinal);
         Assert.StartsWith("provenance:", response, StringComparison.Ordinal);

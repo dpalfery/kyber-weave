@@ -523,7 +523,7 @@ public class ApplicationParityTests
             (binary, stateDir) =>
             {
                 spawned.Add((binary, stateDir));
-                return true;
+                return Task.FromResult(true);
             });
 
         EngineEnsureReport report = await lifecycle.EnsureRunningEngineMatchesVersionAsync(

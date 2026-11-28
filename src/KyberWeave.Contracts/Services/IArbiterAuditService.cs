@@ -39,4 +39,25 @@ public interface IArbiterAuditService
         string? session,
         Func<string?, bool>? matchesPlan,
         DiagnosticReport report);
+
+    /// <summary>
+    /// The same audit without blocking a thread: the repository root and the arbiter state directory are
+    /// resolved while git runs, and the resolution is awaited rather than waited on.
+    /// </summary>
+    /// <param name="repositoryPath">The repository whose logs are read.</param>
+    /// <param name="config">The effective configuration; it says whether a decision model is configured.</param>
+    /// <param name="since">The earliest event to report on, or null for every event.</param>
+    /// <param name="session">The one session to report on, or null for every session.</param>
+    /// <param name="matchesPlan">Whether an event's plan header is the plan the caller named, or null when none was named.</param>
+    /// <param name="report">Receives the findings, the attestations and the metrics.</param>
+    /// <param name="cancellationToken">Cancels the git run and kills the process tree.</param>
+    /// <returns>The report, or null when the log cannot be read whole; the findings say why.</returns>
+    Task<ArbiterAuditReport?> AuditAsync(
+        string repositoryPath,
+        KyberWeaveConfig config,
+        DateTimeOffset? since,
+        string? session,
+        Func<string?, bool>? matchesPlan,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default);
 }

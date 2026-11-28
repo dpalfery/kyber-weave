@@ -14,16 +14,38 @@ public sealed class CodeGraphPortsFactory(
     IFileSystem files,
     IPathResolver paths,
     IProcessEnvironment environment,
-    IBoundedProcessExecutor processes,
+    IProcessRunner processes,
     CodeGraphIndexStaleness staleness) : ICodeGraphPortsFactory
 {
     /// <inheritdoc />
     public CodeGraphPorts ForRepository(string repositoryRoot)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-        string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
-        string databasePath = Path.Combine(root, ".codegraph", "codegraph.db");
+        string databasePath = DatabasePathFor(repositoryRoot);
         CodeGraphResolverAdapter adapter = new(databasePath, files, paths, environment, processes, staleness);
         return new CodeGraphPorts(adapter, adapter, adapter, adapter);
+    }
+
+    /// <inheritdoc />
+    public async Task<CodeGraphPorts> ForRepositoryAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default)
+    {
+        string databasePath = DatabasePathFor(repositoryRoot);
+        CodeGraphResolverAdapter adapter = await CodeGraphResolverAdapter.CreateAsync(
+            databasePath,
+            files,
+            paths,
+            environment,
+            processes,
+            staleness,
+            cancellationToken).ConfigureAwait(false);
+        return new CodeGraphPorts(adapter, adapter, adapter, adapter);
+    }
+
+    private string DatabasePathFor(string repositoryRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+        return Path.Combine(root, ".codegraph", "codegraph.db");
     }
 }

@@ -38,14 +38,15 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
 
     /// <summary>A bot summary prints one line per table row, each with its path and line, and exits 0.</summary>
     [Fact]
-    public void Summary_PrintsOneLinePerTableRow()
+    public async Task Summary_PrintsOneLinePerTableRow()
     {
         WriteCitedFiles();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "kilo-code-bot", Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "kilo-code-bot", Body = Summary },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("src/Widget.cs", execution.Output, StringComparison.Ordinal);
@@ -55,14 +56,15 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
 
     /// <summary>A human author's summary prints every item as real, so no operator is told a human's comment is a nitpick.</summary>
     [Fact]
-    public void Summary_HumanAuthor_PrintsEveryItemReal()
+    public async Task Summary_HumanAuthor_PrintsEveryItemReal()
     {
         WriteCitedFiles();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "dave", Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "dave", Body = Summary },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("nitpick", execution.Output, StringComparison.Ordinal);
@@ -71,14 +73,15 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
 
     /// <summary>A summary with no author is fail-safe real and still exits 0.</summary>
     [Fact]
-    public void Summary_NoAuthor_ExitsZeroWithRealItems()
+    public async Task Summary_NoAuthor_ExitsZeroWithRealItems()
     {
         WriteCitedFiles();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Body = Summary },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("nitpick", execution.Output, StringComparison.Ordinal);
@@ -86,14 +89,15 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
 
     /// <summary>Operator text in a summary's issue cell renders literally and does not throw.</summary>
     [Fact]
-    public void Summary_IssueWithMarkupCharacters_RendersLiterally()
+    public async Task Summary_IssueWithMarkupCharacters_RendersLiterally()
     {
         WriteCitedFiles();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "dave", Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "dave", Body = Summary },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Use [red]this[/] name.", execution.Output, StringComparison.Ordinal);

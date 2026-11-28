@@ -36,12 +36,12 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
     ///     <c>--target-dir .agent_scratchpad/{task}/target</c>, which is refused without one.
     /// </summary>
     [Fact]
-    public void ReviewGatesRunsTheWrittenRustGatesAndReportsGatesDeclared()
+    public async Task ReviewGatesRunsTheWrittenRustGatesAndReportsGatesDeclared()
     {
         string repo = Path.Combine(_temp.Path, "rust-" + Guid.NewGuid().ToString("N"));
         TestGitRepositoryTemplate.CreateDocsInitFixtureRepository("rust", ["rust"], repo);
-        DocsTestCommands.Scaffolding.Scaffold(repo);
-        File.AppendAllText(Path.Combine(repo, "src", "lib.rs"), "\n// review probe\n");
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(repo);
+        await File.AppendAllTextAsync(Path.Combine(repo, "src", "lib.rs"), "\n// review probe\n");
         string reportPath = Path.Combine(_temp.Path, "rust-gates-" + Guid.NewGuid().ToString("N") + ".json");
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => CommandAppFixture.ReviewGates().Run(
@@ -51,12 +51,12 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
         ]));
 
         Assert.DoesNotContain(NoGatesForAgent, execution.Output, StringComparison.Ordinal);
-        if (CargoAvailable())
+        if (await CargoAvailable())
         {
             Assert.True(
                 File.Exists(reportPath),
                 $"review gates wrote no report. Output:{Environment.NewLine}{execution.Output}");
-            using JsonDocument report = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using JsonDocument report = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
             Assert.NotEmpty(report.RootElement.GetProperty("gates").EnumerateArray());
         }
         else
@@ -69,7 +69,7 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
         }
     }
 
-    private static bool CargoAvailable()
+    private static async Task<bool> CargoAvailable()
     {
         try
         {
@@ -83,7 +83,7 @@ public sealed class ReviewGatesRealRustToolchainTests : IDisposable
             startInfo.ArgumentList.Add("--version");
 
             // Bounded: a rustup proxy can stall on a toolchain download, and that stall must not hang the suite.
-            return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30)).ExitCode == 0;
+            return (await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30))).ExitCode == 0;
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {

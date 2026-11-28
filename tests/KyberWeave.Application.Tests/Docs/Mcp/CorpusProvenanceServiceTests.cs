@@ -17,9 +17,9 @@ public sealed class CorpusProvenanceServiceTests
         new(_probe, FakePathResolver.OverEmptyFileSystem(), new FakeProcessEnvironment(currentDirectory));
 
     [Fact]
-    public void ALineNamesTheBranchRepositoryRevisionAndDocumentCountOfTheResolvedRoot()
+    public async Task ALineNamesTheBranchRepositoryRevisionAndDocumentCountOfTheResolvedRoot()
     {
-        string line = Service("/cp-a/work").Line("/cp-a/repo", 7, corpusStamp: 1);
+        string line = await Service("/cp-a/work").LineAsync("/cp-a/repo", 7, corpusStamp: 1);
 
         Assert.Equal(
             "provenance: root=" + _probe.LastRoot + " branch=topic repo=/cp-a/repo/.git rev=abc1234 dirty=no documents=7",
@@ -28,39 +28,39 @@ public sealed class CorpusProvenanceServiceTests
     }
 
     [Fact]
-    public void ARelativeRootIsResolvedAgainstTheEnvironmentsCurrentDirectoryNotTheProcess()
+    public async Task ARelativeRootIsResolvedAgainstTheEnvironmentsCurrentDirectoryNotTheProcess()
     {
-        _ = Service("/cp-b/work").Line("repo", documentCount: null, corpusStamp: 1);
+        _ = await Service("/cp-b/work").LineAsync("repo", documentCount: null, corpusStamp: 1);
 
         Assert.EndsWith("/cp-b/work/repo", _probe.LastRoot.Replace('\\', '/'), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ADocumentCountThatIsNotKnownIsReportedAsUnavailable()
+    public async Task ADocumentCountThatIsNotKnownIsReportedAsUnavailable()
     {
-        string line = Service("/cp-c/work").Line("/cp-c/repo", documentCount: null, corpusStamp: 1);
+        string line = await Service("/cp-c/work").LineAsync("/cp-c/repo", documentCount: null, corpusStamp: 1);
 
         Assert.EndsWith(" documents=" + CorpusProvenance.Unavailable, line, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ASecondLineForTheSameStampsDoesNotReadTheCheckoutAgain()
+    public async Task ASecondLineForTheSameStampsDoesNotReadTheCheckoutAgain()
     {
         CorpusProvenanceService service = Service("/cp-d/work");
 
-        _ = service.Line("/cp-d/repo", 1, corpusStamp: 5);
-        _ = service.Line("/cp-d/repo", 1, corpusStamp: 5);
+        _ = await service.LineAsync("/cp-d/repo", 1, corpusStamp: 5);
+        _ = await service.LineAsync("/cp-d/repo", 1, corpusStamp: 5);
 
         Assert.Equal(1, _probe.LocationReads);
     }
 
     [Fact]
-    public void AChangedCorpusStampReadsTheCheckoutAgain()
+    public async Task AChangedCorpusStampReadsTheCheckoutAgain()
     {
         CorpusProvenanceService service = Service("/cp-e/work");
 
-        _ = service.Line("/cp-e/repo", 1, corpusStamp: 5);
-        _ = service.Line("/cp-e/repo", 1, corpusStamp: 6);
+        _ = await service.LineAsync("/cp-e/repo", 1, corpusStamp: 5);
+        _ = await service.LineAsync("/cp-e/repo", 1, corpusStamp: 6);
 
         Assert.Equal(2, _probe.LocationReads);
     }
@@ -83,6 +83,7 @@ public sealed class CorpusProvenanceServiceTests
             return new GitCheckoutLocation("topic", root + "/.git");
         }
 
-        public GitCheckoutRevision ReadRevision(string root) => new("abc1234", "no");
+        public Task<GitCheckoutRevision> ReadRevisionAsync(string root, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GitCheckoutRevision("abc1234", "no"));
     }
 }

@@ -413,7 +413,7 @@ public static class TestGitRepositoryTemplate
     ///         to commit or find committed.
     ///     </para>
     /// </remarks>
-    internal static void InitializeRunDeliverySeedTemplate(string seed)
+    internal static async Task InitializeRunDeliverySeedTemplate(string seed)
     {
         const string branch = "claude/feat/widget-export";
         const string activePlan = "docs/plans/2026-11-13-widget-export.md";
@@ -446,7 +446,7 @@ public static class TestGitRepositoryTemplate
         WriteFile(model, activePlan, RunDeliveryPlanText);
         RunGit(model, "add", "-A");
         Commit(model, "feat: export widgets as CSV");
-        WriteRunEvidence(model, branch);
+        await WriteRunEvidence(model, branch);
     }
 
     /// <summary>
@@ -454,7 +454,7 @@ public static class TestGitRepositoryTemplate
     ///     completed run leaves in its scratch folder. The scratch folder is ignored so it never reaches the pushed
     ///     branch, which is what the deliver step expects of a real run.
     /// </summary>
-    private static void WriteRunEvidence(string model, string branch)
+    private static async Task WriteRunEvidence(string model, string branch)
     {
         WriteFile(model, ".gitignore", ".agent_scratchpad/\n");
         RunGit(model, "add", ".gitignore");
@@ -463,16 +463,16 @@ public static class TestGitRepositoryTemplate
             [new GateResult("build", true, 0, "passed"), new GateResult("test", true, 0, "passed"), new GateResult("format", true, 0, "passed")])));
         string cycle = Path.Combine(model, ".agent_scratchpad", "review", "review", "cycle-1");
         Directory.CreateDirectory(cycle);
-        File.WriteAllText(Path.Combine(cycle, "gates.json"), ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
+        await File.WriteAllTextAsync(Path.Combine(cycle, "gates.json"), ReviewJson.Write(new GateReport(GateReport.CurrentSchema,
             [new GateResult("build", true, 0, "passed"), new GateResult("test", true, 0, "passed")])));
-        File.WriteAllText(Path.Combine(cycle, "findings.json"), ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema,
+        await File.WriteAllTextAsync(Path.Combine(cycle, "findings.json"), ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema,
             [new ReviewFinding("naming/vague", "naming", ReviewSeverity.Minor, 8, "src/Export.cs", 1, "// export",
                 "The file name does not say it writes CSV.", "Read the file.", "A reader looks for the CSV writer elsewhere.", "Rename it CsvExport.cs.")],
             ["src/Export.cs"], 1)));
         ReviewTestServices.Cycles.WriteIdentity(cycle, new ReviewCycleIdentity(
             branch,
-            Output(model, "merge-base", "origin/main", "HEAD"),
-            Output(model, "rev-parse", "HEAD")));
+            await Output(model, "merge-base", "origin/main", "HEAD"),
+            await Output(model, "rev-parse", "HEAD")));
     }
 
     /// <summary>
@@ -616,13 +616,11 @@ public static class TestGitRepositoryTemplate
     ///     Runs git in <paramref name="repo" /> and throws git's own stderr when it fails. The directory need not be a
     ///     repository: seeding runs <c>git init</c> and <c>git clone</c> inside a plain template directory.
     /// </summary>
-    internal static void RunGit(string repo, params string[] arguments)
-    {
-        _ = Output(repo, arguments);
-    }
+    internal static void RunGit(string repo, params string[] arguments) =>
+        _ = Output(repo, arguments).GetAwaiter().GetResult();
 
     /// <summary>Runs git as <see cref="RunGit" /> does and returns its standard output, trimmed.</summary>
-    private static string Output(string repo, params string[] arguments)
+    private static async Task<string> Output(string repo, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -636,7 +634,7 @@ public static class TestGitRepositoryTemplate
 
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         if (result.ExitCode != 0)
             throw new InvalidOperationException(
                 $"git {string.Join(' ', arguments)} failed in '{repo}': {result.StandardError}");

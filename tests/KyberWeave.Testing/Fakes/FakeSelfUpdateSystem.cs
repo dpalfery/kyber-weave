@@ -32,7 +32,7 @@ public sealed class FakeSelfUpdateSystem(IWritableFileSystem files) : ISelfUpdat
     /// <summary>Gets or sets the exit code <see cref="RunProcess"/> answers.</summary>
     public int RunProcessExitCode { get; set; }
 
-    /// <summary>Gets or sets what <see cref="RunCapture"/> answers.</summary>
+    /// <summary>Gets or sets what <see cref="RunCaptureAsync"/> answers.</summary>
     public ProcessResult CaptureResult { get; set; } = new(0, string.Empty, string.Empty);
 
     /// <summary>Gets or sets the exit code <see cref="StartFinishingProcess"/> answers.</summary>
@@ -55,10 +55,13 @@ public sealed class FakeSelfUpdateSystem(IWritableFileSystem files) : ISelfUpdat
     }
 
     /// <inheritdoc />
-    public ProcessResult RunCapture(string fileName, IReadOnlyList<string> arguments)
+    public Task<ProcessResult> RunCaptureAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
     {
         _startedPrograms.Add(fileName);
-        return CaptureResult;
+        return Task.FromResult(CaptureResult);
     }
 
     /// <inheritdoc />
@@ -79,13 +82,19 @@ public sealed class FakeSelfUpdateSystem(IWritableFileSystem files) : ISelfUpdat
     }
 
     /// <inheritdoc />
-    public void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs)
+    public Task ReplaceBinaryAsync(
+        string extractedBinaryPath,
+        string destinationPath,
+        bool windows,
+        bool macOs,
+        CancellationToken cancellationToken = default)
     {
         if (ReplaceFailure?.Invoke(destinationPath) is { } failure)
             throw failure;
 
         _replacedDestinations.Add(destinationPath);
         files.WriteAllBytes(destinationPath, files.ReadAllBytes(extractedBinaryPath));
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

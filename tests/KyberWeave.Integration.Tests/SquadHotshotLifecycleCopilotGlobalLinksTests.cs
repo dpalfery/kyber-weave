@@ -102,13 +102,13 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             install.GlobalRoots,
             SquadTestRegistry.Create([new CopilotRenderer()]));
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = Corpus.Root,
                 Global = true
-            }));
+            }, CancellationToken.None));
 
         string normalizedOutput = string.Join(
             ' ',

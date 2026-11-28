@@ -60,17 +60,17 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     public void Dispose() => _release.Dispose();
 
     [Fact]
-    public void UpdateGlobalFromTwoUnrelatedDirectoriesFindsTheSameGlobalReceipt()
+    public async Task UpdateGlobalFromTwoUnrelatedDirectoriesFindsTheSameGlobalReceipt()
     {
         string anchor = CreateDirectory("global-anchor");
         string first = CreateDirectory("unrelated-first");
         string second = CreateDirectory("unrelated-second");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
 
-        CommandExecution fromFirst = Capture(() =>
-            UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, GlobalUpdate(first)));
-        CommandExecution fromSecond = Capture(() =>
-            UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, GlobalUpdate(second)));
+        CommandExecution fromFirst = await CaptureAsync(() =>
+            UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, GlobalUpdate(first), CancellationToken.None));
+        CommandExecution fromSecond = await CaptureAsync(() =>
+            UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, GlobalUpdate(second), CancellationToken.None));
 
         AssertExit(fromFirst, 0);
         AssertExit(fromSecond, 0);
@@ -79,10 +79,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
+    public async Task UpdateGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         WriteHomeConfig("""
             arbiter:
               enabled: true
@@ -90,8 +90,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 targets: [codex]
             """);
 
-        CommandExecution execution = Capture(() =>
-            UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, GlobalUpdate(anchor)));
+        CommandExecution execution = await CaptureAsync(() =>
+            UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, GlobalUpdate(anchor), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.DoesNotContain("KW-ARB-CONFIG-011", execution.Output, StringComparison.Ordinal);
@@ -99,21 +99,21 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalFailsOnAMalformedHomeConfigProvingTheHomeFileIsActuallyRead()
+    public async Task UpdateGlobalFailsOnAMalformedHomeConfigProvingTheHomeFileIsActuallyRead()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         WriteHomeConfig("arbiter: [unclosed");
 
-        CommandExecution execution = Capture(() =>
-            UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, GlobalUpdate(anchor)));
+        CommandExecution execution = await CaptureAsync(() =>
+            UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, GlobalUpdate(anchor), CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Contains("kyber-weave squad: error:", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void InstallGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
+    public async Task InstallGlobalReadsTheHomeConfigAsUserLevelSoItsArbiterGlobalBlockIsAccepted()
     {
         string anchor = CreateDirectory("anchor");
         WriteHomeConfig("""
@@ -123,21 +123,21 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 targets: [codex]
             """);
 
-        CommandExecution install = InstallGlobal(anchor);
+        CommandExecution install = await InstallGlobal(anchor);
 
         AssertExit(install, 0);
         Assert.DoesNotContain("KW-ARB-CONFIG-011", install.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void UpdateGlobalWithAPathWarnsThatThePathIsIgnoredAndStillUpdates()
+    public async Task UpdateGlobalWithAPathWarnsThatThePathIsIgnoredAndStillUpdates()
     {
         string anchor = CreateDirectory("anchor");
         string named = CreateDirectory("elsewhere");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
 
-        CommandExecution execution = Capture(() =>
-            UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, GlobalUpdate(named)));
+        CommandExecution execution = await CaptureAsync(() =>
+            UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, GlobalUpdate(named), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Contains("is ignored under --global", execution.Output, StringComparison.Ordinal);
@@ -146,15 +146,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalPickerAllUpdatesEveryNonStaleProjectAndLeavesStaleOneAlone()
+    public async Task UpdateGlobalPickerAllUpdatesEveryNonStaleProjectAndLeavesStaleOneAlone()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(AllNonStale);
         PromptRecorder prompts = new();
         byte[]? staleLockBefore = Snapshot(fleet.Stale.LockPath);
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, prompts.Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Single(picker.Calls);
@@ -165,13 +165,13 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalPickerNoneUpdatesNoProject()
+    public async Task UpdateGlobalPickerNoneUpdatesNoProject()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(NoProjects);
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, new PromptRecorder().Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Single(picker.Calls);
@@ -181,13 +181,13 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalPickerOneProjectUpdatesOnlyThatProject()
+    public async Task UpdateGlobalPickerOneProjectUpdatesOnlyThatProject()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(_ => [fleet.Alpha.Root]);
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, new PromptRecorder().Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Single(picker.Calls);
@@ -201,15 +201,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     as client input before any write.
     /// </summary>
     [Fact]
-    public void UpdateGlobalNoneCombinedWithAnotherProjectChoiceIsRejectedWithoutWrites()
+    public async Task UpdateGlobalNoneCombinedWithAnotherProjectChoiceIsRejectedWithoutWrites()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         byte[]? globalLockBefore = Snapshot(GlobalLockPath());
         byte[]? alphaLockBefore = Snapshot(fleet.Alpha.LockPath);
         RecordingProjectPicker picker = new(AllNonStale);
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, false, new PromptRecorder().Answer).Execute(
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, false, new PromptRecorder().Answer).ExecuteAsync(
                 null!,
                 new SquadUpdateSettings
                 {
@@ -218,7 +218,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                     Version = UpdatedVersion,
                     Yes = true,
                     Projects = ["none", fleet.Alpha.Root]
-                }));
+                },
+                CancellationToken.None));
 
         AssertExit(execution, 2);
         Assert.Contains("none", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -228,14 +229,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalNonInteractiveWithoutProjectsNeverInvokesThePicker()
+    public async Task UpdateGlobalNonInteractiveWithoutProjectsNeverInvokesThePicker()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(AllNonStale);
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             fleet.Command(picker, false, new PromptRecorder().Answer)
-                .Execute(null!, GlobalUpdate(fleet.Anchor, yes: false)));
+                .ExecuteAsync(null!, GlobalUpdate(fleet.Anchor, yes: false), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -245,14 +246,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalProjectsAllUpdatesEveryNonStaleProjectWithoutPrompting()
+    public async Task UpdateGlobalProjectsAllUpdatesEveryNonStaleProjectWithoutPrompting()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(AllNonStale);
         PromptRecorder prompts = new();
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, ["all"])));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, prompts.Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor, ["all"]), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -262,14 +263,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalProjectsNoneUpdatesNoProjectWithoutPrompting()
+    public async Task UpdateGlobalProjectsNoneUpdatesNoProjectWithoutPrompting()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(AllNonStale);
         PromptRecorder prompts = new();
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, ["none"])));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, prompts.Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor, ["none"]), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -279,14 +280,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalProjectsPathUpdatesOnlyThatProjectWithoutPrompting()
+    public async Task UpdateGlobalProjectsPathUpdatesOnlyThatProjectWithoutPrompting()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(AllNonStale);
         PromptRecorder prompts = new();
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, prompts.Answer).Execute(null!, GlobalUpdate(fleet.Anchor, [fleet.Alpha.Root])));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, prompts.Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor, [fleet.Alpha.Root]), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Empty(picker.Calls);
@@ -300,14 +301,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     failure: the operator named it, so silence would hide that nothing happened to it.
     /// </summary>
     [Fact]
-    public void UpdateGlobalProjectsNamingAStaleProjectWarnsAndSkipsIt()
+    public async Task UpdateGlobalProjectsNamingAStaleProjectWarnsAndSkipsIt()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         byte[]? staleLockBefore = Snapshot(fleet.Stale.LockPath);
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             fleet.Command(new RecordingProjectPicker(NoProjects), false, new PromptRecorder().Answer)
-                .Execute(null!, GlobalUpdate(fleet.Anchor, [fleet.Stale.Root])));
+                .ExecuteAsync(null!, GlobalUpdate(fleet.Anchor, [fleet.Stale.Root]), CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Contains("skipping stale project", execution.Output, StringComparison.Ordinal);
@@ -320,10 +321,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     in-repo files stay byte-identical, and the project is reported as skipped, so the exit stays 0.
     /// </summary>
     [Fact]
-    public void GlobalDryRunNamingAnImportableProjectWritesNothingAndSkipsIt()
+    public async Task GlobalDryRunNamingAnImportableProjectWritesNothingAndSkipsIt()
     {
         string anchor = CreateDirectory("global-anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         string importable = CreateDirectory("importable");
         WriteInRepoLegacyState(importable);
         string inRepoReceipt = Path.Combine(importable, ".kyber-weave", "squad.receipt.json");
@@ -336,8 +337,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         SquadUpdateSettings settings = GlobalUpdate(anchor, [importable]);
         settings.DryRun = true;
 
-        CommandExecution execution = Capture(() =>
-            UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, settings));
+        CommandExecution execution = await CaptureAsync(() =>
+            UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, settings, CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.Contains("on the next non-dry-run invocation", execution.Output, StringComparison.Ordinal);
@@ -356,16 +357,16 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     registered project so a typo is one copy-paste away from being fixed.
     /// </summary>
     [Fact]
-    public void UpdateGlobalUnknownProjectsPathExitsTwoWithNearestHintAndNoWrites()
+    public async Task UpdateGlobalUnknownProjectsPathExitsTwoWithNearestHintAndNoWrites()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         byte[]? globalLockBefore = Snapshot(GlobalLockPath());
         byte[]? alphaLockBefore = Snapshot(fleet.Alpha.LockPath);
         string typo = Path.Combine(_work, "alpah");
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             fleet.Command(new RecordingProjectPicker(NoProjects), false, new PromptRecorder().Answer)
-                .Execute(null!, GlobalUpdate(fleet.Anchor, [typo])));
+                .ExecuteAsync(null!, GlobalUpdate(fleet.Anchor, [typo]), CancellationToken.None));
 
         AssertExit(execution, 2);
         Assert.Contains(fleet.Alpha.Root, execution.Output, StringComparison.Ordinal);
@@ -374,16 +375,17 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateProjectsWithoutGlobalExitsTwoNamingTheGlobalFlag()
+    public async Task UpdateProjectsWithoutGlobalExitsTwoNamingTheGlobalFlag()
     {
-        Project alpha = InstallProject("alpha");
+        Project alpha = await InstallProject("alpha");
         byte[]? alphaLockBefore = Snapshot(alpha.LockPath);
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             UpdateCommand(new RecordingProjectPicker(NoProjects), false)
-                .Execute(null!,
+                .ExecuteAsync(null!,
                     new SquadUpdateSettings
-                    { Path = alpha.Root, Global = false, Version = UpdatedVersion, Projects = ["all"] }));
+                    { Path = alpha.Root, Global = false, Version = UpdatedVersion, Projects = ["all"] },
+                    CancellationToken.None));
 
         AssertExit(execution, 2);
         Assert.Contains("--global", execution.Output, StringComparison.Ordinal);
@@ -391,16 +393,16 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void UpdateGlobalWhenTheGlobalUpdateFailsNeverOffersThePicker()
+    public async Task UpdateGlobalWhenTheGlobalUpdateFailsNeverOffersThePicker()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         RecordingProjectPicker picker = new(AllNonStale);
         using FakeSquadReleaseSource failing =
             FakeSquadReleaseSource.Failing(new InvalidOperationException("The Squad release is unavailable."));
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             fleet.Command(picker, true, new PromptRecorder().Answer, failing)
-                .Execute(null!, GlobalUpdate(fleet.Anchor)));
+                .ExecuteAsync(null!, GlobalUpdate(fleet.Anchor), CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Empty(picker.Calls);
@@ -413,9 +415,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     the run ends with a summary and exit 1 rather than a silent partial success.
     /// </summary>
     [Fact]
-    public void UpdateGlobalWhenOneProjectFailsUpdatesTheRestPrintsSummaryAndExitsOne()
+    public async Task UpdateGlobalWhenOneProjectFailsUpdatesTheRestPrintsSummaryAndExitsOne()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         string betaConfigDirectory = Path.Combine(fleet.Beta.Root, ".kyber-weave");
         _state.Files.CreateDirectory(betaConfigDirectory);
         _state.Files.WriteAllText(
@@ -423,8 +425,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             "key: [unterminated\n");
         RecordingProjectPicker picker = new(AllNonStale);
 
-        CommandExecution execution = Capture(() =>
-            fleet.Command(picker, true, new PromptRecorder().Answer).Execute(null!, GlobalUpdate(fleet.Anchor)));
+        CommandExecution execution = await CaptureAsync(() =>
+            fleet.Command(picker, true, new PromptRecorder().Answer).ExecuteAsync(null!, GlobalUpdate(fleet.Anchor), CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Contains(fleet.Alpha.Root, execution.Output, StringComparison.Ordinal);
@@ -439,19 +441,20 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     rather than by the directory the operator happened to be in.
     /// </summary>
     [Fact]
-    public void UpdateGlobalTargetAllReplaceManagedOverwritesEditedOwnedFile()
+    public async Task UpdateGlobalTargetAllReplaceManagedOverwritesEditedOwnedFile()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         string architect = InstalledFile(SquadTarget.Codex, "architect.md");
         byte[] canonical = _state.Files.ReadAllBytes(architect);
         _state.Files.WriteAllText(architect, "locally edited architect\n");
         byte[] edited = _state.Files.ReadAllBytes(architect);
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             UpdateCommand(new RecordingProjectPicker(NoProjects), false)
-                .Execute(null!,
-                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+                .ExecuteAsync(null!,
+                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true),
+                    CancellationToken.None));
 
         AssertExit(execution, 0);
         Assert.NotEqual(edited, _state.Files.ReadAllBytes(architect));
@@ -465,10 +468,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     unowned file is untouched.
     /// </summary>
     [Fact]
-    public void UpdateGlobalTargetAllReplaceManagedWithUnmanagedNewPathFailsWholeRunWithoutWrites()
+    public async Task UpdateGlobalTargetAllReplaceManagedWithUnmanagedNewPathFailsWholeRunWithoutWrites()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         string architect = InstalledFile(SquadTarget.Codex, "architect.md");
         _state.Files.WriteAllText(architect, "locally edited architect\n");
         byte[] edited = _state.Files.ReadAllBytes(architect);
@@ -479,10 +482,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? lockBefore = Snapshot(GlobalLockPath());
         FakeSquadRenderer updateRenderer = FakeSquadRenderer.ScriptedAgents("architect", "collider");
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             UpdateCommand(new RecordingProjectPicker(NoProjects), false, updateRenderer)
-                .Execute(null!,
-                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+                .ExecuteAsync(null!,
+                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true),
+                    CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
@@ -500,9 +504,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     [Fact]
-    public void StatusGlobalListsRegisteredProjectsWithStaleFlags()
+    public async Task StatusGlobalListsRegisteredProjectsWithStaleFlags()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
 
         CommandExecution execution = Status(fleet.Anchor, global: true);
 
@@ -518,10 +522,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     crashing or listing nothing and succeeding. The status read is not a repair, so the corrupt file is left as found.
     /// </summary>
     [Fact]
-    public void StatusGlobalNamesAnUnreadableRegistryAndFailsWithoutRewritingIt()
+    public async Task StatusGlobalNamesAnUnreadableRegistryAndFailsWithoutRewritingIt()
     {
         string anchor = CreateDirectory("global-anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         const string corrupt = "{ this registry is corrupt \n";
         _state.Files.WriteAllText(RegistryPath(), corrupt);
 
@@ -538,15 +542,15 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     could not move, and in-repo legacy state that was imported but kept.
     /// </summary>
     [Fact]
-    public void DoctorGlobalReportsStaleEntriesUnmigratedLegacyRootsAndRetainedInRepoState()
+    public async Task DoctorGlobalReportsStaleEntriesUnmigratedLegacyRootsAndRetainedInRepoState()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         WriteLegacyGlobalRoot("legacy-alpha", "agents/alpha.toml", "alpha\n");
         WriteLegacyGlobalRoot("legacy-beta", "agents/beta.toml", "beta\n");
-        Project gamma = InstallProject("gamma");
+        Project gamma = await InstallProject("gamma");
         WriteInRepoLegacyState(gamma.Root);
 
-        CommandExecution execution = Doctor(fleet.Anchor, fleet.Renderer);
+        CommandExecution execution = await Doctor(fleet.Anchor, fleet.Renderer);
 
         Assert.Contains("is stale (", execution.Output, StringComparison.Ordinal);
         Assert.Contains("until its path is restored", execution.Output, StringComparison.Ordinal);
@@ -569,9 +573,9 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     deployed file — and the registry are the same bytes after the run as before it.
     /// </remarks>
     [Fact]
-    public void UninstallGlobalLeavesProjectStateAndRegistryUntouched()
+    public async Task UninstallGlobalLeavesProjectStateAndRegistryUntouched()
     {
-        Fleet fleet = ArrangeFleet();
+        Fleet fleet = await ArrangeFleet();
         string registry = RegistryPath();
         byte[]? registryBefore = Snapshot(registry);
         string alphaTreeBefore = CaptureTree(fleet.Alpha.Root);
@@ -579,7 +583,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         byte[]? alphaLockBefore = Snapshot(fleet.Alpha.LockPath);
         byte[]? alphaReceiptBefore = Snapshot(fleet.Alpha.ReceiptPath);
 
-        CommandExecution execution = Uninstall(fleet.Anchor, global: true);
+        CommandExecution execution = await Uninstall(fleet.Anchor, global: true);
 
         AssertExit(execution, 0);
         Assert.False(
@@ -598,13 +602,13 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     for an older CLI, so the command that runs after the uninstall must not copy it back into the home.
     /// </summary>
     [Fact]
-    public void UninstallOfMigratedGlobalStateIsNotUndoneByTheNextCommand()
+    public async Task UninstallOfMigratedGlobalStateIsNotUndoneByTheNextCommand()
     {
         string anchor = CreateDirectory("global-anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         MoveGlobalStateToLegacyRoot(anchor);
 
-        AssertExit(Uninstall(anchor, global: true), 0);
+        AssertExit(await Uninstall(anchor, global: true), 0);
         Assert.False(
             _state.Files.FileExists(GlobalReceiptPath()),
             "Global uninstall must remove the global receipt.");
@@ -626,16 +630,16 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     copy is kept on purpose, so the next touch would import it again unless the import is recorded as done.
     /// </summary>
     [Fact]
-    public void UninstallOfImportedProjectStateIsNotUndoneByTheNextTouch()
+    public async Task UninstallOfImportedProjectStateIsNotUndoneByTheNextTouch()
     {
-        Project alpha = InstallProject("alpha");
+        Project alpha = await InstallProject("alpha");
         MoveProjectStateInRepo(alpha);
         _ = _state.Migration.ImportProject(alpha.Root);
         Assert.True(
             _state.Files.FileExists(alpha.ReceiptPath),
             "The import must restore the home project receipt before the uninstall.");
 
-        AssertExit(Uninstall(alpha.Root, global: false), 0);
+        AssertExit(await Uninstall(alpha.Root, global: false), 0);
         Assert.False(
             _state.Files.FileExists(alpha.ReceiptPath),
             "Project uninstall must remove the home project receipt.");
@@ -660,14 +664,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     new home state, and the status that follows reads that state back.
     /// </summary>
     [Fact]
-    public void FreshGlobalInstallAfterUninstallOfMigratedStateWritesNewHomeState()
+    public async Task FreshGlobalInstallAfterUninstallOfMigratedStateWritesNewHomeState()
     {
         string anchor = CreateDirectory("global-anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         MoveGlobalStateToLegacyRoot(anchor);
-        AssertExit(Uninstall(anchor, global: true), 0);
+        AssertExit(await Uninstall(anchor, global: true), 0);
 
-        CommandExecution install = InstallGlobal(anchor);
+        CommandExecution install = await InstallGlobal(anchor);
 
         AssertExit(install, 0);
         Assert.True(
@@ -714,10 +718,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     from one place that no harness update can overwrite.
     /// </summary>
     [Fact]
-    public void UpdateGlobalDeploysTheDefaultResponseGuidanceIntoTheKyberWeaveHome()
+    public async Task UpdateGlobalDeploysTheDefaultResponseGuidanceIntoTheKyberWeaveHome()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         ClearResponseGuidanceToAbsentAndUnowned();
 
         // Pinned to this fixture's own home rather than to the in-memory root it happens to sit under:
@@ -727,7 +731,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             _state.Files.FileExists(expected),
             $"The scenario requires no guidance at '{expected}' beforehand.");
 
-        CommandExecution update = DeployGuidance(anchor);
+        CommandExecution update = await DeployGuidance(anchor);
 
         AssertExit(update, 0);
         Assert.True(
@@ -744,11 +748,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     question Squad can answer before it writes.
     /// </summary>
     [Fact]
-    public void UpdateGlobalRecordsTheDeployedResponseGuidanceInTheGlobalReceipt()
+    public async Task UpdateGlobalRecordsTheDeployedResponseGuidanceInTheGlobalReceipt()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
         string guidancePath = GuidancePath();
         Assert.True(
             _state.Files.FileExists(guidancePath),
@@ -771,11 +775,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     guidance replaces it. Preserving it would leave the operator on wording the release replaced.
     /// </summary>
     [Fact]
-    public void UpdateGlobalReplacesDigestMatchingResponseGuidanceWithTheCurrentDefault()
+    public async Task UpdateGlobalReplacesDigestMatchingResponseGuidanceWithTheCurrentDefault()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
         string path = GuidancePath();
         Assert.True(
             _state.Files.FileExists(path),
@@ -789,7 +793,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RewriteRecordedDigest(current, superseded);
         _state.Files.WriteAllBytes(path, superseded);
 
-        CommandExecution second = DeployGuidance(anchor);
+        CommandExecution second = await DeployGuidance(anchor);
 
         AssertExit(second, 0);
         Assert.True(
@@ -803,11 +807,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     discard the one customization the file exists to hold, so the edit survives and the run says so.
     /// </summary>
     [Fact]
-    public void UpdateGlobalPreservesAndReportsAUserModifiedResponseGuidance()
+    public async Task UpdateGlobalPreservesAndReportsAUserModifiedResponseGuidance()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
         string path = GuidancePath();
         Assert.True(
             _state.Files.FileExists(path),
@@ -815,7 +819,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         const string userWording = "Keep every answer to three sentences and never open with a heading.\n";
         _state.Files.WriteAllText(path, userWording);
 
-        CommandExecution second = DeployGuidance(anchor);
+        CommandExecution second = await DeployGuidance(anchor);
 
         AssertExit(second, 0);
         Assert.Equal(userWording, _state.Files.ReadAllText(path));
@@ -830,11 +834,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     hand.
     /// </summary>
     [Fact]
-    public void UpdateGlobalAdoptsShippedGuidanceWhoseRecordedDigestNoLongerMatches()
+    public async Task UpdateGlobalAdoptsShippedGuidanceWhoseRecordedDigestNoLongerMatches()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
         string path = GuidancePath();
         Assert.True(
             _state.Files.FileExists(path),
@@ -855,7 +859,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         DateTime stamped = _state.Files.GetLastWriteTimeUtc(path);
         _state.Time.Advance(TimeSpan.FromHours(1));
 
-        CommandExecution second = DeployGuidance(anchor);
+        CommandExecution second = await DeployGuidance(anchor);
 
         AssertExit(second, 0);
         Assert.True(
@@ -875,7 +879,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         // leaving the receipt alone, and the very same run must now refuse and say so.
         _state.Files.WriteAllText(path, "Edited by the operator after the adopt.\n");
 
-        CommandExecution third = DeployGuidance(anchor);
+        CommandExecution third = await DeployGuidance(anchor);
 
         AssertExit(third, 0);
         Assert.Equal("Edited by the operator after the adopt.\n", _state.Files.ReadAllText(path));
@@ -889,10 +893,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     reported as an edit they never made.
     /// </summary>
     [Fact]
-    public void UpdateGlobalThatCannotWriteTheResponseGuidanceRecordsNoOwnershipAndRetriesCleanly()
+    public async Task UpdateGlobalThatCannotWriteTheResponseGuidanceRecordsNoOwnershipAndRetriesCleanly()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         ClearResponseGuidanceToAbsentAndUnowned();
         string path = GuidancePath();
 
@@ -900,7 +904,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         // disk does — through the same atomic move the deployer uses — without a real disk.
         _state.Files.CreateDirectory(path);
 
-        CommandExecution failed = DeployGuidance(anchor);
+        CommandExecution failed = await DeployGuidance(anchor);
 
         AssertExit(failed, 0);
         Assert.Contains(SquadResponseGuidanceDeployer.FileName, failed.Output, StringComparison.Ordinal);
@@ -912,7 +916,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
         _state.Files.DeleteTreeNoFollow(path);
 
-        CommandExecution recovered = DeployGuidance(anchor);
+        CommandExecution recovered = await DeployGuidance(anchor);
 
         AssertExit(recovered, 0);
         Assert.True(
@@ -934,10 +938,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     would leave behind a change nothing accounted for.
     /// </summary>
     [Fact]
-    public void UpdateGlobalWhosePlanFailsPreflightLeavesAnAbsentResponseGuidanceAbsent()
+    public async Task UpdateGlobalWhosePlanFailsPreflightLeavesAnAbsentResponseGuidanceAbsent()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         ClearResponseGuidanceToAbsentAndUnowned();
 
         // An unowned hand-authored file at a path the update would claim, so plan construction throws
@@ -951,10 +955,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             _state.Files.FileExists(guidance),
             $"The scenario requires no guidance at '{guidance}' beforehand.");
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             UpdateCommand(new RecordingProjectPicker(NoProjects), false, FakeSquadRenderer.ScriptedAgents("architect", "collider"))
-                .Execute(null!,
-                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+                .ExecuteAsync(null!,
+                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true),
+                    CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
@@ -973,11 +978,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     it was never allowed to touch.
     /// </summary>
     [Fact]
-    public void UpdateGlobalWhosePlanFailsPreflightLeavesADigestMatchingResponseGuidanceUntouched()
+    public async Task UpdateGlobalWhosePlanFailsPreflightLeavesADigestMatchingResponseGuidanceUntouched()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
 
         // An earlier release's default, on disk and recorded: exactly the file a later run would replace.
         string guidance = GuidancePath();
@@ -993,10 +998,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             Path.Combine(Path.GetDirectoryName(architect)!, "collider.md"),
             Encoding.UTF8.GetBytes("hand-authored collider\n"));
 
-        CommandExecution execution = Capture(() =>
+        CommandExecution execution = await CaptureAsync(() =>
             UpdateCommand(new RecordingProjectPicker(NoProjects), false, FakeSquadRenderer.ScriptedAgents("architect", "collider"))
-                .Execute(null!,
-                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true)));
+                .ExecuteAsync(null!,
+                    GlobalUpdate(CreateDirectory("unrelated-second-run"), targets: ["all"], replaceManaged: true),
+                    CancellationToken.None));
 
         AssertExit(execution, 1);
         Assert.Contains("Unmanaged path", execution.Output, StringComparison.Ordinal);
@@ -1010,14 +1016,14 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     so the receipt would lose the ownership it needs for the next run.
     /// </summary>
     [Fact]
-    public void ReinstallGlobalKeepsTheRecordedGuidanceDigestWhenTheReceiptOwnsIt()
+    public async Task ReinstallGlobalKeepsTheRecordedGuidanceDigestWhenTheReceiptOwnsIt()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         string shippedDigest = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(SquadResponseGuidanceSource.DefaultText)));
 
-        SquadLifecycleResult reinstall = RunInstall(anchor);
+        SquadLifecycleResult reinstall = await RunInstallAsync(anchor);
 
         Assert.True(reinstall.Success, DescribeFailure(reinstall));
         Assert.DoesNotContain(
@@ -1033,10 +1039,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     default. The receipt records the older digest, so the file still matches what Squad owns.
     /// </summary>
     [Fact]
-    public void ReinstallGlobalRefreshesAnUneditedOlderDefaultTheReceiptRecords()
+    public async Task ReinstallGlobalRefreshesAnUneditedOlderDefaultTheReceiptRecords()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         string path = GuidancePath();
         byte[] shipped = _state.Files.ReadAllBytes(path);
         byte[] older = Encoding.UTF8.GetBytes("An earlier Kyber-Weave release's default.\n");
@@ -1045,7 +1051,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         RewriteRecordedDigest(shipped, older);
         _state.Files.WriteAllBytes(path, older);
 
-        SquadLifecycleResult reinstall = RunInstall(anchor);
+        SquadLifecycleResult reinstall = await RunInstallAsync(anchor);
 
         Assert.True(reinstall.Success, DescribeFailure(reinstall));
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, _state.Files.ReadAllText(path));
@@ -1063,10 +1069,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     seam fails the read.
     /// </summary>
     [Fact]
-    public void DoctorGlobalSurfacesAGuidanceReadWarningWhenTheHomeFileCannotBeRead()
+    public async Task DoctorGlobalSurfacesAGuidanceReadWarningWhenTheHomeFileCannotBeRead()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         PrepareCanonicalSource();
         string path = GuidancePath();
         _state.Files.FailWhen(
@@ -1078,7 +1084,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         CommandExecution execution;
         try
         {
-            execution = Doctor(_work, FakeSquadRenderer.ScriptedAgents("architect"));
+            execution = await Doctor(_work, FakeSquadRenderer.ScriptedAgents("architect"));
         }
         finally
         {
@@ -1096,12 +1102,12 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     injected.
     /// </summary>
     [Fact]
-    public void DoctorGlobalReportsTheNoBlockWarningForAPreBlockCorpusWithoutCrashing()
+    public async Task DoctorGlobalReportsTheNoBlockWarningForAPreBlockCorpusWithoutCrashing()
     {
         string anchor = CreateDirectory("anchor");
         WriteCanonicalSourceWithoutResponseBlocks();
 
-        CommandExecution execution = Doctor(_work, renderer: null);
+        CommandExecution execution = await Doctor(_work, renderer: null);
 
         Assert.Contains(SquadResponsePreferencesInjector.NoBlockWarning, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("Global unmanaged-collision scan failed", execution.Output, StringComparison.Ordinal);
@@ -1113,12 +1119,12 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     doctor prints the no-block warning, which tells the operator the wrong thing about the cause.
     /// </summary>
     [Fact]
-    public void DoctorGlobalReportsARenderFailureAsTheCollisionScanFailureNotAsNoBlock()
+    public async Task DoctorGlobalReportsARenderFailureAsTheCollisionScanFailureNotAsNoBlock()
     {
         string anchor = CreateDirectory("anchor");
         PrepareCanonicalSource();
 
-        CommandExecution execution = Doctor(_work, FakeSquadRenderer.Failing("The render failed for the test."));
+        CommandExecution execution = await Doctor(_work, FakeSquadRenderer.Failing("The render failed for the test."));
 
         Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(SquadResponsePreferencesInjector.NoBlockWarning, execution.Output, StringComparison.Ordinal);
@@ -1131,11 +1137,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     would then preserve it forever and report an edit they never made.
     /// </summary>
     [Fact]
-    public void GuidanceOwnershipSurvivesAReceiptRewriteThatDeploysNoGuidance()
+    public async Task GuidanceOwnershipSurvivesAReceiptRewriteThatDeploysNoGuidance()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
 
         // An earlier release's default on disk, recorded as what Squad deployed: the file a later run is
         // allowed to replace, and exactly the file a dropped record would strand.
@@ -1155,7 +1161,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             "A receipt rewrite that deploys no guidance must carry the guidance ownership record " +
             "forward, so the next update still knows it owns that file.");
 
-        CommandExecution refresh = DeployGuidance(anchor);
+        CommandExecution refresh = await DeployGuidance(anchor);
 
         AssertExit(refresh, 0);
         Assert.DoesNotContain("Kept the response guidance", refresh.Output, StringComparison.Ordinal);
@@ -1171,11 +1177,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     would strand it as unowned and it would never refresh again.
     /// </summary>
     [Fact]
-    public void UninstallGlobalThatRetainsAnEditedFileKeepsTheGuidanceOwnershipRecord()
+    public async Task UninstallGlobalThatRetainsAnEditedFileKeepsTheGuidanceOwnershipRecord()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
         string guidance = GuidancePath();
         byte[] guidanceBefore = _state.Files.ReadAllBytes(guidance);
 
@@ -1184,7 +1190,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string architect = InstalledFile(SquadTarget.Codex, "architect.md");
         _state.Files.WriteAllText(architect, "operator edit that uninstall must keep\n");
 
-        CommandExecution uninstall = Uninstall(anchor, global: true);
+        CommandExecution uninstall = await Uninstall(anchor, global: true);
 
         AssertExit(uninstall, 0);
         Assert.True(
@@ -1210,11 +1216,11 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     <c>MutexLeaseContractTests</c>; here the in-process fake holds it.
     /// </summary>
     [Fact]
-    public void UpdateGlobalThatCannotTakeTheHomeLeaseLeavesTheResponseGuidanceUntouched()
+    public async Task UpdateGlobalThatCannotTakeTheHomeLeaseLeavesTheResponseGuidanceUntouched()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        AssertExit(DeployGuidance(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
+        AssertExit(await DeployGuidance(anchor), 0);
 
         // An earlier release's default, recorded as what Squad deployed: the file a run that reached it
         // would replace. The clock is advanced past its last write, so a rewrite of any bytes shows.
@@ -1230,7 +1236,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         CommandExecution refused;
         using (HoldHomeLease())
         {
-            refused = DeployGuidance(anchor);
+            refused = await DeployGuidance(anchor);
         }
 
         AssertExit(refused, 1);
@@ -1241,7 +1247,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Assert.Equal(stamped, _state.Files.GetLastWriteTimeUtc(path));
 
         // The refusal costs nothing: with the lease free the same run succeeds and refreshes the file.
-        CommandExecution retried = DeployGuidance(anchor);
+        CommandExecution retried = await DeployGuidance(anchor);
 
         AssertExit(retried, 0);
         Assert.True(
@@ -1255,10 +1261,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     deployment of the same root is refused while it runs, and what it attaches is what is committed.
     /// </summary>
     [Fact]
-    public void HomeFilesAreDeployedWhileTheTransactionHoldsTheHomeLeaseAndTheirRecordIsCommitted()
+    public async Task HomeFilesAreDeployedWhileTheTransactionHoldsTheHomeLeaseAndTheirRecordIsCommitted()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         SquadDeploymentPlan plan = PlanGlobalReceiptRewrite();
         SquadHomeFile record = new(SquadResponseGuidanceDeployer.FileName, new string('a', 64));
         bool ran = false;
@@ -1286,10 +1292,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     was and no half-open transaction behind: a stale journal would refuse every later run.
     /// </summary>
     [Fact]
-    public void AHomeFileCallbackThatFailsLeavesTheReceiptAsItWasAndNoTransactionBehind()
+    public async Task AHomeFileCallbackThatFailsLeavesTheReceiptAsItWasAndNoTransactionBehind()
     {
         string anchor = CreateDirectory("anchor");
-        AssertExit(InstallGlobal(anchor), 0);
+        AssertExit(await InstallGlobal(anchor), 0);
         byte[] receiptBefore = _state.Files.ReadAllBytes(RequireFile(GlobalReceiptPath()));
         SquadDeploymentPlan plan = PlanGlobalReceiptRewrite();
 
@@ -1311,20 +1317,18 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
 
     #region Fixtures
 
-    private CommandExecution DeployGuidance(string anchor) =>
-        Capture(() => UpdateCommand(new RecordingProjectPicker(NoProjects), false).Execute(null!, GlobalUpdate(anchor)));
+    private async Task<CommandExecution> DeployGuidance(string anchor) =>
+        await CaptureAsync(() => UpdateCommand(new RecordingProjectPicker(NoProjects), false).ExecuteAsync(null!, GlobalUpdate(anchor), CancellationToken.None));
 
-    private SquadLifecycleResult RunInstall(string anchor)
+    private async Task<SquadLifecycleResult> RunInstallAsync(string anchor)
     {
-        SquadLifecycleResult result = SquadTestCommands
+        SquadLifecycleResult result = await SquadTestCommands
             .InMemoryLifecycle(_state, _release, _renderer, _roots)
             .InstallAsync(new SquadInstallRequest(
                 anchor,
                 SquadDeploymentScope.Global,
                 [SquadTarget.Codex],
-                Version: InstalledVersion))
-            .GetAwaiter()
-            .GetResult();
+                Version: InstalledVersion));
         return result;
     }
 
@@ -1493,42 +1497,44 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             picker: picker);
     }
 
-    private CommandExecution InstallGlobal(string anchor) =>
-        Capture(() => SquadTestCommands.InMemoryInstall(
+    private async Task<CommandExecution> InstallGlobal(string anchor) =>
+        await CaptureAsync(() => SquadTestCommands.InMemoryInstall(
                 _state,
                 _release,
                 _renderer,
                 globalRoots: _roots,
                 configs: _configs)
-            .Execute(null!, new SquadInstallSettings
+            .ExecuteAsync(null!, new SquadInstallSettings
             {
                 Path = anchor,
                 Global = true,
                 Targets = ["codex"],
                 Version = InstalledVersion,
                 Yes = true
-            }));
+            },
+            CancellationToken.None));
 
-    private Project InstallProject(string name)
+    private async Task<Project> InstallProject(string name)
     {
         string root = Path.Combine(_work, "projects", name);
         _state.Files.CreateDirectory(root);
         string physical = _state.Layout.PhysicalOf(root);
         AssertExit(
-            Capture(() => SquadTestCommands.InMemoryInstall(
+            await CaptureAsync(() => SquadTestCommands.InMemoryInstall(
                     _state,
                     _release,
                     _renderer,
                     globalRoots: _roots,
                     configs: _configs)
-                .Execute(null!, new SquadInstallSettings
+                .ExecuteAsync(null!, new SquadInstallSettings
                 {
                     Path = physical,
                     Global = false,
                     Targets = ["codex"],
                     Version = InstalledVersion,
                     Yes = true
-                })),
+                },
+                CancellationToken.None)),
             0);
         return new Project(
             physical,
@@ -1540,13 +1546,13 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     ///     Builds the registry the global CLI tests run against: a global install, two live projects
     ///     and one project whose root is then removed, so its registry entry is stale.
     /// </summary>
-    private Fleet ArrangeFleet()
+    private async Task<Fleet> ArrangeFleet()
     {
         string anchor = CreateDirectory("global-anchor");
-        AssertExit(InstallGlobal(anchor), 0);
-        Project alpha = InstallProject("alpha");
-        Project beta = InstallProject("beta");
-        Project stale = InstallProject("stale");
+        AssertExit(await InstallGlobal(anchor), 0);
+        Project alpha = await InstallProject("alpha");
+        Project beta = await InstallProject("beta");
+        Project stale = await InstallProject("stale");
         _state.Files.DeleteTreeNoFollow(stale.Root);
         return new Fleet(
             anchor,
@@ -1558,23 +1564,23 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 UpdateCommand(picker, isInteractive, null, readAnswer, releaseSource));
     }
 
-    private CommandExecution Uninstall(string path, bool global) =>
-        Capture(() => SquadTestCommands.InMemoryUninstall(_state, _release, _renderer, _roots)
-            .Execute(null!, new SquadUninstallSettings { PathOption = path, Global = global, Yes = true }));
+    private async Task<CommandExecution> Uninstall(string path, bool global) =>
+        await CaptureAsync(() => SquadTestCommands.InMemoryUninstall(_state, _release, _renderer, _roots)
+            .ExecuteAsync(null!, new SquadUninstallSettings { PathOption = path, Global = global, Yes = true }, CancellationToken.None));
 
     private CommandExecution Status(string path, bool global) =>
         Capture(() => SquadTestCommands.InMemoryStatus(_state, _roots)
             .Execute(null!, new SquadStatusSettings { Path = path, Global = global }));
 
-    private CommandExecution Doctor(string path, ISquadRenderer? renderer) =>
-        Capture(() => SquadTestCommands.InMemoryDoctor(
+    private async Task<CommandExecution> Doctor(string path, ISquadRenderer? renderer) =>
+        await CaptureAsync(() => SquadTestCommands.InMemoryDoctor(
                 _state,
                 new FakeProcessExecutor(),
                 workingDirectory: path,
                 globalRoots: _roots,
                 renderer: renderer,
                 configs: _configs)
-            .Execute(null!, new SquadDoctorSettings { Path = path, Global = true }));
+            .ExecuteAsync(null!, new SquadDoctorSettings { Path = path, Global = true }, CancellationToken.None));
 
     private string CreateDirectory(string name)
     {
@@ -1793,6 +1799,12 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     private static CommandExecution Capture(Func<int> execute)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        return new CommandExecution(execution.Result, execution.Output);
+    }
+
+    private static async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
+    {
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

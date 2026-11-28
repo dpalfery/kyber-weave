@@ -44,7 +44,7 @@ public sealed class ExploreAnswerTests
     private readonly DocFixture _fixture = DocFixture.CreateInMemory();
 
     [Fact]
-    public void AMatchPastCharacter2000IsReturnedAndTheIntroIsNot()
+    public async Task AMatchPastCharacter2000IsReturnedAndTheIntroIsNot()
     {
         const string introMarker = "INTRO-ONLY-MARKER-XYZZY";
         const string answerPhrase = "windowtarget definitive answer phrase";
@@ -57,7 +57,7 @@ public sealed class ExploreAnswerTests
                 ("Answer", sectionBody)
             ]));
 
-        string response = Explore(tools, "windowtarget");
+        string response = await Explore(tools, "windowtarget");
         string prose = AnswerProse(response);
 
         Assert.Contains(answerPhrase, prose, StringComparison.Ordinal);
@@ -68,7 +68,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void ALongSectionReturnsItsBestWindowAsACompleteAnswerWithACursorForTheRest()
+    public async Task ALongSectionReturnsItsBestWindowAsACompleteAnswerWithACursorForTheRest()
     {
         const string needle = "NEEDLE-PARAGRAPH-windowneedle explains the answer.";
         StringBuilder body = new();
@@ -82,7 +82,7 @@ public sealed class ExploreAnswerTests
             ("windowneedle/fixture", "Window needle", "6-Docs/windowneedle/fixture.md", ["windowneedle"],
                 [("Detail", body.ToString().TrimEnd())]));
 
-        string response = Explore(tools, "windowneedle");
+        string response = await Explore(tools, "windowneedle");
         string prose = AnswerProse(response);
 
         Assert.Contains(needle, prose, StringComparison.Ordinal);
@@ -119,7 +119,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void AWindowNeverCutsACodeFenceOrAList()
+    public async Task AWindowNeverCutsACodeFenceOrAList()
     {
         string fence = "```text\n" + RepeatToLength("fencedline windowfence\n", 1500) + "\n\nafter a blank line inside\n```";
         string list = "- item one windowfence\n\n- item two\n\n- item three";
@@ -128,7 +128,7 @@ public sealed class ExploreAnswerTests
             ("windowfence/fixture", "Window fence", "6-Docs/windowfence/fixture.md", ["windowfence"],
                 [("Detail", body)]));
 
-        string prose = AnswerProse(Explore(tools, "windowfence"));
+        string prose = AnswerProse(await Explore(tools, "windowfence"));
 
         Assert.Equal(1, prose.Split("```").Length % 2);
         Assert.True(!prose.Contains("item one", StringComparison.Ordinal) || prose.Contains("item three", StringComparison.Ordinal),
@@ -136,7 +136,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void AFollowUpCallReturnsTheLaterSpanNotTheFirst()
+    public async Task AFollowUpCallReturnsTheLaterSpanNotTheFirst()
     {
         const string early = "FOLLOWUP-EARLY-MARKER-zebrawindow";
         const string late = "FOLLOWUP-LATE-MARKER-zebrawindow";
@@ -149,11 +149,11 @@ public sealed class ExploreAnswerTests
             .SingleOrDefault(parameter => string.Equals(parameter.Name, "cursor", StringComparison.Ordinal));
         Assert.NotNull(cursorParameter);
 
-        string first = Explore(tools, "zebrawindow");
+        string first = await Explore(tools, "zebrawindow");
         Match cursorMatch = CursorToken.Match(first);
         Assert.True(cursorMatch.Success, $"first response must carry a cursor; response was: {first}");
 
-        string second = Explore(tools, "zebrawindow", cursorMatch.Groups["token"].Value);
+        string second = await Explore(tools, "zebrawindow", cursorMatch.Groups["token"].Value);
         string secondProse = AnswerProse(second);
 
         Assert.Contains(late, secondProse, StringComparison.Ordinal);
@@ -161,7 +161,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void AScoringFollowingSectionIsAppendedOnlyWhenItFits()
+    public async Task AScoringFollowingSectionIsAppendedOnlyWhenItFits()
     {
         const string mainPhrase = "routing primary guidance routing";
         const string followPhrase = "routing secondary guidance routing";
@@ -169,7 +169,7 @@ public sealed class ExploreAnswerTests
             ("api/routing", "Routing", "6-Docs/webui/architecture.md", ["routing"],
                 [("Overview", mainPhrase), ("Components", followPhrase)]));
 
-        string response = Explore(tools, "routing");
+        string response = await Explore(tools, "routing");
         string prose = AnswerProse(response);
 
         Assert.Contains(mainPhrase, prose, StringComparison.Ordinal);
@@ -179,7 +179,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void ANonScoringFollowingSectionIsAbsent()
+    public async Task ANonScoringFollowingSectionIsAbsent()
     {
         const string mainPhrase = "routing primary guidance routing";
         const string unrelated = "kangaroo marsupial unrelated";
@@ -187,7 +187,7 @@ public sealed class ExploreAnswerTests
             ("api/routing", "Routing", "6-Docs/webui/architecture.md", ["routing"],
                 [("Overview", mainPhrase), ("Unrelated", unrelated)]));
 
-        string response = Explore(tools, "routing");
+        string response = await Explore(tools, "routing");
         string prose = AnswerProse(response);
 
         Assert.Contains(mainPhrase, prose, StringComparison.Ordinal);
@@ -198,7 +198,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void SectionsAreReturnedInDocumentOrderWhenBothScore()
+    public async Task SectionsAreReturnedInDocumentOrderWhenBothScore()
     {
         DocsTools tools = BuildTools(
             ("api/routing", "Routing", "6-Docs/webui/architecture.md", ["routing"],
@@ -208,7 +208,7 @@ public sealed class ExploreAnswerTests
                 ("Gamma", "routing gamma section routing")
             ]));
 
-        string response = Explore(tools, "routing");
+        string response = await Explore(tools, "routing");
         string prose = AnswerProse(response);
 
         Assert.Contains("alpha section", prose, StringComparison.Ordinal);
@@ -218,7 +218,7 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void ACloseRunnerUpScoresBelow060()
+    public async Task ACloseRunnerUpScoresBelow060()
     {
         (DocsTools tools, DocumentIndexHost host) = BuildToolsWithHost(
             ("topic/alpha", "Alpha", "6-Docs/topic/alpha.md", ["closetopic"],
@@ -227,18 +227,18 @@ public sealed class ExploreAnswerTests
                 [("Detail", "closetopic beta detail closetopic")]));
 
         const string query = "closetopic";
-        string response = Explore(tools, query);
+        string response = await Explore(tools, query);
         AssertTopicConfidence(host, query, response, true, true);
     }
 
     [Fact]
-    public void AClearUniqueSectionScoresAtLeast060()
+    public async Task AClearUniqueSectionScoresAtLeast060()
     {
         const string phrase = "uniquetopic sentinel guidance uniquetopic";
         (DocsTools tools, DocumentIndexHost host) = BuildToolsWithHost(
             ("topic/unique", "Unique", "6-Docs/topic/unique.md", ["uniquetopic"], [("Detail", phrase)]));
 
-        string response = Explore(tools, "uniquetopic");
+        string response = await Explore(tools, "uniquetopic");
         string prose = AnswerProse(response);
 
         Assert.Contains(phrase, prose, StringComparison.Ordinal);
@@ -247,13 +247,13 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void AnExactDocumentIdQueryScores100WhenComplete()
+    public async Task AnExactDocumentIdQueryScores100WhenComplete()
     {
         const string phrase = "exact id handle complete answer";
         DocsTools tools = BuildTools(
             ("fixture/exact", "Exact", "6-Docs/fixture/exact.md", [], [("Overview", phrase)]));
 
-        string response = Explore(tools, "fixture/exact");
+        string response = await Explore(tools, "fixture/exact");
         string prose = AnswerProse(response);
 
         Assert.Contains(phrase, prose, StringComparison.Ordinal);
@@ -263,12 +263,12 @@ public sealed class ExploreAnswerTests
     }
 
     [Fact]
-    public void AnUnanswerableFixtureIsAMiss()
+    public async Task AnUnanswerableFixtureIsAMiss()
     {
         DocsTools tools = BuildTools(
             ("topic/only", "Only", "6-Docs/topic/only.md", [], [("Detail", "nothing about sandwiches here")]));
 
-        string response = Explore(tools, "how do I make a sandwich");
+        string response = await Explore(tools, "how do I make a sandwich");
 
         Assert.Contains("No document", response, StringComparison.Ordinal);
         Assert.DoesNotContain("confidence:", response, StringComparison.Ordinal);
@@ -285,11 +285,11 @@ public sealed class ExploreAnswerTests
     /// the rule has to refuse, and it moves whenever somebody edits a document.
     /// </summary>
     [Fact]
-    public void AQuestionTheCorpusDoesNotAnswerIsNotAnsweredByAPartialIdMatch()
+    public async Task AQuestionTheCorpusDoesNotAnswerIsNotAnsweredByAPartialIdMatch()
     {
         DocsTools tools = BuildCorpusWithOnePartiallyMatchingId();
 
-        string response = Explore(tools, "recipe for sourdough starter");
+        string response = await Explore(tools, "recipe for sourdough starter");
 
         Assert.True(response.Contains("No document", StringComparison.Ordinal),
             $"an unanswerable question must report a miss; response was:\n{response}");
@@ -303,11 +303,11 @@ public sealed class ExploreAnswerTests
     /// question-to-document path intact.
     /// </summary>
     [Fact]
-    public void AQuestionThatNamesWhatTheDocumentSaysStillFindsIt()
+    public async Task AQuestionThatNamesWhatTheDocumentSaysStillFindsIt()
     {
         DocsTools tools = BuildCorpusWithOnePartiallyMatchingId();
 
-        string response = Explore(tools, "run start resume");
+        string response = await Explore(tools, "run start resume");
 
         string source = Assert.Single(SourceLines(response).ToList());
         Assert.Contains(RunStartTodoDocumentPath, source, StringComparison.Ordinal);
@@ -318,24 +318,24 @@ public sealed class ExploreAnswerTests
     /// stops a partial identity from introducing a document must not touch it.
     /// </summary>
     [Fact]
-    public void AnExactIdQuestionStillReachesTheDocumentItNames()
+    public async Task AnExactIdQuestionStillReachesTheDocumentItNames()
     {
         DocsTools tools = BuildCorpusWithOnePartiallyMatchingId();
 
-        string response = Explore(tools, RunStartTodoDocumentId);
+        string response = await Explore(tools, RunStartTodoDocumentId);
 
         string source = Assert.Single(SourceLines(response).ToList());
         Assert.Contains(RunStartTodoDocumentPath, source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheReplyIsAtMost8000CharactersAndContainsNoLegacyBudgetJargon()
+    public async Task TheReplyIsAtMost8000CharactersAndContainsNoLegacyBudgetJargon()
     {
         const string phrase = "routing primary guidance routing";
         DocsTools tools = BuildTools(
             ("api/routing", "Routing", "6-Docs/webui/architecture.md", ["routing"], [("Overview", phrase)]));
 
-        string response = Explore(tools, "routing");
+        string response = await Explore(tools, "routing");
         string prose = AnswerProse(response);
 
         Assert.Equal(phrase, prose);
@@ -554,17 +554,18 @@ public sealed class ExploreAnswerTests
         }
     }
 
-    private static string Explore(DocsTools tools, string query, string? cursor = null)
+    private static async Task<string> Explore(DocsTools tools, string query, string? cursor = null)
     {
         if (cursor is null)
         {
-            return tools.Explore(query);
+            return await tools.ExploreAsync(query);
         }
 
         ParameterInfo? cursorParameter = ExploreMethod.GetParameters()
             .SingleOrDefault(parameter => string.Equals(parameter.Name, "cursor", StringComparison.Ordinal));
         Assert.NotNull(cursorParameter);
-        return (string)ExploreMethod.Invoke(tools, [query, cursor, null])!;
+        Task<string> call = (Task<string>)ExploreMethod.Invoke(tools, [query, cursor, null, CancellationToken.None])!;
+        return await call;
     }
 
     private static double ContractConfidence(double winningTopic, double bestOtherTopic, bool incomplete)

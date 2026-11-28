@@ -34,12 +34,12 @@ public sealed class DocsCommandSeamTests : IDisposable
     public void Dispose() => _console.Dispose();
 
     [Fact]
-    public void CloseoutTakesItsArchiveDateFromTheInjectedClock()
+    public async Task CloseoutTakesItsArchiveDateFromTheInjectedClock()
     {
         RecordingCloseout closeout = new();
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 3, 4, 23, 30, 0, TimeSpan.Zero));
 
-        int exit = Closeout(closeout, clock).Execute(null!, CloseoutSettings(), CancellationToken.None);
+        int exit = await Closeout(closeout, clock).ExecuteAsync(null!, CloseoutSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal(new DateOnly(2026, 3, 4), closeout.ArchiveDate);
@@ -47,52 +47,52 @@ public sealed class DocsCommandSeamTests : IDisposable
     }
 
     [Fact]
-    public void ACloseoutWithoutAWorkingDirectoryResolvesItsRootAgainstTheEnvironmentSeam()
+    public async Task ACloseoutWithoutAWorkingDirectoryResolvesItsRootAgainstTheEnvironmentSeam()
     {
         RecordingCloseout closeout = new();
         DocsCloseoutSettings settings = CloseoutSettings();
         settings.Path = "plans/x.md";
         settings.WorkingDirectory = null;
 
-        int exit = Closeout(closeout, new FakeTimeProvider()).Execute(null!, settings, CancellationToken.None);
+        int exit = await Closeout(closeout, new FakeTimeProvider()).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal([WorkingDirectory], _configs.LoadedRoots);
     }
 
     [Fact]
-    public void AHumanFormatCloseoutAnnouncesThePlanOnTheInjectedConsole()
+    public async Task AHumanFormatCloseoutAnnouncesThePlanOnTheInjectedConsole()
     {
         RecordingCloseout closeout = new();
         DocsCloseoutSettings settings = CloseoutSettings();
         settings.Format = "lines";
 
-        int exit = Closeout(closeout, new FakeTimeProvider()).Execute(null!, settings, CancellationToken.None);
+        int exit = await Closeout(closeout, new FakeTimeProvider()).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains($"Plan: {Plan}", _console.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ACloseoutDateOptionOverridesTheClock()
+    public async Task ACloseoutDateOptionOverridesTheClock()
     {
         RecordingCloseout closeout = new();
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 3, 4, 23, 30, 0, TimeSpan.Zero));
         DocsCloseoutSettings settings = CloseoutSettings();
         settings.Date = "2025-12-31";
 
-        _ = Closeout(closeout, clock).Execute(null!, settings, CancellationToken.None);
+        _ = await Closeout(closeout, clock).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.Equal(new DateOnly(2025, 12, 31), closeout.ArchiveDate);
     }
 
     [Fact]
-    public void FinalizeTakesItsApprovalDateFromTheInjectedClock()
+    public async Task FinalizeTakesItsApprovalDateFromTheInjectedClock()
     {
         RecordingFinalize finalize = new();
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 7, 8, 1, 0, 0, TimeSpan.Zero));
 
-        int exit = Finalize(finalize, clock).Execute(null!, FinalizeSettings(), CancellationToken.None);
+        int exit = await Finalize(finalize, clock).ExecuteAsync(null!, FinalizeSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal(new DateOnly(2026, 7, 8), finalize.ApprovalDate);
@@ -147,6 +147,15 @@ public sealed class DocsCommandSeamTests : IDisposable
             ArchiveDate = archiveDate;
             return new PlanCloseoutOutcome(new DiagnosticReport(), false);
         }
+
+        public Task<PlanCloseoutOutcome> RunAsync(
+            string repoRoot,
+            KyberWeaveConfig config,
+            string planPath,
+            DateOnly archiveDate,
+            bool archive,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Run(repoRoot, config, planPath, archiveDate, archive));
     }
 
     private sealed class RecordingFinalize : IPlanFinalizeService
@@ -164,5 +173,15 @@ public sealed class DocsCommandSeamTests : IDisposable
             ApprovalDate = approvalDate;
             return new PlanFinalizeOutcome(new DiagnosticReport(), false, false, "tasks.yml");
         }
+
+        public Task<PlanFinalizeOutcome> RunAsync(
+            string repoRoot,
+            KyberWeaveConfig config,
+            string planPath,
+            PlanApprovalMode mode,
+            string? approval,
+            DateOnly approvalDate,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Run(repoRoot, config, planPath, mode, approval, approvalDate));
     }
 }

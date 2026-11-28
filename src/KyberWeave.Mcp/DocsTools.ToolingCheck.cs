@@ -31,13 +31,24 @@ public sealed partial class DocsTools
         stop-on-tool-failure: false gets its failures as warnings and EXIT: 0. Writes only the
         checkout's .codegraph index and its post-checkout hook block; safe to call again.
         """)]
-    public string RunToolingCheck(
-        [Description("Absolute path of the checkout or worktree to check. Required.")] string projectPath)
+    public async Task<string> RunToolingCheckAsync(
+        [Description("Absolute path of the checkout or worktree to check. Required.")] string projectPath,
+        CancellationToken cancellationToken = default)
     {
-        if (Redirect(projectPath, tools => tools.Bound.ToolingCheck.RunToolingCheck()) is { } redirected)
+        if (await RedirectAsync(
+                projectPath,
+                tools => tools.Bound.ToolingCheck.RunToolingCheckAsync(cancellationToken),
+                cancellationToken).ConfigureAwait(false) is { } redirected)
+        {
             return redirected;
+        }
+
         if (string.IsNullOrWhiteSpace(projectPath))
-            return ProvenanceLine() + "\nresult: refused\nprojectPath is required: pass the absolute path of the checkout or worktree to check.";
-        return Bound.ToolingCheck.RunToolingCheck();
+        {
+            return await ProvenanceLineAsync(cancellationToken).ConfigureAwait(false)
+                + "\nresult: refused\nprojectPath is required: pass the absolute path of the checkout or worktree to check.";
+        }
+
+        return await Bound.ToolingCheck.RunToolingCheckAsync(cancellationToken).ConfigureAwait(false);
     }
 }

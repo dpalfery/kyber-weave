@@ -44,10 +44,10 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACycleFolderWithoutAVerdictDoesNotCountAsFinished()
+    public async Task ACycleFolderWithoutAVerdictDoesNotCountAsFinished()
     {
         Directory.CreateDirectory(CycleFolder(1));
-        Write($".agent_scratchpad/{Task}/review/cycle-1/head", Head());
+        Write($".agent_scratchpad/{Task}/review/cycle-1/head", await HeadAsync());
 
         (_, string output) = Cycle();
 
@@ -56,11 +56,11 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void AFinishedCycleMakesTheNextOneAVerifierCycleThatRechecksTheFindingsAtOrAboveTheFixLevelAndRerunsTouchedGates()
+    public async Task AFinishedCycleMakesTheNextOneAVerifierCycleThatRechecksTheFindingsAtOrAboveTheFixLevelAndRerunsTouchedGates()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], [Finding("a/major", ReviewSeverity.Major), Finding("a/minor", ReviewSeverity.Minor), Finding("a/nitpick", ReviewSeverity.Nitpick)]);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], [Finding("a/major", ReviewSeverity.Major), Finding("a/minor", ReviewSeverity.Minor), Finding("a/nitpick", ReviewSeverity.Nitpick)]);
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
 
         (int exit, string output) = Cycle();
 
@@ -78,9 +78,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheCouncilsOwnSeatFilesDoNotCountAsAChangedInput()
+    public async Task TheCouncilsOwnSeatFilesDoNotCountAsAChangedInput()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], []);
         Write($".agent_scratchpad/{Task}/review/cycle-1/seats/correctness.md", "NO FINDINGS: none\n");
 
         (_, string output) = Cycle();
@@ -90,9 +90,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void AGateThatFailedIsRerunEvenWhenNoInputChanged()
+    public async Task AGateThatFailedIsRerunEvenWhenNoInputChanged()
     {
-        FinishCycle(1, [Gate("build", exitCode: 1), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build", exitCode: 1), Gate("docs"), Gate("always")], []);
 
         (_, string output) = Cycle();
 
@@ -101,14 +101,14 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void ACarriedResultComesFromTheLatestCycleThatRanTheGate()
+    public async Task ACarriedResultComesFromTheLatestCycleThatRanTheGate()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], []);
         Write("src/a.cs", "// fix one\n");
-        Commit("fix one");
-        FinishCycle(2, [Gate("build"), Gate("always")], []);
+        await Commit("fix one");
+        await FinishCycleAsync(2, [Gate("build"), Gate("always")], []);
         Write("src/a.cs", "// fix two\n");
-        Commit("fix two");
+        await Commit("fix two");
 
         (_, string output) = Cycle();
 
@@ -118,9 +118,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void ADocumentChangeSinceThePriorHeadRerunsTheDocsGate()
+    public async Task ADocumentChangeSinceThePriorHeadRerunsTheDocsGate()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], []);
         Write("notes/new.md", "# new\n");
 
         (_, string output) = Cycle();
@@ -130,9 +130,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void APriorCycleWithNoUsableHeadCannotBeTiedToTheChangeSoItIsIgnoredAndTheRunIsFull()
+    public async Task APriorCycleWithNoUsableHeadCannotBeTiedToTheChangeSoItIsIgnoredAndTheRunIsFull()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], [], head: "not-a-commit");
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], [], head: "not-a-commit");
 
         (_, string output) = Cycle();
 
@@ -142,10 +142,10 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void AStaleCycleFromAnotherBranchIsListedAsIgnoredAndTheTaskStartsAtCycleOne()
+    public async Task AStaleCycleFromAnotherBranchIsListedAsIgnoredAndTheTaskStartsAtCycleOne()
     {
-        FinishCycle(1, [Gate("build")], [], branch: "an-earlier-runs-branch");
-        FinishCycle(2, [Gate("build")], [], branch: "an-earlier-runs-branch");
+        await FinishCycleAsync(1, [Gate("build")], [], branch: "an-earlier-runs-branch");
+        await FinishCycleAsync(2, [Gate("build")], [], branch: "an-earlier-runs-branch");
 
         (_, string output) = Cycle();
 
@@ -156,9 +156,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheJsonFormatCarriesTheSameAnswer()
+    public async Task TheJsonFormatCarriesTheSameAnswer()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], [Finding("a/major", ReviewSeverity.Major)]);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], [Finding("a/major", ReviewSeverity.Major)]);
         Write("src/a.cs", "// fixed\n");
 
         (_, string output) = Cycle("--format", "json");
@@ -176,9 +176,9 @@ public sealed class ReviewCycleTests : IDisposable
     [InlineData("Demo_Task")]
     [InlineData("DEMO-TASK")]
     [InlineData("demo task")]
-    public void ATaskIdInAnySpellingFindsTheFolderWithoutRegardToCase(string task)
+    public async Task ATaskIdInAnySpellingFindsTheFolderWithoutRegardToCase(string task)
     {
-        FinishCycle(1, [Gate("build")], []);
+        await FinishCycleAsync(1, [Gate("build")], []);
 
         (int exit, string output) = Cycle(task);
 
@@ -197,9 +197,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void WithoutTaskTheOnlyReviewFolderIsUsedAndSaid()
+    public async Task WithoutTaskTheOnlyReviewFolderIsUsedAndSaid()
     {
-        FinishCycle(1, [Gate("build")], []);
+        await FinishCycleAsync(1, [Gate("build")], []);
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
             () => CreateApp().Run(["review", "cycle", _repo]));
@@ -210,9 +210,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void WithoutTaskSeveralFoldersAreAnErrorListingThem()
+    public async Task WithoutTaskSeveralFoldersAreAnErrorListingThem()
     {
-        FinishCycle(1, [Gate("build")], []);
+        await FinishCycleAsync(1, [Gate("build")], []);
         Directory.CreateDirectory(Path.Combine(_repo, ".agent_scratchpad", "other-task", "review"));
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
@@ -223,11 +223,11 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void WithoutTaskSeveralFoldersPickTheOneNamedForTheBranch()
+    public async Task WithoutTaskSeveralFoldersPickTheOneNamedForTheBranch()
     {
-        FinishCycle(1, [Gate("build")], []);
+        await FinishCycleAsync(1, [Gate("build")], []);
         Directory.CreateDirectory(Path.Combine(_repo, ".agent_scratchpad", "other-task", "review"));
-        Git("checkout", "-q", "-b", "Demo_Task");
+        await Git("checkout", "-q", "-b", "Demo_Task");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
             () => CreateApp().Run(["review", "cycle", _repo]));
@@ -237,11 +237,11 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheVerdictCarriesAnEarlierPassingResultForAGateThisCycleDidNotRun()
+    public async Task TheVerdictCarriesAnEarlierPassingResultForAGateThisCycleDidNotRun()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], []);
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
         WriteGates(2, [Gate("build"), Gate("always")]);
 
         (int exit, string output) = Verdict(2);
@@ -251,11 +251,11 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheVerdictRefusesWhenAGateWhoseInputsChangedWasNotRunAgain()
+    public async Task TheVerdictRefusesWhenAGateWhoseInputsChangedWasNotRunAgain()
     {
-        FinishCycle(1, [Gate("build"), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build"), Gate("docs"), Gate("always")], []);
         Write("src/a.cs", "// fixed\n");
-        Commit("fix");
+        await Commit("fix");
         WriteGates(2, [Gate("docs"), Gate("always")]);
 
         (int exit, string output) = Verdict(2);
@@ -265,9 +265,9 @@ public sealed class ReviewCycleTests : IDisposable
     }
 
     [Fact]
-    public void TheVerdictDoesNotLetAGateThatFailedDropOutOfTheReport()
+    public async Task TheVerdictDoesNotLetAGateThatFailedDropOutOfTheReport()
     {
-        FinishCycle(1, [Gate("build", exitCode: 1), Gate("docs"), Gate("always")], []);
+        await FinishCycleAsync(1, [Gate("build", exitCode: 1), Gate("docs"), Gate("always")], []);
         WriteGates(2, [Gate("docs"), Gate("always")]);
 
         (int exit, string output) = Verdict(2);
@@ -328,10 +328,10 @@ public sealed class ReviewCycleTests : IDisposable
             ReviewJson.Write(new GateReport(GateReport.CurrentSchema, gates)));
 
     /// <summary>Writes a finished cycle: its head is the repository's current commit unless one is given.</summary>
-    private void FinishCycle(int number, GateResult[] gates, ReviewFinding[] findings, string? head = null, string? branch = null)
+    private async Task FinishCycleAsync(int number, GateResult[] gates, ReviewFinding[] findings, string? head = null, string? branch = null)
     {
         WriteGates(number, gates);
-        Write($".agent_scratchpad/{Task}/review/cycle-{number}/head", head ?? Head());
+        Write($".agent_scratchpad/{Task}/review/cycle-{number}/head", head ?? await HeadAsync());
         ReviewCycleIdentity current = ReviewTestServices.WorkTrees.IdentityOf(_repo, null)!;
         ReviewTestServices.Cycles.WriteIdentity(CycleFolder(number), new ReviewCycleIdentity(branch ?? current.Branch, current.Base, head ?? current.Head));
         Write(
@@ -339,12 +339,12 @@ public sealed class ReviewCycleTests : IDisposable
             ReviewJson.Write(new FindingsReport(FindingsReport.CurrentSchema, findings, [], 0)));
     }
 
-    private string Head() => Git("rev-parse", "HEAD").Trim();
+    private async Task<string> HeadAsync() => (await Git("rev-parse", "HEAD")).Trim();
 
-    private void Commit(string message)
+    private async Task Commit(string message)
     {
-        Git("add", "-A");
-        Git(
+        await Git("add", "-A");
+        await Git(
             "-c", "user.name=cycle", "-c", "user.email=cycle@example.invalid", "-c", "commit.gpgsign=false",
             "commit", "--quiet", "-m", message);
     }
@@ -356,7 +356,7 @@ public sealed class ReviewCycleTests : IDisposable
         File.WriteAllText(path, content);
     }
 
-    private string Git(params string[] arguments)
+    private async Task<string> Git(params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -370,7 +370,7 @@ public sealed class ReviewCycleTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
         return result.StandardOutput;
     }

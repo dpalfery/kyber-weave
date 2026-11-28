@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -25,16 +26,29 @@ public sealed class ReviewCatalogueService(
     IKyberStandardsTemplates templates) : IReviewCatalogueService
 {
     /// <inheritdoc />
-    public ReviewCommandResult Run(
+    public async Task<ReviewCommandResult> RunAsync(
         ReviewCatalogueRequest request,
         TextWriter output,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(output);
+        cancellationToken.ThrowIfCancellationRequested();
 
+        if (!TryPrepare(request, out string root, out IReadOnlyList<string> technologies, out ReviewCommandResult? failure))
+            return failure;
+
+        IReadOnlyList<string> repositoryFiles = await lister.ListAsync(root, cancellationToken).ConfigureAwait(false);
+        return WritePlan(root, technologies, repositoryFiles, output);
+    }
+
+    private bool TryPrepare(
+        ReviewCatalogueRequest request,
+        out string root,
+        out IReadOnlyList<string> technologies,
+        [NotNullWhen(false)] out ReviewCommandResult? failure)
+    {
         DiagnosticReport report = new();
-        string root;
         try
         {
             root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
@@ -48,29 +62,49 @@ public sealed class ReviewCatalogueService(
                 $"Cannot resolve path '{request.Path}': {ex.Message}",
                 "kyber-weave.yml",
                 request.Path));
-            return ReviewCommandResultFactory.Reported(1, report);
+            technologies = [];
+            root = string.Empty;
+            failure = ReviewCommandResultFactory.Reported(1, report);
+            return false;
         }
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResultFactory.Reported(1, report);
+        {
+            technologies = [];
+            failure = ReviewCommandResultFactory.Reported(1, report);
+            return false;
+        }
 
         // A host may declare a technology no template ships: `docs init` scaffolds it as stubs. Its gates are
         // reported as not shipped, not refused, because the technology is the host's own choice.
         HashSet<string> declared = new(config.Ontology.Technologies, StringComparer.OrdinalIgnoreCase);
 
         // Validation is case-insensitive, so slugs map to their canonical spelling before the case-sensitive family match.
-        IReadOnlyList<string> technologies = (request.Technologies.Count > 0
+        technologies = (request.Technologies.Count > 0
             ? request.Technologies
             : config.Ontology.Technologies).Select(technology => CanonicalSlug(technology, declared)).ToList();
 
         foreach (string technology in technologies)
         {
             if (!templates.TryGet(technology, out _) && !declared.Contains(technology))
-                return ReviewCommandResultFactory.Refused(UnknownTechnologyMessage(technology));
+            {
+                failure = ReviewCommandResultFactory.Refused(UnknownTechnologyMessage(technology));
+                return false;
+            }
         }
 
+        failure = null;
+        return true;
+    }
+
+    private ReviewCommandResult WritePlan(
+        string root,
+        IReadOnlyList<string> technologies,
+        IReadOnlyList<string> repositoryFiles,
+        TextWriter output)
+    {
         ReviewGatesPlan plan = ReviewCataloguePlanner.Plan(
-            root, technologies, lister.List(root), new GateCatalogueFacts(files.FileExists, files.ReadAllText));
+            root, technologies, repositoryFiles, new GateCatalogueFacts(files.FileExists, files.ReadAllText));
 
         if (!plan.ShouldWrite)
         {

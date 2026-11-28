@@ -26,30 +26,38 @@ public sealed class RunDeliveryService(
     private readonly IDocsQueryService _query = query ?? throw new ArgumentNullException(nameof(query));
 
     /// <summary>Runs git and gh for the deliver tool; null for the bounded default. Tests set it so nothing leaves the machine.</summary>
-    public IProcessExecutor? DeliveryExecutor { get; set; }
+    public IProcessRunner? DeliveryExecutor { get; set; }
 
     /// <summary>The home directory holding the run records; null for the user profile. Tests point it at a scratch folder.</summary>
     public string? DeliveryHome { get; set; }
 
     /// <inheritdoc />
-    public string DeliverRun(
+    public Task<string> DeliverRunAsync(
         string summary,
         string? notes,
         string? title,
         bool draft,
         string? documentationImpact,
-        string? planFile) =>
-        DeliverHere(summary, notes, title, draft, documentationImpact, planFile);
+        string? planFile,
+        CancellationToken cancellationToken = default) =>
+        DeliverHereAsync(summary, notes, title, draft, documentationImpact, planFile, cancellationToken);
 
-    private string DeliverHere(string summary, string? notes, string? title, bool draft, string? documentationImpact, string? planFile)
+    private async Task<string> DeliverHereAsync(
+        string summary,
+        string? notes,
+        string? title,
+        bool draft,
+        string? documentationImpact,
+        string? planFile,
+        CancellationToken cancellationToken)
     {
-        string provenance = _query.Provenance();
+        string provenance = await _query.ProvenanceAsync(cancellationToken).ConfigureAwait(false);
         DiagnosticReport report = new();
         if (!hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
             return PlanLifecycleService.LifecycleResponse(provenance, "refused", report, null);
 
-        DeliveryOutcome outcome = new RunDelivery(_repositoryRoot, config, DeliveryExecutor, DeliveryHome, ports)
-            .Run(new DeliveryRequest(summary, notes, title, draft, documentationImpact, planFile));
+        DeliveryOutcome outcome = await new RunDelivery(_repositoryRoot, config, DeliveryExecutor, DeliveryHome, ports)
+            .RunAsync(new DeliveryRequest(summary, notes, title, draft, documentationImpact, planFile), cancellationToken).ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         if (!outcome.Delivered)
             return PlanLifecycleService.LifecycleResponse(provenance, "refused", report, outcome.NeedsDeliveryAgent ? DeliverFallbackNext : null);

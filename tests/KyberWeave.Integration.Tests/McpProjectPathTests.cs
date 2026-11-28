@@ -29,15 +29,15 @@ public sealed class McpProjectPathTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     [Fact]
-    public void ProjectPathAnswersFromTheWorktreeWhileTheServerRootKeepsItsOwnDocuments()
+    public async Task ProjectPathAnswersFromTheWorktreeWhileTheServerRootKeepsItsOwnDocuments()
     {
-        string repo = CreateRepository();
-        string worktree = AddWorktree(repo, "wt");
-        File.AppendAllText(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
+        string repo = await CreateRepositoryAsync();
+        string worktree = await AddWorktree(repo, "wt");
+        await File.AppendAllTextAsync(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
         DocsTools tools = ServerTools(repo);
 
-        string fromRoot = tools.Explore(Marker);
-        string fromWorktree = tools.Explore(Marker, projectPath: worktree);
+        string fromRoot = await tools.ExploreAsync(Marker);
+        string fromWorktree = await tools.ExploreAsync(Marker, projectPath: worktree);
 
         Assert.Contains("real miss", fromRoot, StringComparison.Ordinal);
         Assert.Contains("only this page says so", fromWorktree, StringComparison.Ordinal);
@@ -46,30 +46,30 @@ public sealed class McpProjectPathTests : IDisposable
     }
 
     [Fact]
-    public void ProjectPathNamingASubdirectoryOrTheServerRootIsAccepted()
+    public async Task ProjectPathNamingASubdirectoryOrTheServerRootIsAccepted()
     {
-        string repo = CreateRepository();
-        string worktree = AddWorktree(repo, "wt");
-        File.AppendAllText(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
+        string repo = await CreateRepositoryAsync();
+        string worktree = await AddWorktree(repo, "wt");
+        await File.AppendAllTextAsync(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
         DocsTools tools = ServerTools(repo);
 
-        string fromSubdirectory = tools.Explore(Marker, projectPath: Path.Combine(worktree, "docs"));
-        string fromRootPath = tools.DocsStatus(repo);
+        string fromSubdirectory = await tools.ExploreAsync(Marker, projectPath: Path.Combine(worktree, "docs"));
+        string fromRootPath = await tools.DocsStatusAsync(repo);
 
         Assert.Contains("only this page says so", fromSubdirectory, StringComparison.Ordinal);
         Assert.Matches(@"^provenance: root=\S*/repo branch=", fromRootPath);
     }
 
     [Fact]
-    public void ProjectPathInAnotherRepositoryIsRefused()
+    public async Task ProjectPathInAnotherRepositoryIsRefused()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         string foreign = Path.Combine(_temp.Path, "foreign");
         Directory.CreateDirectory(foreign);
-        Git(foreign, "init", "-q");
+        await Git(foreign, "init", "-q");
         DocsTools tools = ServerTools(repo);
 
-        string response = tools.Explore("ontology", projectPath: foreign);
+        string response = await tools.ExploreAsync("ontology", projectPath: foreign);
 
         Assert.Contains("projectPath was refused", response, StringComparison.Ordinal);
         Assert.Contains("different repository", response, StringComparison.Ordinal);
@@ -77,34 +77,39 @@ public sealed class McpProjectPathTests : IDisposable
     }
 
     [Fact]
-    public void ProjectPathThatIsNotAGitDirectoryOrDoesNotExistIsRefused()
+    public async Task ProjectPathThatIsNotAGitDirectoryOrDoesNotExistIsRefused()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         string plain = Path.Combine(_temp.Path, "plain");
         Directory.CreateDirectory(plain);
         DocsTools tools = ServerTools(repo);
 
-        string notGit = tools.Explore("ontology", projectPath: plain);
-        string missing = tools.Explore("ontology", projectPath: Path.Combine(_temp.Path, "absent"));
+        string notGit = await tools.ExploreAsync("ontology", projectPath: plain);
+        string missing = await tools.ExploreAsync("ontology", projectPath: Path.Combine(_temp.Path, "absent"));
 
         Assert.Contains("not inside a git repository", notGit, StringComparison.Ordinal);
         Assert.Contains("not a directory", missing, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RegistryKeepsAtMostFourWorktreesAndReusesTheirTools()
+    public async Task RegistryKeepsAtMostFourWorktreesAndReusesTheirTools()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         DocsRootRegistry registry = Registry(repo);
         DocsTools tools = ServerTools(repo, registry);
-        string[] worktrees = [.. Enumerable.Range(1, 5).Select(i => AddWorktree(repo, "wt" + i))];
+        List<string> worktreeList = [];
+        for (int i = 1; i <= 5; i++)
+            worktreeList.Add(await AddWorktree(repo, "wt" + i));
+        string[] worktrees = [.. worktreeList];
 
-        foreach (string worktree in worktrees) tools.DocsStatus(worktree);
+        foreach (string worktree in worktrees) await tools.DocsStatusAsync(worktree);
         Assert.Equal(DocsRootRegistry.Capacity, registry.Count);
 
-        Assert.True(registry.TryResolve(worktrees[4], out DocsTools? first, out _));
-        Assert.True(registry.TryResolve(worktrees[4], out DocsTools? again, out _));
-        Assert.Same(first, again);
+        DocsRootRegistry.DocsRootResolution first = await registry.TryResolveAsync(worktrees[4]);
+        Assert.True(first.Resolved, first.Refusal);
+        DocsRootRegistry.DocsRootResolution again = await registry.TryResolveAsync(worktrees[4]);
+        Assert.True(again.Resolved, again.Refusal);
+        Assert.Same(first.Tools, again.Tools);
     }
 
     private static DocsRootRegistry Registry(string repo) =>
@@ -113,25 +118,25 @@ public sealed class McpProjectPathTests : IDisposable
     private static DocsTools ServerTools(string repo, DocsRootRegistry? registry = null) =>
         DocsRootRegistry.CreateTools(repo, codeGraphRefreshEnabled: false, registry ?? Registry(repo));
 
-    private string CreateRepository()
+    private async Task<string> CreateRepositoryAsync()
     {
         string repo = Path.Combine(_temp.Path, "repo");
         Directory.CreateDirectory(repo);
-        Git(repo, "init", "-q", "-b", "main");
-        DocsTestCommands.Scaffolding.Scaffold(repo);
-        Git(repo, "add", "-A");
-        Git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
+        await Git(repo, "init", "-q", "-b", "main");
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(repo);
+        await Git(repo, "add", "-A");
+        await Git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
         return repo;
     }
 
-    private string AddWorktree(string repo, string name)
+    private async Task<string> AddWorktree(string repo, string name)
     {
         string path = Path.Combine(_temp.Path, name);
-        Git(repo, "worktree", "add", "-q", "-b", name, path);
+        await Git(repo, "worktree", "add", "-q", "-b", name, path);
         return path;
     }
 
-    private static void Git(string directory, params string[] arguments)
+    private static async Task Git(string directory, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -146,7 +151,7 @@ public sealed class McpProjectPathTests : IDisposable
         startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(directory, ".no-global-gitconfig");
         foreach (string argument in arguments) startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(result.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {result.StandardError}");
     }
 }

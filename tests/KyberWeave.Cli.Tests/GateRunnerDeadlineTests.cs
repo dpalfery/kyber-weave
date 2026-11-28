@@ -271,12 +271,12 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     /// play, a gate that timed out is no different from one that failed.
     /// </summary>
     [Fact]
-    public void ATimedOutBlockingTaskGateStopsTheRunWhenStoppingOnFailure()
+    public async Task ATimedOutBlockingTaskGateStopsTheRunWhenStoppingOnFailure()
     {
         PlannedTaskGate slow = new("slow-gate", true, 1, [], ["sleep", "30"]);
         PlannedTaskGate later = new("later-gate", true, 30, [], ["git", "--version"]);
 
-        TaskGateRun run = _services.Gates.RunTaskGates([slow, later], _repo, fix: false, stopOnBlockingFailure: true);
+        TaskGateRun run = await _services.Gates.RunTaskGatesAsync([slow, later], _repo, fix: false, stopOnBlockingFailure: true);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);

@@ -20,7 +20,7 @@ public sealed class DocsCloseoutCommand(
     IKyberWeaveConfigRepository configs,
     TimeProvider time,
     IAnsiConsole console,
-    PlanArguments plans) : Command<DocsCloseoutSettings>
+    PlanArguments plans) : AsyncCommand<DocsCloseoutSettings>
 {
     /// <summary>The <c>--date</c> value is not a date.</summary>
     public const string InvalidDate = "KW-DOC-CLOSEOUT-005";
@@ -33,7 +33,10 @@ public sealed class DocsCloseoutCommand(
     /// <c>--archive</c>, when it was archived); exits 1 naming each missing condition, or on a usage or I/O error.
     /// Nothing is changed unless every check passes.
     /// </summary>
-    public override int Execute(CommandContext context, DocsCloseoutSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsCloseoutSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -66,7 +69,8 @@ public sealed class DocsCloseoutCommand(
         }
 
         plans.Announce(report, settings, relative);
-        PlanCloseoutOutcome outcome = closeout.Run(root, effective, relative, date, settings.Archive && !settings.DryRun);
+        PlanCloseoutOutcome outcome = await closeout.RunAsync(
+            root, effective, relative, date, settings.Archive && !settings.DryRun, cancellationToken).ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);
 

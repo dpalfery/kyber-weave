@@ -73,16 +73,16 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
     public void WriteHomeFile(string relativePath, string content) => Project.Write(Path.Combine(Home, relativePath), content);
 
     /// <summary>Runs the user-level hook against this scenario's home.</summary>
-    public HookRun RunGlobal(string payload, string harness = Harness) =>
-        Run(Project, harness, null, payload, HookScope.Global, Home);
+    public async Task<HookRun> RunGlobal(string payload, string harness = Harness) =>
+        await Run(Project, harness, null, payload, HookScope.Global, Home);
 
     /// <summary>Runs the project-scope hook on the project host: no scope and no home.</summary>
-    public HookRun RunProject(string payload, string? caller = null) =>
-        Run(Project, Harness, caller, payload, HookScope.Project, null);
+    public async Task<HookRun> RunProject(string payload, string? caller = null) =>
+        await Run(Project, Harness, caller, payload, HookScope.Project, null);
 
     /// <summary>Runs the project-scope hook on the twin host.</summary>
-    public HookRun RunTwin(string payload, string? caller = null) =>
-        Run(Twin, Harness, caller, payload, HookScope.Project, null);
+    public async Task<HookRun> RunTwin(string payload, string? caller = null) =>
+        await Run(Twin, Harness, caller, payload, HookScope.Project, null);
 
     /// <summary>
     /// Masks the <c>DECISION_ID</c> a deny document carries. Each evaluation mints a new id, so two
@@ -187,7 +187,7 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
     }
 
     /// <summary>Runs one hook invocation over the host's in-memory ports.</summary>
-    internal static HookRun Run(
+    internal static async Task<HookRun> Run(
         InMemoryArbiterHost host,
         string harness,
         string? caller,
@@ -198,7 +198,7 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
         HookCommand command = host.HookCommand(host.Registry(host.Engine()));
         using StringWriter stdout = new();
         using StringWriter stderr = new();
-        int exit = command.Run(harness, caller, payload, stdout, stderr, scope, home);
+        int exit = await command.RunAsync(harness, caller, payload, stdout, stderr, scope, home);
         return new HookRun(exit, stdout.ToString(), stderr.ToString());
     }
 

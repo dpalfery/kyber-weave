@@ -12,14 +12,14 @@ namespace KyberWeave.Integration.Tests;
 public sealed class CodeGraphNeighborhoodAdapterSqliteTests
 {
     [Fact]
-    public void CodeGraphResolverAdapterLoadsNodesAndEdgesBeforeTheIndexIsRemoved()
+    public async Task CodeGraphResolverAdapterLoadsNodesAndEdgesBeforeTheIndexIsRemoved()
     {
-        CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
+        CodeGraphFixtureDb fixture = await CodeGraphFixtureDb.CreateAsync();
         try
         {
-            fixture.IndexSymbol("Caller", "src/Caller.cs", 10);
-            fixture.IndexSymbol("Callee", "src/Callee.cs", 20);
-            fixture.IndexEdge("id-Caller", "id-Callee", "calls");
+            await fixture.IndexSymbol("Caller", "src/Caller.cs", 10);
+            await fixture.IndexSymbol("Callee", "src/Callee.cs", 20);
+            await fixture.IndexEdge("id-Caller", "id-Callee", "calls");
 
             CodeGraphResolverAdapter adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
             ICodeGraphNeighborhoodProvider provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(adapter);
@@ -39,14 +39,14 @@ public sealed class CodeGraphNeighborhoodAdapterSqliteTests
     }
 
     [Fact]
-    public void CodeGraphResolverAdapterNeighborhoodQueryIsBatchedAndAppliesDegreeCap()
+    public async Task CodeGraphResolverAdapterNeighborhoodQueryIsBatchedAndAppliesDegreeCap()
     {
-        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
-        fixture.IndexSymbol("Hub", "src/Hub.cs", 1);
-        fixture.IndexSymbol("First", "src/First.cs", 2);
-        fixture.IndexSymbol("Second", "src/Second.cs", 3);
-        fixture.IndexEdge("id-Hub", "id-First", "calls");
-        fixture.IndexEdge("id-Hub", "id-Second", "references");
+        using CodeGraphFixtureDb fixture = await CodeGraphFixtureDb.CreateAsync();
+        await fixture.IndexSymbol("Hub", "src/Hub.cs", 1);
+        await fixture.IndexSymbol("First", "src/First.cs", 2);
+        await fixture.IndexSymbol("Second", "src/Second.cs", 3);
+        await fixture.IndexEdge("id-Hub", "id-First", "calls");
+        await fixture.IndexEdge("id-Hub", "id-Second", "references");
 
         ICodeGraphNeighborhoodProvider provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(
             DocsPorts.CodeGraphAt(fixture.DatabasePath));

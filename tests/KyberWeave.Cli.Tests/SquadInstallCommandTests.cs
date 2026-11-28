@@ -26,11 +26,12 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_UnknownTarget_IsRefusedAsClientInput()
+    public async Task Execute_UnknownTarget_IsRefusedAsClientInput()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings { Targets = ["not-a-harness"] });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings { Targets = ["not-a-harness"] },
+            CancellationToken.None);
 
         Assert.Equal(2, exit);
         Assert.StartsWith("kyber-weave squad: error: ", Output(), StringComparison.Ordinal);
@@ -39,7 +40,7 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NoTargetsResolved_NamesTheRecoveryCommandAndUsesItsExitCode()
+    public async Task Execute_NoTargetsResolved_NamesTheRecoveryCommandAndUsesItsExitCode()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _targets.Decision = new SquadTargetResolutionDecision
@@ -51,7 +52,7 @@ public sealed class SquadInstallCommandTests : IDisposable
             RecoveryCommand = "--target claude"
         };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings(), CancellationToken.None);
 
         Assert.Equal(3, exit);
         Assert.Equal(
@@ -61,11 +62,11 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_Project_InstallsAtTheWorkingDirectoryAndSaysSo()
+    public async Task Execute_Project_InstallsAtTheWorkingDirectoryAndSaysSo()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal([WorkingDirectory], _migration.InvokingDirectories);
@@ -79,14 +80,14 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
+    public async Task Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
     {
         FakeSquadLifecycleService lifecycle = new(_state)
         {
             Result = new SquadLifecycleResult(true, Warnings: ["Recovered an unfinished Squad transaction at '/kw/work/.kyber-weave/.squad-transaction': it had not committed, so its changes were rolled back."])
         };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains(
@@ -97,23 +98,24 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_RelativePath_ResolvesAgainstTheWorkingDirectoryTheEnvironmentNames()
+    public async Task Execute_RelativePath_ResolvesAgainstTheWorkingDirectoryTheEnvironmentNames()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings { PathOption = "app" });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings { PathOption = "app" },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal("/kw/work/app", Assert.Single(lifecycle.Installs).TargetRoot);
     }
 
     [Fact]
-    public void Execute_DryRun_PlansWithoutAskingAndReportsTheFileCount()
+    public async Task Execute_DryRun_PlansWithoutAskingAndReportsTheFileCount()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle, interactive: true, readAnswer: _ => throw new InvalidOperationException("asked"))
-            .Execute(null!, new SquadInstallSettings { DryRun = true });
+        int exit = await Command(lifecycle, interactive: true, readAnswer: _ => throw new InvalidOperationException("asked"))
+            .ExecuteAsync(null!, new SquadInstallSettings { DryRun = true }, CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.True(Assert.Single(lifecycle.Installs).DryRun);
@@ -121,11 +123,12 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_InteractiveAndDeclined_StopsBeforeTheLifecycle()
+    public async Task Execute_InteractiveAndDeclined_StopsBeforeTheLifecycle()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle, interactive: true, readAnswer: _ => false).Execute(null!, new SquadInstallSettings());
+        int exit = await Command(lifecycle, interactive: true, readAnswer: _ => false)
+            .ExecuteAsync(null!, new SquadInstallSettings(), CancellationToken.None);
 
         Assert.Equal(2, exit);
         Assert.Empty(lifecycle.Installs);
@@ -133,7 +136,7 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_OpenCodeProject_PrintsTheRegistrationStepOnTheStandardStream()
+    public async Task Execute_OpenCodeProject_PrintsTheRegistrationStepOnTheStandardStream()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _configs.WriteRepositoryConfig(WorkingDirectory, "arbiter:\n  enabled: true\n");
@@ -144,7 +147,7 @@ public sealed class SquadInstallCommandTests : IDisposable
             Source = SquadTargetResolutionSource.Explicit
         };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Equal(
@@ -153,11 +156,11 @@ public sealed class SquadInstallCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_LifecycleFails_PrintsEachErrorAndExitsOne()
+    public async Task Execute_LifecycleFails_PrintsEachErrorAndExitsOne()
     {
         FakeSquadLifecycleService lifecycle = new(_state) { Result = new SquadLifecycleResult(false, Errors: ["broken [x]"]) };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadInstallSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadInstallSettings(), CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.EndsWith("kyber-weave squad: error: broken [x]\n", Output(), StringComparison.Ordinal);

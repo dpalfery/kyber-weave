@@ -22,45 +22,45 @@ namespace KyberWeave.Integration.Tests;
 public sealed class McpDocsGateToolsRealGitTests
 {
     [Fact]
-    public void DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
+    public async Task DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
     {
-        using CloseoutGitRepo repo = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
+        await repo.CommitAsync("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeValidate(tools, true, gitBase: "HEAD");
+        string response = await InvokeValidateAsync(tools, true, gitBase: "HEAD");
 
         Assert.StartsWith("result: pass", ResultLine(response), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
+    public async Task DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
     {
-        using CloseoutGitRepo repo = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
+        await repo.CommitAsync("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeValidate(tools, true, gitBase: "origin/this-ref-is-not-present");
+        string response = await InvokeValidateAsync(tools, true, gitBase: "origin/this-ref-is-not-present");
 
         Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
         Assert.Contains("scope is unknown (C0)", response, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DocsValidateMergeReadyFailsClosedWhenArchivedEntryIsSymlink()
+    public async Task DocsValidateMergeReadyFailsClosedWhenArchivedEntryIsSymlink()
     {
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        using CloseoutGitRepo repo = new();
+        using CloseoutGitRepo repo = await CloseoutGitRepo.CreateAsync();
         using TempDirectory outside = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
+        await repo.CommitAsync("initial");
 
         string target = Path.Combine(outside.Path, "target.md");
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             target,
             """
             ---
@@ -82,7 +82,7 @@ public sealed class McpDocsGateToolsRealGitTests
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
         string? captured = null;
-        Exception? failure = Record.Exception(() => captured = InvokeValidate(tools, true, gitBase: "HEAD"));
+        Exception? failure = await Record.ExceptionAsync(async () => captured = await InvokeValidateAsync(tools, true, gitBase: "HEAD"));
         Assert.Null(failure);
         Assert.NotNull(captured);
         string response = captured;

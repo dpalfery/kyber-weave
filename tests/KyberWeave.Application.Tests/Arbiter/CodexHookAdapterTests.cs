@@ -48,6 +48,23 @@ public sealed class CodexHookAdapterTests
 
         public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
             PostResult;
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private sealed class ContextualEngine : IContextualHookDecisionEngine
@@ -106,6 +123,53 @@ public sealed class CodexHookAdapterTests
             SeenPostToolCallId = toolCallId;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
@@ -114,7 +178,7 @@ public sealed class CodexHookAdapterTests
     private static string Fixture(string name) =>
         EmbeddedFixtureText.Read(typeof(CodexHookAdapterTests).Assembly, $"arbiter-hooks/codex/{name}");
 
-    private static (int Exit, string Stdout, string Log) Run(
+    private static async Task<(int Exit, string Stdout, string Log)> Run(
         string stdin,
         string? caller,
         IHookDecisionEngine engine,
@@ -126,18 +190,18 @@ public sealed class CodexHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(CodexHookAdapter.Token, caller, stdin, stdout, log);
+        int exit = await command.RunAsync(CodexHookAdapter.Token, caller, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
     [Fact]
-    public void PreDispatch_Deny_WritesDenyShape()
+    public async Task PreDispatch_Deny_WritesDenyShape()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-spawn-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -148,9 +212,9 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
+    public async Task PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
     {
-        (int exit, string stdout, _) = Run(Fixture("pre-spawn-dispatch.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("pre-spawn-dispatch.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -169,21 +233,21 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
+    public async Task PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-spawn-dispatch.json").Replace(
             "\"agent_type\": \"dev-medium\"", "\"agent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
-        (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(stdin, null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void PreDispatch_AgentAlias_TreatedAsDispatch()
+    public async Task PreDispatch_AgentAlias_TreatedAsDispatch()
     {
-        (int exit, string stdout, _) = Run(Fixture("pre-agent-alias.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("pre-agent-alias.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -194,7 +258,7 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_PrefixedSpawnAgent_TreatedAsDispatch()
+    public async Task PreDispatch_PrefixedSpawnAgent_TreatedAsDispatch()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
@@ -202,7 +266,7 @@ public sealed class CodexHookAdapterTests
         string stdin = Fixture("pre-spawn-dispatch.json").Replace(
             "\"tool_name\": \"spawn_agent\"", "\"tool_name\": \"my-ns/spawn_agent\"", StringComparison.Ordinal);
 
-        (int exit, string stdout, _) = Run(stdin, null, engine);
+        (int exit, string stdout, _) = await Run(stdin, null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -210,11 +274,11 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_TargetAndPrompt_ComeFromAgentTypeAndMessage()
+    public async Task PreDispatch_TargetAndPrompt_ComeFromAgentTypeAndMessage()
     {
         ScriptedEngine engine = new();
 
-        (int exit, _, _) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
+        (int exit, _, _) = await Run(Fixture("pre-spawn-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal("dev-medium", engine.SeenPreTarget);
@@ -223,7 +287,7 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_NonDispatchTool_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_NonDispatchTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -234,7 +298,7 @@ public sealed class CodexHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(CodexHookAdapter.Token, null, Fixture("pre-non-dispatch.json"), stdout, log);
+        int exit = await command.RunAsync(CodexHookAdapter.Token, null, Fixture("pre-non-dispatch.json"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -243,7 +307,7 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_NoTarget_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_NoTarget_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -254,7 +318,7 @@ public sealed class CodexHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(CodexHookAdapter.Token, null, Fixture("pre-spawn-no-target.json"), stdout, log);
+        int exit = await command.RunAsync(CodexHookAdapter.Token, null, Fixture("pre-spawn-no-target.json"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -262,13 +326,13 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Block_WritesAdditionalContextNeverTopLevelBlock()
+    public async Task PostDispatch_Block_WritesAdditionalContextNeverTopLevelBlock()
     {
         const string note =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-spawn-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-spawn-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -279,13 +343,13 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Deny_AlsoWritesAdditionalContext()
+    public async Task PostDispatch_Deny_AlsoWritesAdditionalContext()
     {
         const string note =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.Deny, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-spawn-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-spawn-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -294,21 +358,21 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Allow_WritesNothing()
+    public async Task PostDispatch_Allow_WritesNothing()
     {
-        (int exit, string stdout, _) = Run(Fixture("post-spawn-completed.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("post-spawn-completed.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);
     }
 
     [Fact]
-    public void Pairing_PreAndPost_UseToolUseId()
+    public async Task Pairing_PreAndPost_UseToolUseId()
     {
         ContextualEngine engine = new();
 
-        (int preExit, _, _) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
-        (int postExit, _, _) = Run(Fixture("post-spawn-completed.json"), null, engine);
+        (int preExit, _, _) = await Run(Fixture("pre-spawn-dispatch.json"), null, engine);
+        (int postExit, _, _) = await Run(Fixture("post-spawn-completed.json"), null, engine);
 
         Assert.Equal(0, preExit);
         Assert.Equal(0, postExit);
@@ -319,11 +383,11 @@ public sealed class CodexHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_AllowsAndLogs()
+    public async Task InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, string log) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = await Run(Fixture("pre-spawn-dispatch.json"), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);

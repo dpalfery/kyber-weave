@@ -14,16 +14,17 @@ public sealed class ArbiterSectionsUsageCliTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void ASectionsRunWithoutAPathIsAUsageErrorNotAnException()
+    public async Task ASectionsRunWithoutAPathIsAUsageErrorNotAnException()
     {
         ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
 
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterSectionsSettings
             {
                 Task = "Change the install steps.",
-            }));
+            },
+            token));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("kyber-weave arbiter: error: --path is required.", execution.Output, StringComparison.Ordinal);

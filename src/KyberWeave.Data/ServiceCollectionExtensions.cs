@@ -58,7 +58,6 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
-        services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
     }
@@ -69,14 +68,14 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton(sp => new CodeGraphIndexStaleness(
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IProgramRunner>()));
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
         services.TryAddSingleton(sp => new AnalysisCacheSafety(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>()));
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<IAnalysisPersistenceFactory, SqliteAnalysisPersistenceFactory>();
         services.TryAddSingleton<IEmbeddingTransport, LoopbackEmbeddingTransport>();
         services.TryAddSingleton<IEmbeddingGeneratorFactory, OpenAiCompatibleEmbeddingGeneratorFactory>();
@@ -101,7 +100,6 @@ public static class ServiceCollectionExtensions
     /// <param name="services">The collection to populate.</param>
     private static void RegisterReviewAndSkillAdapters(IServiceCollection services)
     {
-        services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<IReviewEvidenceStore>(sp => new FileReviewEvidenceStore(sp.GetRequiredService<IWritableFileSystem>()));

@@ -66,8 +66,8 @@ public sealed class ReviewSeatRecorderTests : IDisposable
 
     private static string CopilotResult(string text) => JsonSerializer.Serialize(new { textResultForLlm = text, resultType = "success" });
 
-    private HookOutcome Sync(string prompt, string toolOutput, HookContext context) =>
-        Engine().DecidePostDispatch("claude", "code-reviewer", "review-lens", prompt, toolOutput, Config, context);
+    private async Task<HookOutcome> Sync(string prompt, string toolOutput, HookContext context) =>
+        await Engine().DecidePostDispatchAsync("claude", "code-reviewer", "review-lens", prompt, toolOutput, Config, context);
 
     /// <summary>A synchronous return is saved unchanged as its lens's seat file.</summary>
     [Fact]
@@ -82,7 +82,7 @@ public sealed class ReviewSeatRecorderTests : IDisposable
 
     /// <summary>A Claude result's text blocks are the reply.</summary>
     [Fact]
-    public void AClaudeContentResultWritesItsTextBlocks()
+    public async Task AClaudeContentResultWritesItsTextBlocks()
     {
         (HookContext context, _) = Context();
         string result = JsonSerializer.Serialize(new { status = "completed", content = new[] { new { type = "text", text = Reply } } });
@@ -94,13 +94,13 @@ public sealed class ReviewSeatRecorderTests : IDisposable
 
     /// <summary>A background agent's turn is saved through the stored dispatch's prompt.</summary>
     [Fact]
-    public void ABackgroundReturnWritesTheSeatFile()
+    public async Task ABackgroundReturnWritesTheSeatFile()
     {
         (HookContext context, _) = Context();
         BackgroundDispatch dispatch = new("copilot-cli", "session-1", "agent-1", "code-reviewer", "review-lens", Prompt(Packet()));
         _host.Get<IBackgroundDispatchStore>().Save(_host.ArbiterDirectory, new BackgroundDispatchRecord(dispatch, "pre-1"));
 
-        _ = Engine().DecideBackgroundReturn("copilot-cli", "session-1", "agent-1", Reply, Config, context);
+        _ = await Engine().DecideBackgroundReturnAsync("copilot-cli", "session-1", "agent-1", Reply, Config, context);
 
         Assert.Equal(Reply, _host.Files.ReadAllText(Seat()));
     }
@@ -270,13 +270,13 @@ public sealed class ReviewSeatRecorderTests : IDisposable
 
     /// <summary>A write that fails is logged and the dispatch is still allowed.</summary>
     [Fact]
-    public void AFailedWriteIsLoggedAndTheDispatchIsStillAllowed()
+    public async Task AFailedWriteIsLoggedAndTheDispatchIsStillAllowed()
     {
         (HookContext context, StringWriter log) = Context();
         _host.Files.CreateDirectory(Cycle());
         _host.Files.WriteAllText(Path.Combine(Cycle(), "seats"), "a file where the seats folder belongs");
 
-        HookOutcome outcome = Sync(Prompt(Packet()), CopilotResult(Reply), context);
+        HookOutcome outcome = await Sync(Prompt(Packet()), CopilotResult(Reply), context);
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Contains("review seat was not saved", log.ToString(), StringComparison.Ordinal);

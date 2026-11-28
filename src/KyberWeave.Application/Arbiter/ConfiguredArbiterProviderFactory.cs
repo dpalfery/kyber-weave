@@ -26,20 +26,18 @@ public sealed class ConfiguredArbiterProviderFactory(
     TimeProvider clock,
     Func<ICredentialStore> credentialStore)
 {
-    /// <summary>The provider to ask, or null when none is configured or reachable without a call.</summary>
+    /// <summary>The provider to ask without blocking a thread, or null when none is configured or reachable without a call.</summary>
     /// <param name="repositoryProvider">The provider the repository configures.</param>
     /// <param name="homeDirectory">The user's home directory, where the override lives.</param>
     /// <param name="handler">The HTTP handler; null for the transport the handler seam creates.</param>
     /// <param name="storeFactory">The credential store; null for the operating system's.</param>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The handler's lifetime transfers to the returned provider, which the caller disposes.")]
-    public IArbiterProvider? TryCreate(
+    /// <param name="cancellationToken">Cancels the key resolution.</param>
+    public async Task<IArbiterProvider?> TryCreateAsync(
         ArbiterProviderConfig repositoryProvider,
         string homeDirectory,
         HttpMessageHandler? handler = null,
-        Func<ICredentialStore>? storeFactory = null)
+        Func<ICredentialStore>? storeFactory = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(repositoryProvider);
         ArgumentNullException.ThrowIfNull(homeDirectory);
@@ -73,11 +71,11 @@ public sealed class ConfiguredArbiterProviderFactory(
             store = null;
         }
 
-        Func<Uri, string?> keyResolver = uri =>
+        Func<Uri, CancellationToken, Task<string?>> keyResolver = async (uri, token) =>
         {
             try
             {
-                return ArbiterKeyResolver.Resolve(uri.ToString(), store, environment.GetVariable, userOverride);
+                return await ArbiterKeyResolver.ResolveAsync(uri.ToString(), store, environment.GetVariable, userOverride, token).ConfigureAwait(false);
             }
             catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
@@ -85,10 +83,13 @@ public sealed class ConfiguredArbiterProviderFactory(
             }
         };
 
-        if (!endpoint.IsLoopback && keyResolver(endpoint) is null)
+        if (!endpoint.IsLoopback && await keyResolver(endpoint, cancellationToken).ConfigureAwait(false) is null)
             return null;
 
         return SystemOneClient.CreateForProduct(
-            handler ?? handlers.Create(), endpoint, provider.Model, provider.TimeoutMs, clock, keyResolver);
+            CreateTransport(handler), endpoint, provider.Model, provider.TimeoutMs, clock, keyResolver);
     }
+
+    /// <summary>The transport to hand the client: the caller's, or the one the handler seam creates.</summary>
+    private HttpMessageHandler CreateTransport(HttpMessageHandler? handler) => handler ?? handlers.Create();
 }

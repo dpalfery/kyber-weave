@@ -120,14 +120,15 @@ public sealed partial class DocsQueryService : IDocsQueryService
         _skills = skills ?? throw new ArgumentNullException(nameof(skills));
     }
 
-    public string Explore(
+    public async Task<string> ExploreAsync(
         string query,
-        string? cursor)
+        string? cursor,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
-        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
+        if (gate.Failure is { } failure) return Blocked(await ProvenanceAsync(null, cancellationToken).ConfigureAwait(false), failure);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         ExploreAnswer answer = index.Explore(query, cursor);
 
@@ -197,13 +198,14 @@ public sealed partial class DocsQueryService : IDocsQueryService
         return sb.ToString();
     }
 
-    public string ForSymbol(
-        string symbol)
+    public async Task<string> ForSymbolAsync(
+        string symbol,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
-        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
+        if (gate.Failure is { } failure) return Blocked(await ProvenanceAsync(null, cancellationToken).ConfigureAwait(false), failure);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         IReadOnlyList<DocumentHit> hits = index.ForSymbol(symbol);
 
@@ -230,16 +232,17 @@ public sealed partial class DocsQueryService : IDocsQueryService
         return Lead(gate, provenance, sb.ToString());
     }
 
-    public string AnalysisCandidates(
+    public async Task<string> AnalysisCandidatesAsync(
         string? kind,
         string? cursor,
         int limit,
-        int charBudget)
+        int charBudget,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
-        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
+        if (gate.Failure is { } failure) return Blocked(await ProvenanceAsync(null, cancellationToken).ConfigureAwait(false), failure);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         int effectiveBudget = Math.Max(0, Math.Clamp(charBudget, 0, AnalysisCharCap) - provenance.Length - 1);
 
@@ -259,7 +262,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
         DocumentationAnalysisResult result;
         try
         {
-            result = _analysisReader.Analyze();
+            result = await _analysisReader.AnalyzeAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (DocsToolSupport.IsExpectedReadFailure(exception))
         {
@@ -337,13 +340,14 @@ public sealed partial class DocsQueryService : IDocsQueryService
         return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
-    public string Glossary(
-        string term)
+    public async Task<string> GlossaryAsync(
+        string term,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
-        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
+        if (gate.Failure is { } failure) return Blocked(await ProvenanceAsync(null, cancellationToken).ConfigureAwait(false), failure);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         int effectiveBudget = Math.Max(0, AnalysisCharCap - provenance.Length - 1);
 
@@ -413,15 +417,16 @@ public sealed partial class DocsQueryService : IDocsQueryService
         return Lead(gate, provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
-    public string DocsValidate(
+    public async Task<string> DocsValidateAsync(
         bool mergeReady,
         string baseRef,
-        int charBudget)
+        int charBudget,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
-        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
+        if (gate.Failure is { } failure) return Blocked(await ProvenanceAsync(null, cancellationToken).ConfigureAwait(false), failure);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         DiagnosticReport report = new();
         _gates.ValidateSchema(
@@ -434,12 +439,13 @@ public sealed partial class DocsQueryService : IDocsQueryService
         return FormatGateResponse(gate, provenance, report, charBudget);
     }
 
-    public string DocsDrift(
-        int charBudget)
+    public async Task<string> DocsDriftAsync(
+        int charBudget,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         // This tool answers even when the gate reports a failure, and that is deliberate: its
         // verdict is the CodeGraph failure report the caller came for — the linter emits a
@@ -447,7 +453,12 @@ public sealed partial class DocsQueryService : IDocsQueryService
         // the documented second line of the response. Replacing that with the generic block would
         // throw away the findings. The gate's one-line note still rides above the verdict.
         DiagnosticReport report = new();
-        _gates.CheckDrift(_host.RepositoryRoot, _host.LoadDocumentSet, _host.CreateCodeGraphResolver, report);
+        await _gates.CheckDriftAsync(
+            _host.RepositoryRoot,
+            _host.LoadDocumentSet,
+            _host.CreateCodeGraphResolver,
+            report,
+            cancellationToken).ConfigureAwait(false);
 
         return FormatGateResponse(gate, provenance, report, charBudget);
     }
@@ -456,10 +467,10 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// Reports the provenance of the corpus this server answers from, with no query. This is
     /// the cheap session-start check an agent calls before trusting any other docs tool.
     /// </summary>
-    public string DocsStatus()
+    public async Task<string> DocsStatusAsync(CancellationToken cancellationToken = default)
     {
         DocumentIndex index = _host.Current();
-        return Provenance(index);
+        return await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -480,15 +491,16 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// caller's budget is an index nobody can rely on.
     /// </para>
     /// </remarks>
-    public string AgentCodingStandards(
+    public async Task<string> AgentCodingStandardsAsync(
         string technology,
         string? topic,
-        int charBudget)
+        int charBudget,
+        CancellationToken cancellationToken = default)
     {
-        CodeGraphGate gate = CheckCodeGraph();
-        if (gate.Failure is { } failure) return Blocked(Provenance(null), failure);
+        CodeGraphGate gate = await CheckCodeGraphAsync(cancellationToken).ConfigureAwait(false);
+        if (gate.Failure is { } failure) return Blocked(await ProvenanceAsync(null, cancellationToken).ConfigureAwait(false), failure);
         DocumentIndex index = _host.Current();
-        string provenance = Provenance(index);
+        string provenance = await ProvenanceAsync(index, cancellationToken).ConfigureAwait(false);
 
         // The index folds an unnamed technology into an empty result, so a caller error would
         // otherwise be answered with "no standard for ''". Usage prose is the honest reply to
@@ -634,9 +646,9 @@ public sealed partial class DocsQueryService : IDocsQueryService
     }
 
     /// <inheritdoc />
-    public string LoadSkill(string name)
+    public async Task<string> LoadSkillAsync(string name, CancellationToken cancellationToken = default)
     {
-        string provenance = Provenance();
+        string provenance = await ProvenanceAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(name)) return provenance + "\n" + LoadSkillUsage;
 
         KwSkillLoadResult result = _skills.Load(name);
@@ -708,20 +720,26 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// <remarks>
     /// One gate rather than a check per tool, because the question is the same for all of them:
     /// the joins these tools report come from CodeGraph, and an answer with the joins silently
-    /// missing reads exactly like a complete one. <see cref="DocsStatus"/> is exempt because it is
+    /// missing reads exactly like a complete one. <see cref="DocsStatusAsync"/> is exempt because it is
     /// the tool a caller reaches for once something else has failed, and it has to answer.
     /// </remarks>
-    private CodeGraphGate CheckCodeGraph() => _freshness.Evaluate(_host.CreateCodeGraphResolver);
+    private async Task<CodeGraphGate> CheckCodeGraphAsync(CancellationToken cancellationToken) =>
+        await _freshness.EvaluateAsync(_host.CreateCodeGraphResolver, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// The provenance header for a response answered from <paramref name="index"/>. Every
     /// user-visible return leads with this so a caller can tell which corpus answered.
     /// </summary>
-    private string Provenance(DocumentIndex? index = null) =>
-        _provenance.Line(_host.RepositoryRoot, index?.DocumentCount ?? _host.DocumentCount, _host.CorpusBuilds);
+    private async Task<string> ProvenanceAsync(DocumentIndex? index = null, CancellationToken cancellationToken = default) =>
+        await _provenance.LineAsync(
+            _host.RepositoryRoot,
+            index?.DocumentCount ?? _host.DocumentCount,
+            _host.CorpusBuilds,
+            cancellationToken).ConfigureAwait(false);
 
     /// <inheritdoc />
-    string IDocsQueryService.Provenance() => Provenance();
+    Task<string> IDocsQueryService.ProvenanceAsync(CancellationToken cancellationToken) =>
+        ProvenanceAsync(cancellationToken: cancellationToken);
 
     /// <summary>
     /// Puts the provenance line first, then the gate's one-line note when it has one, then the
@@ -1192,8 +1210,8 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// list — does not pass through a section.
     /// </param>
     /// <param name="requestLabel">
-    /// What the caller asked with — <c>query</c> from <see cref="Explore"/>, <c>topic</c> from
-    /// <see cref="AgentCodingStandards"/> — so the marker names the thing the caller actually
+    /// What the caller asked with — <c>query</c> from <see cref="ExploreAsync"/>, <c>topic</c> from
+    /// <see cref="AgentCodingStandardsAsync"/> — so the marker names the thing the caller actually
     /// passed.
     /// </param>
     private static void AppendOmittedHeadingsMarker(
@@ -1221,8 +1239,8 @@ public sealed partial class DocsQueryService : IDocsQueryService
     /// declined to name.
     /// </param>
     /// <param name="requestLabel">
-    /// What the caller asked with — <c>query</c> from <see cref="Explore"/>, <c>topic</c> from
-    /// <see cref="AgentCodingStandards"/> — so the marker for an off-topic section names the
+    /// What the caller asked with — <c>query</c> from <see cref="ExploreAsync"/>, <c>topic</c> from
+    /// <see cref="AgentCodingStandardsAsync"/> — so the marker for an off-topic section names the
     /// thing the caller actually passed.
     /// </param>
     private static void AppendExcerpt(
@@ -1339,7 +1357,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
 
         /// <summary>
         /// Nothing is withheld, so a citation prints as the document wrote it. The surfaces with
-        /// no rule-id index — <see cref="Explore"/> and <see cref="ForSymbol"/> — name every id
+        /// no rule-id index — <see cref="ExploreAsync"/> and <see cref="ForSymbolAsync"/> — name every id
         /// they echo and so have nothing to withhold; passing this says so at the call site
         /// instead of leaving it to a default the next echo site could inherit by accident.
         /// </summary>

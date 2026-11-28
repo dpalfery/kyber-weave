@@ -75,13 +75,14 @@ public sealed class ReviewPathSeamTests
     }
 
     [Fact]
-    public void TheCatalogueCommandLoadsTheConfigurationForTheResolvedRoot()
+    public async Task TheCatalogueCommandLoadsTheConfigurationForTheResolvedRootAsync()
     {
         RecordingConfigs configs = new();
         ReviewCatalogueService service = new(
             configs, new UnusedLister(), _files, Paths, _environment, new KyberStandardsTemplateReader(_resources));
 
-        ReviewCommandResult result = service.Run(new ReviewCatalogueRequest("repo", null, []), TextWriter.Null);
+        ReviewCommandResult result = await service.RunAsync(
+            new ReviewCatalogueRequest("repo", null, []), TextWriter.Null, CancellationToken.None);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal("/work/repo", configs.Root);
@@ -174,6 +175,10 @@ public sealed class ReviewPathSeamTests
     private sealed class UnusedLister : IRepositoryFileLister
     {
         public IReadOnlyList<string> List(string repositoryRoot) => throw new InvalidOperationException("unexpected call");
+
+        public Task<IReadOnlyList<string>> ListAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default) => throw new InvalidOperationException("unexpected call");
     }
 
     private sealed class UnusedDetector : IDuplicateDetectionService
@@ -195,5 +200,9 @@ public sealed class ReviewPathSeamTests
     private sealed class UnusedGraphs : ICodeGraphPortsFactory
     {
         public CodeGraphPorts ForRepository(string repositoryRoot) => throw new InvalidOperationException("unexpected call");
+
+        public Task<CodeGraphPorts> ForRepositoryAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default) => throw new InvalidOperationException("unexpected call");
     }
 }

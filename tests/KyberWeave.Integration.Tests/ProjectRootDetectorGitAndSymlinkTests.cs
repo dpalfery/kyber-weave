@@ -25,7 +25,7 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
 
     private static ProjectRootSet Detect(string repositoryRoot, string[] markers, ProjectRootNesting nesting) =>
         ProjectRootDetection.Detect(
-            RealRepositoryFileLister.Create().List(repositoryRoot),
+            RealRepositoryFileLister.Create().ListAsync(repositoryRoot, CancellationToken.None).GetAwaiter().GetResult(),
             markers,
             nesting,
             false,
@@ -36,11 +36,11 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
     /// as scratch output is not gated. This case needs real git, because the ignore rules come from git.
     /// </summary>
     [Fact]
-    public void AGitIgnoredDirectoryIsNeverARoot()
+    public async Task AGitIgnoredDirectoryIsNeverARoot()
     {
         string repo = _fixture.Path;
-        Git(repo, "init", "-q");
-        File.WriteAllText(Path.Combine(repo, ".gitignore"), "scratch/\n", new UTF8Encoding(false));
+        await Git(repo, "init", "-q");
+        await File.WriteAllTextAsync(Path.Combine(repo, ".gitignore"), "scratch/\n", new UTF8Encoding(false));
         Touch(repo, "scratch/go.mod");
         Touch(repo, "app/go.mod");
 
@@ -54,14 +54,14 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
     /// directory exclusion must apply on top of the git listing, not only to untracked files.
     /// </summary>
     [Fact]
-    public void ACommittedVendorDirectoryIsNeverARoot()
+    public async Task ACommittedVendorDirectoryIsNeverARoot()
     {
         string repo = _fixture.Path;
-        Git(repo, "init", "-q");
+        await Git(repo, "init", "-q");
         Touch(repo, "vendor/go.mod");
         Touch(repo, "app/go.mod");
-        Git(repo, "add", "-A");
-        Git(
+        await Git(repo, "add", "-A");
+        await Git(
             repo,
             "-c", "user.name=kyber-weave-tests",
             "-c", "user.email=tests@example.invalid",
@@ -95,13 +95,13 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
     /// treating it as a marker. Otherwise a removed module keeps its gate until someone commits.
     /// </summary>
     [Fact]
-    public void ADeletedButTrackedMarkerIsNeverARoot()
+    public async Task ADeletedButTrackedMarkerIsNeverARoot()
     {
         string repo = _fixture.Path;
-        Git(repo, "init", "-q");
+        await Git(repo, "init", "-q");
         Touch(repo, "app/go.mod");
-        Git(repo, "add", "-A");
-        Git(
+        await Git(repo, "add", "-A");
+        await Git(
             repo,
             "-c", "user.name=kyber-weave-tests",
             "-c", "user.email=tests@example.invalid",
@@ -124,7 +124,7 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
         File.WriteAllText(path, string.Empty, new UTF8Encoding(false));
     }
 
-    private static void Git(string repo, params string[] arguments)
+    private static async Task Git(string repo, params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -139,7 +139,7 @@ public sealed class ProjectRootDetectorGitAndSymlinkTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} exited with {result.ExitCode}: {result.StandardError.Trim()}");

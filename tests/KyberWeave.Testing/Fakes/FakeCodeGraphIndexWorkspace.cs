@@ -23,11 +23,15 @@ public sealed class FakeCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
     public bool CodeGraphLockHeld { get; set; }
 
     /// <inheritdoc />
-    public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
+    public Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+        string path,
+        TimeSpan wait,
+        CancellationToken cancellationToken = default)
     {
         _lockPaths.Add(path);
-        failure = RefuseLock ? LockFailure : null;
-        return RefuseLock ? null : new Handle();
+        return RefuseLock
+            ? Task.FromResult(new CodeGraphIndexLockAttempt(null, LockFailure))
+            : Task.FromResult(new CodeGraphIndexLockAttempt(NoopHandle.Instance, null));
     }
 
     /// <inheritdoc />
@@ -36,8 +40,10 @@ public sealed class FakeCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
     /// <inheritdoc />
     public bool IsCodeGraphLockHeld(string indexDirectory) => CodeGraphLockHeld;
 
-    private sealed class Handle : IDisposable
+    private sealed class NoopHandle : IDisposable
     {
+        public static NoopHandle Instance { get; } = new();
+
         public void Dispose()
         {
         }

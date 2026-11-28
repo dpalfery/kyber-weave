@@ -35,12 +35,12 @@ public sealed class SquadDoctorMcpRenameTests
     /// the file, and the migrate verb, and exits as it would have without the leftover.
     /// </summary>
     [Fact]
-    public void Doctor_ProjectWithProvenOldKey_WarnsWithTheMigrateVerbAndKeepsItsExitCode()
+    public async Task Doctor_ProjectWithProvenOldKey_WarnsWithTheMigrateVerbAndKeepsItsExitCode()
     {
         string workingDir = NewRoot("doctor-old-key");
         WriteProvenOldKey(workingDir);
 
-        CommandExecution leftover = RunProjectDoctor(workingDir);
+        CommandExecution leftover = await RunProjectDoctor(workingDir);
 
         Assert.Contains("warn", leftover.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(WarningCode, leftover.Output, StringComparison.Ordinal);
@@ -49,7 +49,7 @@ public sealed class SquadDoctorMcpRenameTests
 
         string cleanDir = NewRoot("doctor-clean");
         _state.Files.CreateDirectory(cleanDir);
-        CommandExecution clean = RunProjectDoctor(cleanDir);
+        CommandExecution clean = await RunProjectDoctor(cleanDir);
 
         Assert.Equal(clean.ExitCode, leftover.ExitCode);
     }
@@ -62,7 +62,7 @@ public sealed class SquadDoctorMcpRenameTests
     /// is then doctor having read it and found nothing, not doctor having no rename check at all.
     /// </remarks>
     [Fact]
-    public void Doctor_ProjectWithoutAnOldKey_SaysNothingAboutRenaming()
+    public async Task Doctor_ProjectWithoutAnOldKey_SaysNothingAboutRenaming()
     {
         string workingDir = NewRoot("doctor-no-old-key");
         _host.Files.WriteAllText(
@@ -75,7 +75,7 @@ public sealed class SquadDoctorMcpRenameTests
                 }
             }.ToJsonString());
 
-        CommandExecution execution = RunProjectDoctor(workingDir);
+        CommandExecution execution = await RunProjectDoctor(workingDir);
 
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(MigrateVerb, execution.Output, StringComparison.Ordinal);
@@ -83,7 +83,7 @@ public sealed class SquadDoctorMcpRenameTests
         string controlDir = NewRoot("doctor-no-old-key-control");
         WriteProvenOldKey(controlDir);
 
-        CommandExecution control = RunProjectDoctor(controlDir);
+        CommandExecution control = await RunProjectDoctor(controlDir);
 
         Assert.Contains(WarningCode, control.Output, StringComparison.Ordinal);
     }
@@ -93,7 +93,7 @@ public sealed class SquadDoctorMcpRenameTests
     /// hand edit as its remedy rather than a command that would refuse it.
     /// </summary>
     [Fact]
-    public void Doctor_ProjectWithUnprovenOldKey_ReportsItAsLeftAloneWithAHandEdit()
+    public async Task Doctor_ProjectWithUnprovenOldKey_ReportsItAsLeftAloneWithAHandEdit()
     {
         string workingDir = NewRoot("doctor-unproven");
         _host.Files.WriteAllText(
@@ -111,7 +111,7 @@ public sealed class SquadDoctorMcpRenameTests
                 }
             }.ToJsonString());
 
-        CommandExecution execution = RunProjectDoctor(workingDir);
+        CommandExecution execution = await RunProjectDoctor(workingDir);
 
         Assert.Contains("warn", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(InfoCode, execution.Output, StringComparison.Ordinal);
@@ -124,13 +124,13 @@ public sealed class SquadDoctorMcpRenameTests
     /// The notice is read-only: the leftover file keeps every byte after doctor has named it.
     /// </summary>
     [Fact]
-    public void Doctor_ProjectWithProvenOldKey_LeavesTheFileByteIdentical()
+    public async Task Doctor_ProjectWithProvenOldKey_LeavesTheFileByteIdentical()
     {
         string workingDir = NewRoot("doctor-read-only");
         WriteProvenOldKey(workingDir);
         byte[] before = _host.Files.ReadAllBytes(Path.Combine(workingDir, ".mcp.json"));
 
-        CommandExecution execution = RunProjectDoctor(workingDir);
+        CommandExecution execution = await RunProjectDoctor(workingDir);
 
         Assert.Contains(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, _host.Files.ReadAllBytes(Path.Combine(workingDir, ".mcp.json")));
@@ -164,7 +164,7 @@ public sealed class SquadDoctorMcpRenameTests
             }.ToJsonString());
     }
 
-    private CommandExecution RunProjectDoctor(string workingDir)
+    private async Task<CommandExecution> RunProjectDoctor(string workingDir)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
@@ -174,9 +174,10 @@ public sealed class SquadDoctorMcpRenameTests
             workingDirectory: workingDir,
             wiring: _host.Services().GetRequiredService<IMcpWiringService>());
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
-            new SquadDoctorSettings { Path = workingDir, Global = false }));
+            new SquadDoctorSettings { Path = workingDir, Global = false },
+            CancellationToken.None));
 
         return new CommandExecution(execution.Result, Normalize(execution.Output));
     }

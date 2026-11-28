@@ -140,12 +140,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -157,18 +158,20 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
         {
-            HandleSubagentStop(payload, config, context);
+            await HandleSubagentStopAsync(payload, config, context, cancellationToken).ConfigureAwait(false);
             return string.Empty;
         }
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config, context);
+            return await HandlePreAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config, context);
+            return await HandlePostAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
@@ -185,21 +188,26 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// does not follow keeps the message for the completed dispatch event, unless a hand-back already kept the report.
     /// This runs first so the recovery below does not close a dispatch whose report is about to be recorded.
     /// </remarks>
-    private void HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
+    private async Task HandleSubagentStopAsync(
+        JsonElement payload,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
-        RecordLastAssistantMessage(payload, config, context);
+        await RecordLastAssistantMessageAsync(payload, config, context, cancellationToken).ConfigureAwait(false);
         if (_engine is not ILostReturnRecovery recovery)
         {
             return;
         }
 
         string? agent = GetString(payload, "agent_type") ?? GetString(payload, "agent_name");
-        recovery.RecoverLostReturn(
+        await recovery.RecoverLostReturnAsync(
             Token,
             GetString(payload, "session_id"),
             string.IsNullOrWhiteSpace(agent) ? [] : [agent],
             context,
-            GetString(payload, "agent_id"));
+            GetString(payload, "agent_id"),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -208,7 +216,10 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// unreturned horizon. The stopped task's id is the agent's id, so a followed agent's own dispatch is closed with
     /// a recovered row. A task the Arbiter does not follow, such as a background shell, is left alone.
     /// </summary>
-    private void HandleTaskStop(JsonElement payload, HookContext context)
+    private async Task HandleTaskStopAsync(
+        JsonElement payload,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         string? sessionId = GetString(payload, "session_id");
         JsonElement input = payload.TryGetProperty("tool_input", out JsonElement found) ? found : default;
@@ -223,20 +234,25 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         }
 
         string? target = followed.Dispatch.Target;
-        recovery.RecoverLostReturn(
+        await recovery.RecoverLostReturnAsync(
             Token,
             sessionId,
             string.IsNullOrWhiteSpace(target) ? [] : [target],
             context,
             taskId,
-            StopTool);
+            StopTool,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Uses a stop event's <c>last_assistant_message</c> as the agent's report when no hand-back delivered one. A
     /// delivery notice is never used: it holds no report.
     /// </summary>
-    private void RecordLastAssistantMessage(JsonElement payload, KyberWeaveConfig config, HookContext context)
+    private async Task RecordLastAssistantMessageAsync(
+        JsonElement payload,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         string? sessionId = GetString(payload, "session_id");
         string? agentId = GetString(payload, "agent_id");
@@ -255,7 +271,8 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             // A recorded return came through the hand-back, which is the report itself; the stop message adds nothing.
             if (saved.LastResponseDigest is null)
             {
-                _ = background.DecideBackgroundReturn(Token, sessionId, agentId, message, config, context);
+                _ = await background.DecideBackgroundReturnAsync(
+                    Token, sessionId, agentId, message, config, context, cancellationToken).ConfigureAwait(false);
             }
 
             return;
@@ -301,7 +318,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePreAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (IsDispatchTool(tool))
         {
@@ -329,7 +352,9 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                     return pending.Written.Value;
                 },
             };
-            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, decisionContext, dispatchModel);
+            HookOutcome outcome = await DecidePreAsync(
+                payload, caller, target, prompt, config, decisionContext, dispatchModel, cancellationToken)
+                .ConfigureAwait(false);
 
             // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
             DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
@@ -401,17 +426,23 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (IsHandbackTool(tool))
         {
-            return HandleHandback(payload, caller, config, context);
+            return await HandleHandbackAsync(payload, caller, config, context, cancellationToken).ConfigureAwait(false);
         }
 
         return string.Empty;
     }
 
-    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePostAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (IsStopTool(tool))
         {
-            HandleTaskStop(payload, context);
+            await HandleTaskStopAsync(payload, context, cancellationToken).ConfigureAwait(false);
             return string.Empty;
         }
 
@@ -482,8 +513,10 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         // A saved launch with no return stored yet records this turn against that pre, so a repeat of the same text
         // is not a second row.
         HookOutcome outcome = saved is not null && key is not null
-            ? key.Engine.DecideBackgroundReturn(Token, key.SessionId, key.AgentId, output, config, context)
-            : DecidePost(payload, caller, target, prompt, output, config, context);
+            ? await key.Engine.DecideBackgroundReturnAsync(
+                Token, key.SessionId, key.AgentId, output, config, context, cancellationToken).ConfigureAwait(false)
+            : await DecidePostAsync(payload, caller, target, prompt, output, config, context, cancellationToken)
+                .ConfigureAwait(false);
         return RenderPostOutcome(outcome);
     }
 
@@ -583,13 +616,18 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// denied: a return with no join is recorded unpaired and allowed.
     /// </summary>
     /// <remarks>
-    /// A followed dispatch is evaluated by <see cref="IBackgroundDispatchEngine.DecideBackgroundReturn"/> with the
+    /// A followed dispatch is evaluated by <see cref="IBackgroundDispatchEngine.DecideBackgroundReturnAsync"/> with the
     /// dispatch's own caller, target and prompt, as a foreground return is. An agent with no saved record is
     /// evaluated through the same contextual path with the returning agent as both caller and target and an empty
     /// prompt, and its row carries no <c>pre-id</c>. A plain <see cref="IHookDecisionEngine"/> falls back to the
     /// context-free overload. The pending note is not taken here: it already rides in the hand-back message.
     /// </remarks>
-    private string HandleHandback(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleHandbackAsync(
+        JsonElement payload,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         JsonElement toolInput = RequireToolInput(payload);
         string? agentId = GetString(payload, "agent_id");
@@ -614,13 +652,14 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         {
             // The saved record carries the dispatch's caller, target and prompt, so the return is judged as a
             // foreground return of that dispatch would be, and pairs with its pre event.
-            outcome = background.DecideBackgroundReturn(Token, sessionId, agentId, message, config, context);
+            outcome = await background.DecideBackgroundReturnAsync(
+                Token, sessionId, agentId, message, config, context, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            context.Log.WriteLine(
+            await context.Log.WriteLineAsync(
                 $"Arbiter: no followed background dispatch for agent '{agentId}' in session '{sessionId ?? "(none)"}'; " +
-                "its return is recorded unpaired.");
+                "its return is recorded unpaired.").ConfigureAwait(false);
 
             // A foreground dispatch's report arrives here, and its completed event later carries only the delivery
             // notice. The report is kept so that event can record it with the dispatch's own prompt and target.
@@ -631,7 +670,8 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 keeper.KeepUnpairedReturn(sessionId, agentId, message, context);
             }
 
-            outcome = DecidePost(payload, caller, caller, string.Empty, message, config, context);
+            outcome = await DecidePostAsync(
+                payload, caller, caller, string.Empty, message, config, context, cancellationToken).ConfigureAwait(false);
         }
 
         return outcome.Kind switch
@@ -663,42 +703,48 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private HookOutcome DecidePre(
+    private async Task<HookOutcome> DecidePreAsync(
         JsonElement payload,
         string caller,
         string? target,
         string prompt,
         KyberWeaveConfig config,
         HookContext context,
-        string? dispatchModel)
+        string? dispatchModel,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePreDispatch(
+            return await contextual.DecidePreDispatchAsync(
                 Token, caller, target, prompt, config, context,
-                GetString(payload, "tool_use_id"), GetString(payload, "session_id"), dispatchModel);
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"), dispatchModel,
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePreDispatch(caller, target, prompt, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, target, prompt, config, cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePostAsync(
         JsonElement payload,
         string caller,
         string? target,
         string prompt,
         string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
+            return await contextual.DecidePostDispatchAsync(
                 Token, caller, target, prompt, toolOutput, config, context,
-                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"),
+                cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        return await _engine.DecidePostDispatchAsync(
+            caller, target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

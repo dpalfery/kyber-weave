@@ -50,7 +50,7 @@ public sealed class DocsAnalysisCliCommandTests
     [InlineData("error", Severity.Warning, 0)]
     [InlineData("error", Severity.Error, 1)]
     [InlineData("error", Severity.Critical, 1)]
-    public void AnalyzeFindingExitGateHonorsFailOn(
+    public async Task AnalyzeFindingExitGateHonorsFailOn(
         string failOn,
         Severity severity,
         int expectedExitCode)
@@ -61,21 +61,22 @@ public sealed class DocsAnalysisCliCommandTests
         };
         DocsIntegrityCheckCommand command = new DocsIntegrityCheckCommand(service, _host.Console);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await CaptureAsync(() => command.ExecuteAsync(
             null!,
             new DocsIntegrityCheckSettings
             {
                 Path = _host.Repo,
                 FailOn = failOn,
                 Format = "json"
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(expectedExitCode, execution.ExitCode);
         Assert.Contains("KW-DOC-ANALYSIS-TEST", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnalyzeOperationalFailureIsNonzeroEvenWhenFailOnNone()
+    public async Task AnalyzeOperationalFailureIsNonzeroEvenWhenFailOnNone()
     {
         RecordingCommandService service = new RecordingCommandService
         {
@@ -83,14 +84,15 @@ public sealed class DocsAnalysisCliCommandTests
                 "KW-DOC-ANALYSIS-004: malformed ignore markup")
         };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsIntegrityCheckCommand(service, _host.Console).ExecuteAsync(
             null!,
             new DocsIntegrityCheckSettings
             {
                 Path = _host.Repo,
                 FailOn = "none",
                 Format = "json"
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("KW-DOC-ANALYSIS-004", execution.Output, StringComparison.Ordinal);
@@ -100,7 +102,7 @@ public sealed class DocsAnalysisCliCommandTests
     [Theory]
     [InlineData(DocumentationAnalyzer.IgnoreMarkupRuleCode)]
     [InlineData(DocumentationAnalyzer.EmbeddingUnavailableRuleCode)]
-    public void AnalyzeOperationalErrorDiagnosticIsNonzeroEvenWhenFailOnNone(string ruleCode)
+    public async Task AnalyzeOperationalErrorDiagnosticIsNonzeroEvenWhenFailOnNone(string ruleCode)
     {
         DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(
@@ -110,14 +112,15 @@ public sealed class DocsAnalysisCliCommandTests
             "docs analysis"));
         RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsIntegrityCheckCommand(service, _host.Console).ExecuteAsync(
             null!,
             new DocsIntegrityCheckSettings
             {
                 Path = _host.Repo,
                 FailOn = "none",
                 Format = "json"
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains(ruleCode, execution.Output, StringComparison.Ordinal);
@@ -128,7 +131,7 @@ public sealed class DocsAnalysisCliCommandTests
     [InlineData("json", "docs/related.md")]
     [InlineData("sarif", "docs/related.md")]
     [InlineData("markdown", "docs/related.md")]
-    public void AnalyzeEveryFormatReportsRelatedLocationsAndMetrics(
+    public async Task AnalyzeEveryFormatReportsRelatedLocationsAndMetrics(
         string format,
         string relatedMarker)
     {
@@ -138,14 +141,15 @@ public sealed class DocsAnalysisCliCommandTests
         report.AddMetric("truncated", false);
         RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsIntegrityCheckCommand(service, _host.Console).ExecuteAsync(
             null!,
             new DocsIntegrityCheckSettings
             {
                 Path = _host.Repo,
                 FailOn = "none",
                 Format = format
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains(relatedMarker, execution.Output, StringComparison.Ordinal);
@@ -155,21 +159,22 @@ public sealed class DocsAnalysisCliCommandTests
     }
 
     [Fact]
-    public void ReviewExportWritesTheCompleteBundleToTheRequestedPath()
+    public async Task ReviewExportWritesTheCompleteBundleToTheRequestedPath()
     {
         string output = Path.Combine(_host.Repo, "review", "candidates.json");
         RecordingCommandService service = new RecordingCommandService { ExportResult = ExportResult("{\"schema\":\"candidates/v1\"}") };
 
-        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service, _host.Files, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsReviewExportCommand(service, _host.Files, _host.Console).ExecuteAsync(
             null!,
-            new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output }));
+            new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Equal(service.ExportResult.Json, _host.Files.ReadAllText(output));
     }
 
     [Fact]
-    public void ReviewExportOperationalFailureLeavesAnExistingOutputByteForByteUnchanged()
+    public async Task ReviewExportOperationalFailureLeavesAnExistingOutputByteForByteUnchanged()
     {
         string output = Path.Combine(_host.Repo, "candidates.json");
         const string sentinel = "operator-owned output";
@@ -180,16 +185,17 @@ public sealed class DocsAnalysisCliCommandTests
             ExportException = new IOException("candidate export failed")
         };
 
-        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service, _host.Files, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsReviewExportCommand(service, _host.Files, _host.Console).ExecuteAsync(
             null!,
-            new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output }));
+            new DocsReviewExportSettings { Path = _host.Repo, OutputPath = output },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Equal(sentinel, _host.Files.ReadAllText(output));
     }
 
     [Fact]
-    public void ReviewImportReadsTheRequestedBundleAndReturnsFailureWithoutPartialWrites()
+    public async Task ReviewImportReadsTheRequestedBundleAndReturnsFailureWithoutPartialWrites()
     {
         string input = Path.Combine(_host.Repo, "verdicts.json");
         const string verdicts = "{\"schema\":\"kyber-weave.docs-review.verdicts/v1\"}";
@@ -205,14 +211,15 @@ public sealed class DocsAnalysisCliCommandTests
             ImportResult = new ReviewImportResult(false, 0, diagnostics)
         };
 
-        CommandExecution execution = Capture(() => new DocsReviewImportCommand(service, _host.Files, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsReviewImportCommand(service, _host.Files, _host.Console).ExecuteAsync(
             null!,
             new DocsReviewImportSettings
             {
                 Path = _host.Repo,
                 InputPath = input,
                 Format = "json"
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Equal(verdicts, service.ImportedJson);
@@ -223,7 +230,7 @@ public sealed class DocsAnalysisCliCommandTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void GlossaryPreviewAndWritePassTheExplicitMutationChoice(bool write)
+    public async Task GlossaryPreviewAndWritePassTheExplicitMutationChoice(bool write)
     {
         const string markdown = "## loop\n\n| Sense ID | Status | Definition | Scope | Aliases |";
         RecordingCommandService service = new RecordingCommandService
@@ -236,9 +243,10 @@ public sealed class DocsAnalysisCliCommandTests
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsGlossaryCommand(service, _host.Console).ExecuteAsync(
             null!,
-            new DocsGlossarySettings { Path = _host.Repo, Write = write }));
+            new DocsGlossarySettings { Path = _host.Repo, Write = write },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Equal(write, service.GlossaryWriteRequested);
@@ -252,7 +260,7 @@ public sealed class DocsAnalysisCliCommandTests
     [Theory]
     [InlineData("json")]
     [InlineData("sarif")]
-    public void GlossaryMachineFormatsEmitOneParseablePayloadWithoutMarkdownPrefix(string format)
+    public async Task GlossaryMachineFormatsEmitOneParseablePayloadWithoutMarkdownPrefix(string format)
     {
         const string markdown = "---\nid: reference/glossary\n---\n\n## loop\n";
         RecordingCommandService service = new RecordingCommandService
@@ -265,9 +273,10 @@ public sealed class DocsAnalysisCliCommandTests
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsGlossaryCommand(service, _host.Console).ExecuteAsync(
             null!,
-            new DocsGlossarySettings { Path = _host.Repo, Format = format }));
+            new DocsGlossarySettings { Path = _host.Repo, Format = format },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         using JsonDocument payload = JsonDocument.Parse(execution.Output);
@@ -280,7 +289,7 @@ public sealed class DocsAnalysisCliCommandTests
     [Theory]
     [InlineData("table")]
     [InlineData("markdown")]
-    public void GlossaryHumanFormatsRenderPreviewInsideTheSelectedReport(string format)
+    public async Task GlossaryHumanFormatsRenderPreviewInsideTheSelectedReport(string format)
     {
         const string markdown = "## loop\n\n| Sense ID | Status | Definition | Scope | Aliases |";
         RecordingCommandService service = new RecordingCommandService
@@ -293,9 +302,10 @@ public sealed class DocsAnalysisCliCommandTests
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, _host.Console).Execute(
+        CommandExecution execution = await CaptureAsync(() => new DocsGlossaryCommand(service, _host.Console).ExecuteAsync(
             null!,
-            new DocsGlossarySettings { Path = _host.Repo, Format = format }));
+            new DocsGlossarySettings { Path = _host.Repo, Format = format },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("glossaryPreview", execution.Output, StringComparison.Ordinal);
@@ -359,9 +369,9 @@ public sealed class DocsAnalysisCliCommandTests
         json.Length,
         Truncated: false);
 
-    private CommandExecution Capture(Func<int> execute)
+    private async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
     {
-        int exit = execute();
+        int exit = await execute();
         return new CommandExecution(exit, _host.Output);
     }
 
@@ -383,29 +393,38 @@ public sealed class DocsAnalysisCliCommandTests
         public int PersistedVerdictCount { get; private set; }
         public bool GlossaryWriteRequested { get; private set; }
 
-        public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings)
+        public Task<DocumentationAnalysisResult> AnalyzeAsync(
+            DocsIntegrityCheckSettings settings,
+            CancellationToken cancellationToken = default)
         {
             if (AnalysisException is not null) throw AnalysisException;
-            return AnalysisResult;
+            return Task.FromResult(AnalysisResult);
         }
 
-        public ReviewExportResult ExportReview(DocsReviewExportSettings settings)
+        public Task<ReviewExportResult> ExportReviewAsync(
+            DocsReviewExportSettings settings,
+            CancellationToken cancellationToken = default)
         {
             if (ExportException is not null) throw ExportException;
-            return ExportResult;
+            return Task.FromResult(ExportResult);
         }
 
-        public ReviewImportResult ImportReview(DocsReviewImportSettings settings, string json)
+        public Task<ReviewImportResult> ImportReviewAsync(
+            DocsReviewImportSettings settings,
+            string json,
+            CancellationToken cancellationToken = default)
         {
             ImportedJson = json;
             if (ImportResult.Success) PersistedVerdictCount = ImportResult.ImportedCount;
-            return ImportResult;
+            return Task.FromResult(ImportResult);
         }
 
-        public GlossaryUpdateResult UpdateGlossary(DocsGlossarySettings settings)
+        public Task<GlossaryUpdateResult> UpdateGlossaryAsync(
+            DocsGlossarySettings settings,
+            CancellationToken cancellationToken = default)
         {
             GlossaryWriteRequested = settings.Write;
-            return GlossaryResult;
+            return Task.FromResult(GlossaryResult);
         }
     }
 }

@@ -49,7 +49,7 @@ public sealed class TieredRosterDispatchTests : IDisposable
     }
 
     /// <summary>Dispatches one implementation task to <paramref name="target"/> through the OpenCode hook path.</summary>
-    private string Dispatch(string target)
+    private async Task<string> Dispatch(string target)
     {
         ArbiterHookDecisionEngine engine = _host.Engine(
             providerFactory: _ => new ArbiterEvaluatorFixtures.ScriptedProvider(),
@@ -78,7 +78,7 @@ public sealed class TieredRosterDispatchTests : IDisposable
 
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("opencode", "conductor", envelope.ToJsonString(), stdout, log);
+        int exit = await command.RunAsync("opencode", "conductor", envelope.ToJsonString(), stdout, log);
         Assert.Equal(0, exit);
         return stdout.ToString();
     }
@@ -93,11 +93,11 @@ public sealed class TieredRosterDispatchTests : IDisposable
     [InlineData("dev-hard")]
     [InlineData("platform-researcher")]
     [InlineData("devops")]
-    public void ATieredConductorDispatchToItsRosterIsAllowed(string target)
+    public async Task ATieredConductorDispatchToItsRosterIsAllowed(string target)
     {
         WriteConfig(WorkerRosters.Tiered);
 
-        string output = Dispatch(target);
+        string output = await Dispatch(target);
 
         using JsonDocument document = JsonDocument.Parse(output);
         Assert.Equal("allow", document.RootElement.GetProperty("decision").GetString());
@@ -108,11 +108,11 @@ public sealed class TieredRosterDispatchTests : IDisposable
     /// tier the task belongs on. With no plan task recorded, the task reads as medium, so the tier is <c>dev-medium</c>.
     /// </summary>
     [Fact]
-    public void ATieredConductorDispatchToATechnologyDeveloperIsRefusedWithTheTierNamed()
+    public async Task ATieredConductorDispatchToATechnologyDeveloperIsRefusedWithTheTierNamed()
     {
         WriteConfig(WorkerRosters.Tiered);
 
-        string output = Dispatch("csharp-dev");
+        string output = await Dispatch("csharp-dev");
 
         using JsonDocument document = JsonDocument.Parse(output);
         JsonElement root = document.RootElement;

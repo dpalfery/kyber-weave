@@ -13,26 +13,26 @@ public sealed class FakeCredentialStoreContractTests : CredentialStoreContractTe
     protected override ICredentialStore CreateStore() => new FakeCredentialStore(_host);
 
     [Fact]
-    public void IndependentFakesDoNotShareCredentials()
+    public async Task IndependentFakesDoNotShareCredentials()
     {
         FakeCredentialStore first = new();
         FakeCredentialStore second = new();
         string origin = NewOrigin();
 
-        first.Write(origin, "sk-contract-isolated");
+        await first.WriteAsync(origin, "sk-contract-isolated");
 
-        Assert.Null(second.Read(origin));
+        Assert.Null(await second.ReadAsync(origin));
     }
 
     [Fact]
-    public void RecordsTheOriginsACallerReadWriteAndDeleted()
+    public async Task RecordsTheOriginsACallerReadWriteAndDeleted()
     {
         FakeCredentialStore store = new();
         string origin = NewOrigin();
 
-        store.Write(origin, "sk-contract-recorded");
-        _ = store.Read(origin);
-        store.Delete(origin);
+        await store.WriteAsync(origin, "sk-contract-recorded");
+        _ = await store.ReadAsync(origin);
+        await store.DeleteAsync(origin);
 
         Assert.Equal([(origin, "sk-contract-recorded")], store.Writes);
         Assert.Equal([origin], store.Reads);

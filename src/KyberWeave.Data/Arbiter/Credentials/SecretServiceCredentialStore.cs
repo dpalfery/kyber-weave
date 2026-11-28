@@ -29,7 +29,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public string? Read(string origin)
+    public async ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         RejectLineBreak(origin, nameof(origin));
@@ -46,7 +46,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add("account");
         startInfo.ArgumentList.Add(origin);
 
-        ProcessResult result = RunSecretTool(startInfo, string.Empty);
+        ProcessResult result = await RunSecretToolAsync(startInfo, string.Empty, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             // secret-tool uses exit 1 both for "no matching item" and for a failed
@@ -68,7 +68,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public void Write(string origin, string key)
+    public async ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
@@ -90,7 +90,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
 
         // The secret travels on stdin only: argv carries the lookup attributes, where
         // any local user could read them, so the key must never be among them.
-        ProcessResult result = RunSecretTool(startInfo, key);
+        ProcessResult result = await RunSecretToolAsync(startInfo, key, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
@@ -99,7 +99,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public void Delete(string origin)
+    public async ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         RejectLineBreak(origin, nameof(origin));
@@ -116,7 +116,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add("account");
         startInfo.ArgumentList.Add(origin);
 
-        ProcessResult result = RunSecretTool(startInfo, string.Empty);
+        ProcessResult result = await RunSecretToolAsync(startInfo, string.Empty, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             // Clearing an absent secret is already the desired end state, so the
@@ -133,7 +133,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
 
     /// <summary>
     /// Whether <paramref name="result"/> reports no matching secret: exit 1 with a
-    /// "no match" or "no such secret" diagnostic, the same absence <see cref="Read"/>
+    /// "no match" or "no such secret" diagnostic, the same absence <see cref="ReadAsync"/>
     /// treats as a missing key.
     /// </summary>
     private static bool IsMissingSecret(ProcessResult result)
@@ -157,11 +157,14 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         }
     }
 
-    private ProcessResult RunSecretTool(ProcessStartInfo startInfo, string standardInput)
+    private async Task<ProcessResult> RunSecretToolAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return _runner.Run(startInfo, standardInput);
+            return await _runner.RunAsync(startInfo, standardInput, cancellationToken).ConfigureAwait(false);
         }
         catch (Win32Exception exception)
         {

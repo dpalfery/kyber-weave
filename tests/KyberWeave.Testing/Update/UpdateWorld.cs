@@ -175,7 +175,7 @@ internal sealed class UpdateWorld : IDisposable
             log,
             runProcess,
             canWriteDirectory,
-            captureProcess,
+            captureProcess is { } capture ? (file, args, _) => Task.FromResult(capture(file, args)) : null,
             arbiterHookRefresher,
             finishingProcess,
             arbiterTargets);
@@ -230,7 +230,7 @@ internal sealed class UpdateWorld : IDisposable
     /// <param name="runProcess">Runs the tray verb; the update system's when null.</param>
     /// <param name="captureProcess">Runs a KyberDash verb; answers success with no output when null.</param>
     /// <returns>The outcome.</returns>
-    internal SelfUpdateOutcome Run(
+    internal async Task<SelfUpdateOutcome> RunAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
@@ -260,7 +260,7 @@ internal sealed class UpdateWorld : IDisposable
             canWriteDirectory,
             capture,
             finishingProcess: loopback.Invoke);
-        return updater.Run(options);
+        return await updater.RunAsync(options).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -297,7 +297,7 @@ internal sealed class UpdateWorld : IDisposable
         _ = services.AddSingleton<ISquadFileAccess>(new InMemorySquadFileAccess(Files));
         _ = services.AddSingleton<ISquadLinkFileSystem>(new FileSystemSquadLinkFileSystem(Files));
         _ = services.AddSingleton<IMcpConfigFiles>(new InMemoryMcpConfigFiles(Files));
-        _ = services.AddSingleton<IBoundedProcessExecutor>(processes);
+        _ = services.AddSingleton<IProcessRunner>(processes);
         _ = services.AddSingleton<IConsoleProcessLauncher>(new FakeConsoleProcessLauncher());
         _ = services.AddSingleton<IUpdateFileModes>(new FakeUpdateFileModes());
         _ = services.AddSingleton<ISquadReleaseHttpHandlers>(new UnreachableReleaseHandlers());

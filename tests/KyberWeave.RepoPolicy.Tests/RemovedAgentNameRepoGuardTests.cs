@@ -76,7 +76,8 @@ public sealed class RemovedAgentNameRepoGuardTests
     private static IEnumerable<string> TrackedSourceFiles() =>
         TrackedFiles()
             .Where(path => path.StartsWith("src/", StringComparison.Ordinal))
-            .Where(path => path.EndsWith(".cs", StringComparison.Ordinal));
+            .Where(path => path.EndsWith(".cs", StringComparison.Ordinal))
+            .Where(path => File.Exists(Path.Combine(RepoRoot, path)));
 
     /// <summary>
     /// The tracked files, listed through <see cref="StdioSession" />: it kills the child tree on dispose whatever
@@ -91,7 +92,7 @@ public sealed class RemovedAgentNameRepoGuardTests
             string line;
             try
             {
-                line = session.ReadLine();
+                line = session.ReadLineAsync().GetAwaiter().GetResult();
             }
             catch (EndOfStreamException)
             {

@@ -13,10 +13,13 @@ public sealed class DocsDriftCommand(
     ICodeGraphPortsFactory codeGraph,
     IKyberWeaveConfigRepository configs,
     IDocumentSourceFactory documents,
-    IAnsiConsole console) : Command<DocsSettings>
+    IAnsiConsole console) : AsyncCommand<DocsSettings>
 {
     /// <inheritdoc />
-    public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        DocsSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -29,8 +32,13 @@ public sealed class DocsDriftCommand(
         }
 
         DocumentSet set = loader.Load();
-        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
-        report.AddRange(new DocDriftLinter(resolver).Validate(set).Items);
+        ICodeGraphResolver resolver = await DocsCommandComposition
+            .CreateResolverAsync(settings, codeGraph, cancellationToken)
+            .ConfigureAwait(false);
+        DiagnosticReport drift = await new DocDriftLinter(resolver)
+            .ValidateAsync(set, cancellationToken)
+            .ConfigureAwait(false);
+        report.AddRange(drift.Items);
 
         CommandHelpers.Finish(console, report, settings, "docs drift", "Document");
         return report.HasErrors ? 1 : 0;

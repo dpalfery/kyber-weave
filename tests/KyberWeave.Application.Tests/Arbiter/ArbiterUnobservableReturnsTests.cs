@@ -136,6 +136,23 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
 
         public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
             new(HookOutcomeKind.Allow);
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     // ---------------------------------------------------------------------
@@ -205,7 +222,7 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
     }
 
     [Fact]
-    public void Antigravity_DependentDispatchWithoutLedgerCompletion_Allows_AndLogsTheSkip()
+    public async Task Antigravity_DependentDispatchWithoutLedgerCompletion_Allows_AndLogsTheSkip()
     {
         WriteReadyOnlyConfig();
         WritePlanWithDependency();
@@ -213,7 +230,7 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
 
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             "antigravity", null, AntigravityPayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         Assert.Equal(0, exit);
@@ -226,7 +243,7 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
     }
 
     [Fact]
-    public void Claude_SameDependentDispatchWithoutLedgerCompletion_AllowsWhenNoModelAnswers()
+    public async Task Claude_SameDependentDispatchWithoutLedgerCompletion_AllowsWhenNoModelAnswers()
     {
         WriteReadyOnlyConfig();
         WritePlanWithDependency();
@@ -234,7 +251,7 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
 
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             "claude", "conductor", ClaudePayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         // ADR 0072: completion read from markers is prose; with no model answer the dispatch proceeds.
@@ -243,7 +260,7 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
     }
 
     [Fact]
-    public void Claude_SameDependentDispatch_ConfidentWaitingAnswer_Escalates()
+    public async Task Claude_SameDependentDispatch_ConfidentWaitingAnswer_Escalates()
     {
         WriteReadyOnlyConfig();
         WritePlanWithDependency();
@@ -251,7 +268,7 @@ public sealed class ArbiterUnobservableReturnsTests : IDisposable
 
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             "claude", "conductor", ClaudePayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         Assert.Equal(0, exit);

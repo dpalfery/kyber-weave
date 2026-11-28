@@ -94,8 +94,8 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         WriteHostConfig();
         await AppendLedgerPastTheWindowAsync();
 
-        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
-            null!, new ArbiterSettings { Path = Root }));
+        ArbiterCommandRun run = await _host.RunAsync(token => _host.Command<ArbiterAuditCommand>().ExecuteAsync(
+            null!, new ArbiterSettings { Path = Root }, token));
 
         Assert.Contains(ArbiterAuditCommand.LogWindowTruncated, run.Output, StringComparison.Ordinal);
     }
@@ -106,8 +106,8 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         WriteHostConfig();
         await AppendDecisionsPastTheWindowAsync();
 
-        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
-            null!, new ArbiterSettings { Path = Root }));
+        ArbiterCommandRun run = await _host.RunAsync(token => _host.Command<ArbiterAuditCommand>().ExecuteAsync(
+            null!, new ArbiterSettings { Path = Root }, token));
 
         Assert.Contains(ArbiterAuditCommand.LogWindowTruncated, run.Output, StringComparison.Ordinal);
     }
@@ -118,8 +118,8 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         WriteHostConfig();
         await _host.State.Ledger(ArbiterDirectory).AppendAsync(Event("event-small", 10));
 
-        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
-            null!, new ArbiterSettings { Path = Root }));
+        ArbiterCommandRun run = await _host.RunAsync(token => _host.Command<ArbiterAuditCommand>().ExecuteAsync(
+            null!, new ArbiterSettings { Path = Root }, token));
 
         // The audit ran to its summary, so the absence below is "the log fit the window", not "the command printed nothing".
         Assert.Contains("1 ledger event(s)", run.Output, StringComparison.Ordinal);
@@ -127,13 +127,13 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     }
 
     [Fact]
-    public void AuditFailsClosedOnALogItCannotRead()
+    public async Task AuditFailsClosedOnALogItCannotRead()
     {
         WriteHostConfig();
         MakeUnreadable(InFlightLedger.FileName);
 
-        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
-            null!, new ArbiterSettings { Path = Root }));
+        ArbiterCommandRun run = await _host.RunAsync(token => _host.Command<ArbiterAuditCommand>().ExecuteAsync(
+            null!, new ArbiterSettings { Path = Root }, token));
 
         Assert.Equal(1, run.ExitCode);
         Assert.Contains("could not be read", run.Output, StringComparison.Ordinal);

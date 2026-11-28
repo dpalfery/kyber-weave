@@ -44,11 +44,48 @@ public sealed class ArbiterInstallService(
     IArbiterKeyService keys) : IArbiterInstallService
 {
     /// <inheritdoc />
-    public ArbiterInstallPrepared Prepare(ArbiterInstallRequest request)
+    public async Task<ArbiterInstallPrepared> PrepareAsync(
+        ArbiterInstallRequest request,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         List<ArbiterInstallEvent> events = [];
+        if (!TryBeginPreparation(request, events, out InstallContext context))
+            return StopPrepared(context.ExitCode, events);
+
+        (bool keyStop, string? keyToStore) = await ResolveKeyToStoreAsync(
+            request, context.NeedsKey, context.Endpoint, context.Origin, context.RepositoryConfig, context.EffectiveProvider,
+            events, cancellationToken).ConfigureAwait(false);
+        if (keyStop)
+            return StopPrepared(2, events);
+
+        string? existingStored = context.NeedsKey
+            ? await ReadStoredKeyAsync(context.Origin, cancellationToken).ConfigureAwait(false)
+            : null;
+        bool keyWriteNeeded = context.NeedsKey
+                              && !string.IsNullOrEmpty(keyToStore)
+                              && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
+
+        (bool configStop, string configPath, string desiredText, bool configChanged) =
+            await PrepareConfigTextAsync(
+                context.Root, request, context.IsProjectScope, context.KindName, events, cancellationToken).ConfigureAwait(false);
+        if (configStop)
+            return StopPrepared(1, events);
+
+        return FinishPreparation(
+            request, context, keyToStore, keyWriteNeeded, (configPath, desiredText, configChanged), events);
+    }
+
+    /// <summary>
+    /// Everything both preparations decide before the key and the config text: the root, the provider choice they report,
+    /// and the endpoint and origin the rest of the run follows. False means the run stops with the context's exit code.
+    /// </summary>
+    private bool TryBeginPreparation(
+        ArbiterInstallRequest request,
+        List<ArbiterInstallEvent> events,
+        out InstallContext context)
+    {
         bool isProjectScope = request.ProjectScope;
         string root = isProjectScope
             ? paths.GetFullPath(
@@ -58,9 +95,8 @@ public sealed class ArbiterInstallService(
                 environment.CurrentDirectory)
             : paths.GetFullPath(environment.HomeDirectory, environment.CurrentDirectory);
 
-        ArbiterProviderKind existingKind;
-        ArbiterProviderKind effectiveKind;
         KyberWeaveConfig repositoryConfig;
+        ArbiterProviderKind existingKind;
         ArbiterProviderConfig effectiveProvider;
         bool endpointOverridden;
         string? loadedConfigPath;
@@ -68,12 +104,12 @@ public sealed class ArbiterInstallService(
         {
             (repositoryConfig, existingKind, effectiveProvider, endpointOverridden, loadedConfigPath) =
                 ReadExistingProvider(root, request.ConfigOption, isProjectScope);
-            effectiveKind = effectiveProvider.Kind;
         }
         catch (YamlDotNet.Core.YamlException ex)
         {
             events.Add(new ArbiterInstallError(ex.Message));
-            return StopPrepared(1, events);
+            context = InstallContext.Stopped(1);
+            return false;
         }
 
         if (!ArbiterUserSettings.TryResolveEndpointOrigin(
@@ -87,9 +123,35 @@ public sealed class ArbiterInstallService(
                 out string? endpointError))
         {
             events.Add(new ArbiterInstallError(endpointError));
-            return StopPrepared(1, events);
+            context = InstallContext.Stopped(1);
+            return false;
         }
 
+        ArbiterProviderKind providerKind = ReportProviderChoice(request, existingKind, effectiveProvider.Kind, events);
+        context = new InstallContext(
+            0,
+            root,
+            isProjectScope ? SquadDeploymentScope.Project : SquadDeploymentScope.Global,
+            isProjectScope,
+            KindName(providerKind),
+            endpoint,
+            origin,
+            providerKind == ArbiterProviderKind.Systemone && !IsLoopbackEndpoint(endpoint),
+            repositoryConfig,
+            effectiveProvider);
+        return true;
+    }
+
+    /// <summary>
+    /// Reports the provider choice the run settled on and returns the kind it will apply: the existing kind unless
+    /// <c>--provider</c> names another.
+    /// </summary>
+    private static ArbiterProviderKind ReportProviderChoice(
+        ArbiterInstallRequest request,
+        ArbiterProviderKind existingKind,
+        ArbiterProviderKind effectiveKind,
+        List<ArbiterInstallEvent> events)
+    {
         bool providerOmitted = request.ProviderOption is null;
         ArbiterProviderKind providerKind = existingKind;
         if (!providerOmitted && ParseProvider(request.ProviderOption, out ArbiterProviderKind parsed))
@@ -111,25 +173,18 @@ public sealed class ArbiterInstallService(
             events.Add(new ArbiterInstallArgvKeyWarning());
         }
 
-        bool needsKey = providerKind == ArbiterProviderKind.Systemone
-                        && !IsLoopbackEndpoint(endpoint);
+        return providerKind;
+    }
 
-        (bool keyStop, string? keyToStore) = ResolveKeyToStore(
-            request, needsKey, endpoint, origin, repositoryConfig, effectiveProvider, events);
-        if (keyStop)
-            return StopPrepared(2, events);
-
-        string? existingStored = needsKey ? ReadStoredKey(origin) : null;
-        bool keyWriteNeeded = needsKey
-                              && !string.IsNullOrEmpty(keyToStore)
-                              && !string.Equals(existingStored, keyToStore, StringComparison.Ordinal);
-
-        SquadDeploymentScope scope = isProjectScope ? SquadDeploymentScope.Project : SquadDeploymentScope.Global;
-        (bool configStop, string configPath, string desiredText, bool configChanged) =
-            PrepareConfigText(root, request, isProjectScope, kindName, events);
-        if (configStop)
-            return StopPrepared(1, events);
-
+    /// <summary>The target, the receipt already recorded and the plan, which is what the caller confirms and applies.</summary>
+    private ArbiterInstallPrepared FinishPreparation(
+        ArbiterInstallRequest request,
+        InstallContext context,
+        string? keyToStore,
+        bool keyWriteNeeded,
+        (string Path, string DesiredText, bool Changed) config,
+        List<ArbiterInstallEvent> events)
+    {
         if (!SquadTargetCatalog.TryResolve(request.TargetToken, out SquadTarget target))
         {
             events.Add(new ArbiterInstallError($"Unknown target '{request.TargetToken}'."));
@@ -139,19 +194,19 @@ public sealed class ArbiterInstallService(
         SquadReceipt? existingReceipt;
         try
         {
-            existingReceipt = stateStore.ReadReceipt(root, scope);
+            existingReceipt = stateStore.ReadReceipt(context.Root, context.Scope);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or InvalidOperationException)
         {
-            events.Add(new ArbiterInstallError($"The Squad deployment state for '{root}' could not be read: {ex.Message}"));
+            events.Add(new ArbiterInstallError($"The Squad deployment state for '{context.Root}' could not be read: {ex.Message}"));
             return StopPrepared(1, events);
         }
 
         bool receiptMatches = existingReceipt is not null && ReceiptTargetsMatch(existingReceipt, request.TargetToken);
 
-        if (!configChanged && !keyWriteNeeded && receiptMatches)
+        if (!config.Changed && !keyWriteNeeded && receiptMatches)
         {
-            events.Add(new ArbiterInstallAlreadyInstalled(request.TargetToken, root));
+            events.Add(new ArbiterInstallAlreadyInstalled(request.TargetToken, context.Root));
             return StopPrepared(0, events);
         }
 
@@ -159,35 +214,33 @@ public sealed class ArbiterInstallService(
             0,
             events,
             new ArbiterInstallPlan(
-                root,
-                scope,
+                context.Root,
+                context.Scope,
                 target,
                 request.TargetToken,
                 request.DryRun,
-                configPath,
+                config.Path,
                 request.ConfigOption,
-                desiredText,
-                configChanged,
+                config.DesiredText,
+                config.Changed,
                 keyWriteNeeded,
                 keyToStore,
-                origin,
-                needsKey,
-                endpoint,
+                context.Origin,
+                context.NeedsKey,
+                context.Endpoint,
                 existingReceipt));
     }
 
-    /// <summary>
-    /// Resolves the key the install stores: the request's own, then the piped or prompted one; a key already in the
-    /// credential store needs no rewrite. <c>Stop</c> is set when the remote provider has no key to resolve.
-    /// </summary>
-    private (bool Stop, string? KeyToStore) ResolveKeyToStore(
+    /// <summary>The same key resolution without blocking on the credential store.</summary>
+    private async Task<(bool Stop, string? KeyToStore)> ResolveKeyToStoreAsync(
         ArbiterInstallRequest request,
         bool needsKey,
         string endpoint,
         string origin,
         KyberWeaveConfig repositoryConfig,
         ArbiterProviderConfig effectiveProvider,
-        List<ArbiterInstallEvent> events)
+        List<ArbiterInstallEvent> events,
+        CancellationToken cancellationToken)
     {
         string? keyToStore = NullIfEmpty(request.ArbiterKey);
         if (needsKey && keyToStore is null && request.KeyStdin)
@@ -196,7 +249,9 @@ public sealed class ArbiterInstallService(
         if (!needsKey || keyToStore is not null)
             return (false, keyToStore);
 
-        if (!string.IsNullOrEmpty(ResolveStoredKey(endpoint, repositoryConfig, effectiveProvider)))
+        string? stored = await keys.TryResolveKeyAsync(
+            repositoryConfig, effectiveProvider, endpoint, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(stored))
             return (false, null);
 
         string? prompted = request.KeyStdin ? null : NullIfEmpty(ReadPromptedKey());
@@ -211,16 +266,14 @@ public sealed class ArbiterInstallService(
         return (true, null);
     }
 
-    /// <summary>
-    /// Works out the config text the install writes: scaffolds the docs on a bare project root, reads the existing
-    /// file, and folds the Arbiter settings in. <c>Stop</c> is set when the file cannot be read or written.
-    /// </summary>
-    private (bool Stop, string ConfigPath, string DesiredText, bool ConfigChanged) PrepareConfigText(
+    /// <summary>The same config text without blocking on the docs scaffold.</summary>
+    private async Task<(bool Stop, string ConfigPath, string DesiredText, bool ConfigChanged)> PrepareConfigTextAsync(
         string root,
         ArbiterInstallRequest request,
         bool isProjectScope,
         string kindName,
-        List<ArbiterInstallEvent> events)
+        List<ArbiterInstallEvent> events,
+        CancellationToken cancellationToken)
     {
         if (isProjectScope
             && !request.DryRun
@@ -229,7 +282,7 @@ public sealed class ArbiterInstallService(
         {
             try
             {
-                scaffolder.Scaffold(root);
+                await scaffolder.ScaffoldAsync(root, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException)
             {
@@ -318,7 +371,9 @@ public sealed class ArbiterInstallService(
     }
 
     /// <inheritdoc />
-    public ArbiterInstallApplied Apply(ArbiterInstallPlan plan, CancellationToken cancellationToken)
+    public async Task<ArbiterInstallApplied> ApplyAsync(
+        ArbiterInstallPlan plan,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -330,10 +385,49 @@ public sealed class ArbiterInstallService(
             if (plan.ConfigChanged && !WriteConfigText(plan.ConfigPath, plan.DesiredConfigText, events))
                 return StopApplied(1, events);
 
-            if (plan.KeyWriteNeeded && plan.KeyToStore is not null && !WriteStoredKey(plan.Origin, plan.KeyToStore, events))
+            if (plan.KeyWriteNeeded
+                && plan.KeyToStore is not null
+                && !await WriteStoredKeyAsync(plan.Origin, plan.KeyToStore, events, cancellationToken).ConfigureAwait(false))
                 return StopApplied(1, events);
         }
 
+        SquadArbiterWiring? wiring = LoadWiring(plan, globalScope, events);
+        if (wiring is null)
+            return StopApplied(1, events);
+
+        SquadLifecycleResult result;
+        try
+        {
+            result = await lifecycle.InstallAsync(
+                plan.Root, plan.Scope, plan.Target, plan.ExistingReceipt, plan.DryRun, wiring, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (SquadDeploymentConflictException ex)
+        {
+            events.Add(new ArbiterInstallError(ex.Message));
+            return StopApplied(1, events);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            events.Add(new ArbiterInstallError(ex.Message));
+            return StopApplied(1, events);
+        }
+
+        if (!ReportRender(plan, wiring, result, globalScope, events))
+            return StopApplied(1, events);
+
+        if (!plan.DryRun && !await VerifyAsync(plan, events, cancellationToken).ConfigureAwait(false))
+            return StopApplied(1, events);
+
+        return new ArbiterInstallApplied(0, events);
+    }
+
+    /// <summary>
+    /// The Arbiter settings the deployment runs with, read from the configuration the run left on disk. Null stops the
+    /// run with the load finding already recorded.
+    /// </summary>
+    private SquadArbiterWiring? LoadWiring(ArbiterInstallPlan plan, bool globalScope, List<ArbiterInstallEvent> events)
+    {
         // A dry run writes no scaffold, so on a bare root there is no file to load. Preview
         // against the configuration the real run would have written instead of failing. An
         // explicit --config keeps its normal load path, so a missing file is still reported.
@@ -362,30 +456,22 @@ public sealed class ArbiterInstallService(
             events.Add(new ArbiterInstallError(
                 $"The host configuration '{configLoad.ConfigPath ?? plan.ConfigPath}' could not be loaded: " +
                 $"{configLoad.Error ?? "unknown load failure"}."));
-            return StopApplied(1, events);
+            return null;
         }
 
-        SquadArbiterWiring wiring = new(
+        return new SquadArbiterWiring(
             configLoad.Config.Arbiter.Enabled,
             ArbiterHookTimeout.SecondsFor(configLoad.Config.Arbiter.Provider.TimeoutMs));
+    }
 
-        SquadLifecycleResult result;
-        try
-        {
-            result = lifecycle.InstallAsync(plan.Root, plan.Scope, plan.Target, plan.ExistingReceipt, plan.DryRun, wiring, cancellationToken)
-                .GetAwaiter().GetResult();
-        }
-        catch (SquadDeploymentConflictException ex)
-        {
-            events.Add(new ArbiterInstallError(ex.Message));
-            return StopApplied(1, events);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
-        {
-            events.Add(new ArbiterInstallError(ex.Message));
-            return StopApplied(1, events);
-        }
-
+    /// <summary>Reports the render's outcome; false means it failed and its errors are recorded.</summary>
+    private bool ReportRender(
+        ArbiterInstallPlan plan,
+        SquadArbiterWiring wiring,
+        SquadLifecycleResult result,
+        bool globalScope,
+        List<ArbiterInstallEvent> events)
+    {
         if (!result.Success)
         {
             if (result.Errors is { Count: > 0 })
@@ -398,7 +484,7 @@ public sealed class ArbiterInstallService(
                 events.Add(new ArbiterInstallError("The Squad render failed."));
             }
 
-            return StopApplied(1, events);
+            return false;
         }
 
         if (plan.DryRun)
@@ -421,10 +507,7 @@ public sealed class ArbiterInstallService(
             events.Add(ScopeTable(plan.Root));
         }
 
-        if (!plan.DryRun && !Verify(plan, events))
-            return StopApplied(1, events);
-
-        return new ArbiterInstallApplied(0, events);
+        return true;
     }
 
     private static ArbiterInstallPrepared StopPrepared(int exitCode, List<ArbiterInstallEvent> events) =>
@@ -546,16 +629,12 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private string? ResolveStoredKey(string endpoint, KyberWeaveConfig repository, ArbiterProviderConfig effectiveProvider)
-    {
-        return keys.TryResolveKey(repository, effectiveProvider, endpoint);
-    }
-
-    private string? ReadStoredKey(string origin)
+    /// <summary>The stored key without blocking on the credential store; a store failure reads as no key.</summary>
+    private async Task<string?> ReadStoredKeyAsync(string origin, CancellationToken cancellationToken)
     {
         try
         {
-            return credentials.Read(origin);
+            return await credentials.ReadAsync(origin, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
@@ -563,11 +642,16 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private bool WriteStoredKey(string origin, string key, List<ArbiterInstallEvent> events)
+    /// <summary>The key write without blocking on the credential store; false means the finding is recorded.</summary>
+    private async Task<bool> WriteStoredKeyAsync(
+        string origin,
+        string key,
+        List<ArbiterInstallEvent> events,
+        CancellationToken cancellationToken)
     {
         try
         {
-            credentials.Write(origin, key);
+            await credentials.WriteAsync(origin, key, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidOperationException or Win32Exception)
         {
@@ -646,7 +730,11 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private bool Verify(ArbiterInstallPlan plan, List<ArbiterInstallEvent> events)
+    /// <summary>The same verification without blocking on the credential store.</summary>
+    private async Task<bool> VerifyAsync(
+        ArbiterInstallPlan plan,
+        List<ArbiterInstallEvent> events,
+        CancellationToken cancellationToken)
     {
         KyberWeaveConfigLoadResult loaded = configs.Load(plan.Root, plan.ConfigOption, plan.Scope == SquadDeploymentScope.Project);
         if (!loaded.Success || loaded.Config is null || !loaded.Config.Arbiter.Enabled)
@@ -659,69 +747,98 @@ public sealed class ArbiterInstallService(
 
         if (plan.NeedsKey)
         {
-            // Read and validate the override once here, then pass the merged provider to key
-            // resolution so a file modified mid-verify cannot pass validation on one endpoint
-            // and bind the environment key to another.
-            ArbiterUserProviderResolution effective;
-            try
+            if (!TryResolveVerifiedProvider(loaded, plan, events, out ArbiterProviderConfig? provider, out string effectiveEndpoint)
+                || provider is null)
             {
-                effective = userSettings.Resolve(loaded.Config.Arbiter.Provider, environment.HomeDirectory);
-            }
-            catch (YamlDotNet.Core.YamlException ex)
-            {
-                events.Add(new ArbiterInstallError(ex.Message));
                 return false;
             }
 
-            if (!ArbiterUserSettings.TryResolveEndpointOrigin(
-                    loaded.Config.Arbiter.Provider,
-                    effective.Provider,
-                    effective.EndpointOverridden,
-                    environment.HomeDirectory,
-                    loaded.ConfigPath,
-                    out string effectiveEndpoint,
-                    out string effectiveOrigin,
-                    out string? endpointError))
-            {
-                events.Add(new ArbiterInstallError(endpointError));
-                return false;
-            }
-
-            if (!ArbiterUserSettings.EndpointsEqual(effectiveEndpoint, plan.Endpoint) ||
-                !ArbiterUserSettings.EndpointsEqual(effectiveOrigin, plan.Origin))
-            {
-                (string displayEffectiveEndpoint, string displayPlannedEndpoint) =
-                    FormatMismatchPair(effectiveEndpoint, plan.Endpoint);
-                (string displayEffectiveOrigin, string displayPlannedOrigin) =
-                    FormatMismatchPair(effectiveOrigin, plan.Origin);
-                events.Add(new ArbiterInstallError(
-                    $"Verification failed: the effective provider endpoint '{displayEffectiveEndpoint}' " +
-                    $"(origin '{displayEffectiveOrigin}') does not match the planned endpoint '{displayPlannedEndpoint}' " +
-                    $"(origin '{displayPlannedOrigin}')."));
-                return false;
-            }
-
-            string? key = keys.TryResolveKey(loaded.Config, effective.Provider, effectiveEndpoint);
-
+            string? key = await keys.TryResolveKeyAsync(
+                loaded.Config, provider, effectiveEndpoint, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrEmpty(key))
             {
-                events.Add(new ArbiterInstallError(
-                    "Verification failed: no key resolves for the configured provider " +
-                    "after install. Run with --arbiter-key, --key-stdin, or export " +
-                    $"{ArbiterKeyResolver.EnvVarName}."));
+                events.Add(MissingVerifiedKeyError());
                 return false;
             }
         }
 
-        ProbeBinary(events);
+        await ProbeBinaryAsync(events, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
-    private void ProbeBinary(List<ArbiterInstallEvent> events)
+    /// <summary>
+    /// The effective provider the loaded configuration resolves to, once its endpoint and origin are confirmed to match
+    /// the plan. False means the finding is recorded and verification stops.
+    /// </summary>
+    private bool TryResolveVerifiedProvider(
+        KyberWeaveConfigLoadResult loaded,
+        ArbiterInstallPlan plan,
+        List<ArbiterInstallEvent> events,
+        out ArbiterProviderConfig? provider,
+        out string effectiveEndpoint)
+    {
+        provider = null;
+        effectiveEndpoint = string.Empty;
+        if (loaded.Config is not { } config)
+            return false;
+
+        // Read and validate the override once here, then pass the merged provider to key
+        // resolution so a file modified mid-verify cannot pass validation on one endpoint
+        // and bind the environment key to another.
+        ArbiterUserProviderResolution effective;
+        try
+        {
+            effective = userSettings.Resolve(config.Arbiter.Provider, environment.HomeDirectory);
+        }
+        catch (YamlDotNet.Core.YamlException ex)
+        {
+            events.Add(new ArbiterInstallError(ex.Message));
+            return false;
+        }
+
+        if (!ArbiterUserSettings.TryResolveEndpointOrigin(
+                config.Arbiter.Provider,
+                effective.Provider,
+                effective.EndpointOverridden,
+                environment.HomeDirectory,
+                loaded.ConfigPath,
+                out effectiveEndpoint,
+                out string effectiveOrigin,
+                out string? endpointError))
+        {
+            events.Add(new ArbiterInstallError(endpointError));
+            return false;
+        }
+
+        if (!ArbiterUserSettings.EndpointsEqual(effectiveEndpoint, plan.Endpoint) ||
+            !ArbiterUserSettings.EndpointsEqual(effectiveOrigin, plan.Origin))
+        {
+            (string displayEffectiveEndpoint, string displayPlannedEndpoint) =
+                FormatMismatchPair(effectiveEndpoint, plan.Endpoint);
+            (string displayEffectiveOrigin, string displayPlannedOrigin) =
+                FormatMismatchPair(effectiveOrigin, plan.Origin);
+            events.Add(new ArbiterInstallError(
+                $"Verification failed: the effective provider endpoint '{displayEffectiveEndpoint}' " +
+                $"(origin '{displayEffectiveOrigin}') does not match the planned endpoint '{displayPlannedEndpoint}' " +
+                $"(origin '{displayPlannedOrigin}')."));
+            return false;
+        }
+
+        provider = effective.Provider;
+        return true;
+    }
+
+    /// <summary>The finding for a key that stopped resolving once the install wrote its configuration.</summary>
+    private static ArbiterInstallError MissingVerifiedKeyError() =>
+        new("Verification failed: no key resolves for the configured provider " +
+            "after install. Run with --arbiter-key, --key-stdin, or export " +
+            $"{ArbiterKeyResolver.EnvVarName}.");
+
+    private async Task ProbeBinaryAsync(List<ArbiterInstallEvent> events, CancellationToken cancellationToken)
     {
         try
         {
-            ToolProbeResult result = probe.Probe();
+            ToolProbeResult result = await probe.ProbeAsync(cancellationToken).ConfigureAwait(false);
             if (!result.IsAvailable)
             {
                 events.Add(new ArbiterInstallProbeWarning(
@@ -737,41 +854,91 @@ public sealed class ArbiterInstallService(
         }
     }
 
-    private static (string Effective, string Planned) FormatMismatchPair(string effective, string planned)
+    private static (string Effective, string Planned) FormatMismatchPair(string effective, string planned) =>
+        MismatchDisplay.For(effective, planned);
+
+    /// <summary>
+    /// How a verification mismatch spells the two values it compared. The two are bounded to a fixed length first, so a
+    /// long endpoint cannot flood the error; when that bound makes them identical, each carries where they diverge, how
+    /// long it is, and a content hash, so the operator still sees two different strings.
+    /// </summary>
+    private static class MismatchDisplay
     {
-        string displayEffective = ArbiterUserSettings.FormatCandidateForError(effective);
-        string displayPlanned = ArbiterUserSettings.FormatCandidateForError(planned);
-
-        if (string.Equals(effective, planned, StringComparison.Ordinal) ||
-            !string.Equals(displayEffective, displayPlanned, StringComparison.Ordinal))
+        /// <summary>The two displays, in the order the error names them.</summary>
+        /// <param name="effective">The endpoint or origin the install now resolves.</param>
+        /// <param name="planned">The endpoint or origin the plan recorded.</param>
+        /// <returns>The two displays, each distinguishable from the other.</returns>
+        internal static (string Effective, string Planned) For(string effective, string planned)
         {
-            return (displayEffective, displayPlanned);
-        }
+            string displayEffective = Bound(effective);
+            string displayPlanned = Bound(planned);
 
-        int diffIndex = FirstDifferenceIndex(effective, planned);
-        return (
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"{displayEffective} [differs at index {diffIndex}, len {effective.Length}, sha256:{ShortSha256(effective)}]"),
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"{displayPlanned} [differs at index {diffIndex}, len {planned.Length}, sha256:{ShortSha256(planned)}]"));
-    }
-
-    private static int FirstDifferenceIndex(string left, string right)
-    {
-        int sharedLength = Math.Min(left.Length, right.Length);
-        for (int i = 0; i < sharedLength; i++)
-        {
-            if (left[i] != right[i])
+            if (string.Equals(effective, planned, StringComparison.Ordinal) ||
+                !string.Equals(displayEffective, displayPlanned, StringComparison.Ordinal))
             {
-                return i;
+                return (displayEffective, displayPlanned);
             }
+
+            int diffIndex = FirstDifferenceIndex(effective, planned);
+            return (Annotate(displayEffective, diffIndex, effective), Annotate(displayPlanned, diffIndex, planned));
         }
 
-        return sharedLength;
+        private static string Bound(string value) => ArbiterUserSettings.FormatCandidateForError(value);
+
+        private static string Annotate(string display, int diffIndex, string value) =>
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{display} [differs at index {diffIndex}, len {value.Length}, sha256:{ShortSha256(value)}]");
+
+        private static int FirstDifferenceIndex(string left, string right)
+        {
+            int sharedLength = Math.Min(left.Length, right.Length);
+            for (int i = 0; i < sharedLength; i++)
+            {
+                if (left[i] != right[i])
+                {
+                    return i;
+                }
+            }
+
+            return sharedLength;
+        }
+
+        private static string ShortSha256(string value) =>
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8];
     }
 
-    private static string ShortSha256(string value) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8];
+    /// <summary>
+    /// What both preparations settle on before the key and the config text, so the synchronous and asynchronous paths
+    /// share every step after it.
+    /// </summary>
+    /// <param name="ExitCode">The code the run stops with when <see cref="Stopped"/> built it; 0 otherwise.</param>
+    /// <param name="Root">The resolved deployment root.</param>
+    /// <param name="Scope">Project or global.</param>
+    /// <param name="IsProjectScope">Whether the root is a project rather than the user's home.</param>
+    /// <param name="KindName">The provider kind's name, as the events and the config text spell it.</param>
+    /// <param name="Endpoint">The provider endpoint in effect.</param>
+    /// <param name="Origin">The origin the key is stored under.</param>
+    /// <param name="NeedsKey">Whether the provider needs a key at all.</param>
+    /// <param name="RepositoryConfig">The repository configuration before the per-user override applied.</param>
+    /// <param name="EffectiveProvider">The provider in effect once the override applied.</param>
+    private sealed record InstallContext(
+        int ExitCode,
+        string Root,
+        SquadDeploymentScope Scope,
+        bool IsProjectScope,
+        string KindName,
+        string Endpoint,
+        string Origin,
+        bool NeedsKey,
+        KyberWeaveConfig RepositoryConfig,
+        ArbiterProviderConfig EffectiveProvider)
+    {
+        /// <summary>A context for a run that stops before it resolves a root, carrying only the exit code.</summary>
+        /// <param name="exitCode">The code the host returns.</param>
+        /// <returns>The context <see cref="TryBeginPreparation"/> hands back for a stopped run.</returns>
+        internal static InstallContext Stopped(int exitCode) =>
+            new(exitCode, string.Empty, SquadDeploymentScope.Project, true, string.Empty, string.Empty, string.Empty, false,
+                KyberWeaveConfigDefaults.Product, ArbiterProviderConfig.DefaultNone);
+    }
 }

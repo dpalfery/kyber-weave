@@ -22,7 +22,7 @@ public sealed class UpdateCommandTests : IDisposable
     public void Dispose() => _world.Dispose();
 
     [Fact]
-    public void ExecuteWritesHumanOutput()
+    public async Task ExecuteWritesHumanOutput()
     {
         using ReleaseMapHandler handler = UpdateRelease.Map("0.2.0", "osx-arm64", windows: false);
         UpdateRelease.MapLatest(handler, "0.2.0");
@@ -30,7 +30,7 @@ public sealed class UpdateCommandTests : IDisposable
         LoopbackFinishingProcess loopback = _world.Loopback(handler, host, _ => { }, _ => null);
         UpdateCommandRun run = UpdateCommandTestServices.Create(_world, host, handler, loopback.Invoke);
 
-        int exit = run.Command.Execute(null!, new UpdateSettings());
+        int exit = await run.Command.ExecuteAsync(null!, new UpdateSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains("updated kyber-weave 0.2.0", run.Output, StringComparison.Ordinal);
@@ -41,7 +41,7 @@ public sealed class UpdateCommandTests : IDisposable
     /// the outcome is never printed twice, once by each process.
     /// </summary>
     [Fact]
-    public void ExecuteAfterASuccessfulHandOffPrintsExactlyOneOutcomeLine()
+    public async Task ExecuteAfterASuccessfulHandOffPrintsExactlyOneOutcomeLine()
     {
         using ReleaseMapHandler handler = UpdateRelease.Map("0.2.0", "osx-arm64", windows: false);
         SelfUpdateHost host = _world.CreateHost("0.1.0", "osx-arm64");
@@ -56,7 +56,7 @@ public sealed class UpdateCommandTests : IDisposable
                 return 0;
             });
 
-        int exit = run.Command.Execute(null!, new UpdateSettings { Version = "0.2.0" });
+        int exit = await run.Command.ExecuteAsync(null!, new UpdateSettings { Version = "0.2.0" }, CancellationToken.None);
 
         Assert.True(exit == 0, $"exit {exit}; output: {run.Output}");
         Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
@@ -69,7 +69,7 @@ public sealed class UpdateCommandTests : IDisposable
     /// exception text. A user reading the error needs the cause and the command, not a stack-shaped string.
     /// </summary>
     [Fact]
-    public void ExecuteAfterAFailedHandOffPrintsExactlyOneErrorLineWithoutTheRawExceptionText()
+    public async Task ExecuteAfterAFailedHandOffPrintsExactlyOneErrorLineWithoutTheRawExceptionText()
     {
         Win32Exception failure = new(5, "Access is denied.");
         using ReleaseMapHandler handler = UpdateRelease.Map("0.2.0", "osx-arm64", windows: false);
@@ -88,7 +88,7 @@ public sealed class UpdateCommandTests : IDisposable
                 return 0;
             });
 
-        int exit = run.Command.Execute(null!, new UpdateSettings { Version = "0.2.0" });
+        int exit = await run.Command.ExecuteAsync(null!, new UpdateSettings { Version = "0.2.0" }, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Single(handOffs, arguments => arguments.Count > 0 && arguments[0] == "update");
@@ -103,13 +103,13 @@ public sealed class UpdateCommandTests : IDisposable
     /// process that started it, so an empty outcome is the correct success.
     /// </summary>
     [Fact]
-    public void ExecuteFinishingTheInstalledVersionPrintsNoOutcomeLine()
+    public async Task ExecuteFinishingTheInstalledVersionPrintsNoOutcomeLine()
     {
         using ReleaseMapHandler handler = new();
         SelfUpdateHost host = _world.CreateHost("0.2.0", "osx-arm64");
         UpdateCommandRun run = UpdateCommandTestServices.Create(_world, host, handler);
 
-        int exit = run.Command.Execute(null!, new UpdateSettings { Version = "0.2.0", FinishUpdate = true });
+        int exit = await run.Command.ExecuteAsync(null!, new UpdateSettings { Version = "0.2.0", FinishUpdate = true }, CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Empty(handler.Uris);
@@ -129,7 +129,7 @@ public sealed class UpdateCommandTests : IDisposable
     [Theory]
     [InlineData("opencode")]
     [InlineData("factory")]
-    public void TheUpdateAndTheSquadStepRelayTheSameCapturePluginGuidance(string harness)
+    public async Task TheUpdateAndTheSquadStepRelayTheSameCapturePluginGuidance(string harness)
     {
         string stdout = CapturePluginVerbStdout(harness);
 
@@ -140,7 +140,7 @@ public sealed class UpdateCommandTests : IDisposable
         Func<string, string?> environment = HomeWithTray();
         Func<string, IReadOnlyList<string>, ProcessResult> capture = (_, args) =>
             HarnessOf(args) == harness ? new ProcessResult(0, stdout, string.Empty) : UpdateWorld.QuietSuccess;
-        SelfUpdateOutcome outcome = _world.Run(
+        SelfUpdateOutcome outcome = await _world.RunAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -158,10 +158,11 @@ public sealed class UpdateCommandTests : IDisposable
             executor,
             () => Path.Combine(_world.Install, "kyberdash"),
             new SquadConsole(squadConsole, new FakeConsole(isInputRedirected: true)));
-        CapturePluginStepOutcome stepOutcome = step.Run(
+        CapturePluginStepOutcome stepOutcome = await step.RunAsync(
             TargetOf(harness),
             harness == "opencode" ? Path.Combine(_world.Files.Root, "opencode") : null,
-            false);
+            false,
+            CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Completed, stepOutcome);
 

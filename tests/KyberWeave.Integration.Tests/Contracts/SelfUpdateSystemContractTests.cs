@@ -80,7 +80,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
     }
 
     [Fact]
-    public void AReplacedBinaryIsExecutableAndLeavesNoStagingFileOnTheRealDisk()
+    public async Task AReplacedBinaryIsExecutableAndLeavesNoStagingFileOnTheRealDisk()
     {
         if (OperatingSystem.IsWindows())
             return;
@@ -92,7 +92,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
         _files.WriteAllText(destination, "old");
         _files.WriteAllText(extracted, "new");
 
-        _system.ReplaceBinary(extracted, destination, windows: false, macOs: false);
+        await _system.ReplaceBinaryAsync(extracted, destination, windows: false, macOs: false, CancellationToken.None);
 
         Assert.Equal("new", _files.ReadAllText(destination));
         Assert.True(File.GetUnixFileMode(destination).HasFlag(UnixFileMode.UserExecute));
@@ -100,7 +100,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
     }
 
     [Fact]
-    public void AnArchiveMadeBySystemTarAsTheReleaseWorkflowDoesExtractsWithItsExecutableBit()
+    public async Task AnArchiveMadeBySystemTarAsTheReleaseWorkflowDoesExtractsWithItsExecutableBit()
     {
         if (OperatingSystem.IsWindows())
             return;
@@ -115,7 +115,7 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
         foreach (string argument in new[] { "-C", packed, "-czf", archive, "kyber-weave" })
             tar.ArgumentList.Add(argument);
 
-        ProcessResult made = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));
+        ProcessResult made = await ProcessRunner.RunAsync(tar, string.Empty, TimeSpan.FromSeconds(30));
         Assert.Equal(0, made.ExitCode);
 
         _system.ExtractArchive(archive, Path.Combine(_root, "extract"), windows: false);

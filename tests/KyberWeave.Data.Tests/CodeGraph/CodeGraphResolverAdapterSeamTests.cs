@@ -24,7 +24,7 @@ public sealed class CodeGraphResolverAdapterSeamTests
     private string Database => Path.Combine(Root, ".codegraph", "codegraph.db");
 
     [Fact]
-    public void AnIndexThatIsThereIsReadOnceAndAnswersSymbolRouteAndPathQueries()
+    public async Task AnIndexThatIsThereIsReadOnceAndAnswersSymbolRouteAndPathQueries()
     {
         Index();
         ScriptedProcessExecutor sqlite = new(_ => Output(
@@ -32,7 +32,7 @@ public sealed class CodeGraphResolverAdapterSeamTests
             Line("node", "n2", "route", "GET /api/widgets", "", "src/Api.cs", "csharp", "5", "5"),
             Line("edge", "n2", "n1", "calls", "", "", "", "", "")));
 
-        CodeGraphResolverAdapter graph = Open(sqlite, Database);
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
 
         Assert.True(graph.IsAvailable);
         Assert.Equal("Widget", Assert.Single(graph.ResolveSymbol("Shop.Widget")).Name);
@@ -46,11 +46,11 @@ public sealed class CodeGraphResolverAdapterSeamTests
     }
 
     [Fact]
-    public void AMissingIndexIsUnavailableAndSqliteIsNeverStarted()
+    public async Task AMissingIndexIsUnavailableAndSqliteIsNeverStarted()
     {
         ScriptedProcessExecutor sqlite = new(_ => Output());
 
-        CodeGraphResolverAdapter graph = Open(sqlite, Database);
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
 
         Assert.False(graph.IsAvailable);
         Assert.Contains(Database, graph.UnavailableReason, StringComparison.Ordinal);
@@ -59,24 +59,27 @@ public sealed class CodeGraphResolverAdapterSeamTests
     }
 
     [Fact]
-    public void ARelativeIndexPathIsResolvedAgainstTheWorkingDirectory()
+    public async Task ARelativeIndexPathIsResolvedAgainstTheWorkingDirectory()
     {
         Index();
         ScriptedProcessExecutor sqlite = new(_ => Output());
 
-        CodeGraphResolverAdapter graph = Open(sqlite, ".codegraph/codegraph.db", currentDirectory: Root);
+        CodeGraphResolverAdapter graph = await OpenAsync(
+            sqlite,
+            ".codegraph/codegraph.db",
+            currentDirectory: Root);
 
         Assert.Equal(Database, graph.DatabasePath);
         Assert.True(graph.IsAvailable);
     }
 
     [Fact]
-    public void ASqliteThatFailsMakesTheIndexUnavailableAndSaysWhy()
+    public async Task ASqliteThatFailsMakesTheIndexUnavailableAndSaysWhy()
     {
         Index();
         ScriptedProcessExecutor sqlite = new(_ => new ProcessResult(1, "", "no such table: nodes"));
 
-        CodeGraphResolverAdapter graph = Open(sqlite, Database);
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
 
         Assert.False(graph.IsAvailable);
         Assert.Contains("exit 1", graph.UnavailableReason, StringComparison.Ordinal);
@@ -86,31 +89,67 @@ public sealed class CodeGraphResolverAdapterSeamTests
     [Theory]
     [InlineData(typeof(Win32Exception))]
     [InlineData(typeof(TimeoutException))]
-    public void ASqliteThatCannotRunOrHangsMakesTheIndexUnavailable(Type failure)
+    public async Task ASqliteThatCannotRunOrHangsMakesTheIndexUnavailable(Type failure)
     {
         Index();
         ScriptedProcessExecutor sqlite = new(_ => throw (Exception)Activator.CreateInstance(failure)!);
 
-        CodeGraphResolverAdapter graph = Open(sqlite, Database);
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
 
         Assert.False(graph.IsAvailable);
         Assert.NotNull(graph.UnavailableReason);
     }
 
     [Fact]
-    public void TheRecordedCommitAndPerFileStateComeFromASeparateRead()
+    public async Task TheRecordedCommitAndPerFileStateComeFromASeparateRead()
     {
         Index();
         ScriptedProcessExecutor sqlite = new(call => call.ArgumentList[^1].Contains("project_metadata", StringComparison.Ordinal)
             ? Output(Line("file", "src/A.cs", "1700", "4"), Line("meta", "indexed_at_commit", "abc123", ""))
             : Output());
-        CodeGraphResolverAdapter graph = Open(sqlite, Database);
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
 
-        (string? commit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) = graph.ReadStalenessFacts();
+        (string? commit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) = await graph.ReadStalenessFactsAsync(CancellationToken.None);
 
         Assert.Equal("abc123", commit);
         Assert.Equal((1700L, 4), files["src/A.cs"]);
         Assert.Equal(2, sqlite.CallsTo("sqlite3").Count());
+    }
+
+    [Fact]
+    public async Task CreateAsyncReadsTheIndexWithoutBlocking()
+    {
+        Index();
+        ScriptedProcessRunner sqlite = new();
+        _ = sqlite.Script("sqlite3", OutputRun(
+            Line("node", "n1", "class", "Widget", "Shop.Widget", "src/Widget.cs", "csharp", "3", "9"),
+            Line("edge", "n1", "n1", "calls", "", "", "", "", "")));
+
+        CodeGraphResolverAdapter graph = await OpenAsync(sqlite, Database);
+
+        Assert.True(graph.IsAvailable);
+        Assert.Equal("Widget", Assert.Single(graph.ResolveSymbol("Shop.Widget")).Name);
+        Assert.Single(sqlite.Calls);
+    }
+
+    [Fact]
+    public async Task ThePortsFactoryReadsTheIndexWithoutBlocking()
+    {
+        Index();
+        ScriptedProcessRunner sqlite = new();
+        _ = sqlite.Script("sqlite3", OutputRun(Line("node", "n1", "class", "Widget", "Shop.Widget", "src/Widget.cs", "csharp", "3", "9")));
+        FakePathResolver paths = new(_files);
+        CodeGraphPortsFactory factory = new(
+            _files,
+            paths,
+            new FakeProcessEnvironment(currentDirectory: WorkingDirectory),
+            sqlite,
+            new CodeGraphIndexStaleness(_files, sqlite));
+
+        CodeGraphPorts ports = await factory.ForRepositoryAsync(Root, CancellationToken.None);
+
+        Assert.True(((CodeGraphResolverAdapter)ports.Resolver).IsAvailable);
+        Assert.Equal("Widget", Assert.Single(ports.Resolver.ResolveSymbol("Shop.Widget")).Name);
     }
 
     private void Index()
@@ -131,7 +170,30 @@ public sealed class CodeGraphResolverAdapterSeamTests
             new CodeGraphIndexStaleness(_files, new ScriptedProcessRunner()));
     }
 
+    private async Task<CodeGraphResolverAdapter> OpenAsync(
+        IProcessRunner sqlite,
+        string path,
+        string? currentDirectory = null)
+    {
+        FakePathResolver paths = new(_files);
+        return await CodeGraphResolverAdapter.CreateAsync(
+            path,
+            _files,
+            paths,
+            new FakeProcessEnvironment(currentDirectory: currentDirectory ?? WorkingDirectory),
+            sqlite,
+            new CodeGraphIndexStaleness(_files, sqlite),
+            CancellationToken.None);
+    }
+
     private static ProcessResult Output(params string[] lines) => new(0, string.Join('\n', lines), string.Empty);
+
+    private static ProcessRunResult OutputRun(params string[] lines) =>
+        new(0, string.Join('\n', lines), TimedOut: false)
+        {
+            StandardOutput = string.Join('\n', lines),
+            StandardError = string.Empty
+        };
 
     private static string Line(params string[] fields) => string.Join(Sep, fields);
 }

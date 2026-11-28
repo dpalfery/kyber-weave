@@ -18,7 +18,7 @@ public sealed class ArbiterEvalCommand(
     IArbiterRepositoryLocator locator,
     IArbiterDryRunService dryRun,
     IFileSystem files,
-    IAnsiConsole console) : Command<ArbiterSettings>
+    IAnsiConsole console) : AsyncCommand<ArbiterSettings>
 {
     private static readonly JsonSerializerOptions EventJson = new()
     {
@@ -33,7 +33,7 @@ public sealed class ArbiterEvalCommand(
     /// <c>KW-ARB-HOOK-001</c> envelope instead. Exits 1 on an unreadable event,
     /// an unknown <c>--trigger</c>, or an error result.
     /// </summary>
-    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -57,9 +57,9 @@ public sealed class ArbiterEvalCommand(
             return 1;
         }
 
-        string repositoryRoot = locator.ResolveRepositoryRoot(settings.Path);
-        using IArbiterEvaluatorSession? session = dryRun.CreateEvaluator(
-            config, repositoryRoot, settings.Provider, report);
+        string repositoryRoot = await locator.ResolveRepositoryRootAsync(settings.Path, cancellationToken).ConfigureAwait(false);
+        using IArbiterEvaluatorSession? session = await dryRun.CreateEvaluatorAsync(
+            config, repositoryRoot, settings.Provider, report, cancellationToken).ConfigureAwait(false);
         if (session is null)
         {
             CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
@@ -69,11 +69,11 @@ public sealed class ArbiterEvalCommand(
         ArbiterEvaluationResult result;
         try
         {
-            result = session.Evaluator.EvaluateAsync(
+            result = await session.Evaluator.EvaluateAsync(
                 ev,
                 config,
                 new ArbiterEvaluatorOptions(DryRun: true, Source: "eval"),
-                cancellationToken).GetAwaiter().GetResult();
+                cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -179,7 +179,4 @@ public sealed class ArbiterEvalCommand(
         }
     }
 
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 }

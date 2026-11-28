@@ -17,7 +17,7 @@ public static class RealSelfUpdateSystem
         return new SelfUpdateSystem(
             disk,
             new PhysicalPathResolver(disk),
-            new KernelBoundedProcessExecutor(),
+            new KernelProcessRunner(),
             new ProcessConsoleLauncher(),
             new UnixUpdateFileModes());
     }

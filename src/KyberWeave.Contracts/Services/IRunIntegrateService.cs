@@ -56,5 +56,7 @@ public interface IRunIntegrateService
 {
     /// <summary>Integrates one task, or refuses and changes nothing.</summary>
     /// <param name="request">The two worktrees, the task id and the operator's home.</param>
-    RunIntegrateOutcome Integrate(RunIntegrateRequest request);
+    /// <param name="cancellationToken">Cancels the wait for a lock and the git children the integration runs.</param>
+    /// <returns>The outcome, which fixes the exit code.</returns>
+    Task<RunIntegrateOutcome> IntegrateAsync(RunIntegrateRequest request, CancellationToken cancellationToken = default);
 }

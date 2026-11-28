@@ -28,12 +28,12 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
     }
 
     [Fact]
-    public void AConcurrentGateRunsAlongsideTheGatesDeclaredAfterIt()
+    public async Task AConcurrentGateRunsAlongsideTheGatesDeclaredAfterIt()
     {
         ReviewGate waiter = new("waits-for-release", WaitForReleaseFile(), TimeoutSeconds: 30) { Concurrent = true };
         ReviewGate release = new("release", WriteReleaseFile(), TimeoutSeconds: 30);
 
-        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
+        GateReport report = await ReviewTestServices.Gates.RunAsync(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
 
         Assert.Equal(["waits-for-release", "release"], report.Gates.Select(gate => gate.Id));
         Assert.All(report.Gates, gate => Assert.True(gate.Passed, $"{gate.Id}: {gate.Summary}"));
@@ -41,24 +41,24 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
 
     /// <summary>The control for the test above: without the key the same pair cannot overlap.</summary>
     [Fact]
-    public void WithoutTheKeyAGateHoldsUpTheGatesDeclaredAfterIt()
+    public async Task WithoutTheKeyAGateHoldsUpTheGatesDeclaredAfterIt()
     {
         ReviewGate waiter = new("waits-for-release", WaitForReleaseFile(), TimeoutSeconds: 2);
         ReviewGate release = new("release", WriteReleaseFile(), TimeoutSeconds: 30);
 
-        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
+        GateReport report = await ReviewTestServices.Gates.RunAsync(new ReviewConfig { Gates = [waiter, release] }, _root.Path);
 
         Assert.Equal(GateOutcome.TimedOut, report.Gates[0].Outcome);
         Assert.True(report.Gates[1].Passed, report.Gates[1].Summary);
     }
 
     [Fact]
-    public void AConcurrentGateThatRunsPastItsLimitIsTimedOutAndNeverPassed()
+    public async Task AConcurrentGateThatRunsPastItsLimitIsTimedOutAndNeverPassed()
     {
         ReviewGate slow = new("slow", Sleep30(), TimeoutSeconds: 1) { Concurrent = true };
         ReviewGate quick = new("quick", ["git", "--version"], TimeoutSeconds: 30);
 
-        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [slow, quick] }, _root.Path);
+        GateReport report = await ReviewTestServices.Gates.RunAsync(new ReviewConfig { Gates = [slow, quick] }, _root.Path);
 
         Assert.Equal(["slow", "quick"], report.Gates.Select(gate => gate.Id));
         Assert.Equal(GateOutcome.TimedOut, report.Gates[0].Outcome);
@@ -72,7 +72,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
     /// running is stopped and left out of the report like the gates that never started, and its process is gone.
     /// </summary>
     [Fact]
-    public void StoppingOnABlockingFailureStopsAConcurrentGateThatIsStillRunning()
+    public async Task StoppingOnABlockingFailureStopsAConcurrentGateThatIsStillRunning()
     {
         ReviewGate slow = new("slow", RecordPidThenSleep30(), TimeoutSeconds: 120) { Concurrent = true };
         ReviewGate started = new("slow-has-started", WaitForPidFile(), TimeoutSeconds: 30);
@@ -80,7 +80,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
         ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
 
         long start = Stopwatch.GetTimestamp();
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = await ReviewTestServices.Gates.RunAsync(
             new ReviewConfig { Gates = [slow, started, failing, never] }, _root.Path, stopOnBlockingFailure: true);
 
         Assert.Equal(["slow-has-started", "failing"], report.Gates.Select(gate => gate.Id));
@@ -95,13 +95,13 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
     /// other blocking failure.
     /// </summary>
     [Fact]
-    public void StoppingOnABlockingFailureCountsAConcurrentGateThatHasAlreadyFailed()
+    public async Task StoppingOnABlockingFailureCountsAConcurrentGateThatHasAlreadyFailed()
     {
         ReviewGate failing = new("fails-at-once", ["git", "kw-no-such-subcommand"], TimeoutSeconds: 30) { Concurrent = true };
         ReviewGate slower = new("slower", Sleep3(), TimeoutSeconds: 30);
         ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
 
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = await ReviewTestServices.Gates.RunAsync(
             new ReviewConfig { Gates = [failing, slower, never] }, _root.Path, stopOnBlockingFailure: true);
 
         Assert.Equal(["fails-at-once", "slower"], report.Gates.Select(gate => gate.Id));
@@ -110,12 +110,12 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
 
     /// <summary>The report waits for a concurrent gate that outlasts every gate declared after it.</summary>
     [Fact]
-    public void AConcurrentGateIsAlwaysJoinedBeforeTheReportIsReturned()
+    public async Task AConcurrentGateIsAlwaysJoinedBeforeTheReportIsReturned()
     {
         ReviewGate failing = new("fails-late", FailAfterRelease(), TimeoutSeconds: 30) { Concurrent = true };
         ReviewGate release = new("release", WriteReleaseFile(), TimeoutSeconds: 30);
 
-        GateReport report = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = [failing, release] }, _root.Path);
+        GateReport report = await ReviewTestServices.Gates.RunAsync(new ReviewConfig { Gates = [failing, release] }, _root.Path);
 
         Assert.Equal(["fails-late", "release"], report.Gates.Select(gate => gate.Id));
         Assert.Equal(GateOutcome.Completed, report.Gates[0].Outcome);
@@ -128,7 +128,7 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
     /// collide with a bound of three. The results and their order are the same either way.
     /// </summary>
     [Fact]
-    public void AtMostParallelismGatesRunAtOnceAndTheReportKeepsDeclarationOrder()
+    public async Task AtMostParallelismGatesRunAtOnceAndTheReportKeepsDeclarationOrder()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The gates are POSIX shell commands, which Windows does not run.");
 
@@ -137,8 +137,8 @@ public sealed class GateRunnerConcurrentGateTests : IDisposable
 
         ReviewGate[] gates = [Exclusive("a", true), Exclusive("b", true), Exclusive("c", false)];
 
-        GateReport bounded = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = gates, Parallelism = 1 }, _root.Path);
-        GateReport unbounded = ReviewTestServices.Gates.Run(new ReviewConfig { Gates = gates, Parallelism = 3 }, _root.Path);
+        GateReport bounded = await ReviewTestServices.Gates.RunAsync(new ReviewConfig { Gates = gates, Parallelism = 1 }, _root.Path);
+        GateReport unbounded = await ReviewTestServices.Gates.RunAsync(new ReviewConfig { Gates = gates, Parallelism = 3 }, _root.Path);
 
         Assert.Equal(["a", "b", "c"], bounded.Gates.Select(gate => gate.Id));
         Assert.All(bounded.Gates, gate => Assert.True(gate.Passed, $"{gate.Id}: {gate.Summary}"));

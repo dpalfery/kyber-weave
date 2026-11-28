@@ -151,12 +151,12 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void ReplacingABinaryLeavesTheNewImageAndNoStagingFile()
+    public async Task ReplacingABinaryLeavesTheNewImageAndNoStagingFile()
     {
         _files.WriteAllText(Destination, "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false);
+        await _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
@@ -165,12 +165,12 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void ReplacingOnWindowsKeepsNoExecutableBitAndLeavesNoOldImage()
+    public async Task ReplacingOnWindowsKeepsNoExecutableBitAndLeavesNoOldImage()
     {
         _files.WriteAllText(Destination, "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
+        await _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
@@ -178,7 +178,7 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void AFailedMoveOfTheNewImageOnWindowsPutsTheOldImageBack()
+    public async Task AFailedMoveOfTheNewImageOnWindowsPutsTheOldImageBack()
     {
         _files.WriteAllText(Destination, "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
@@ -186,15 +186,15 @@ public sealed class SelfUpdateSystemTests
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("locked"));
 
-        _ = Assert.Throws<IOException>(
-            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false));
+        _ = await Assert.ThrowsAsync<IOException>(
+            () => _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
     }
 
     [Fact]
-    public void AFailedMoveOffTheWindowsPathLeavesNoStagingFileEither()
+    public async Task AFailedMoveOffTheWindowsPathLeavesNoStagingFileEither()
     {
         _files.WriteAllText(Destination, "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
@@ -202,27 +202,27 @@ public sealed class SelfUpdateSystemTests
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("denied"));
 
-        _ = Assert.Throws<IOException>(
-            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false));
+        _ = await Assert.ThrowsAsync<IOException>(
+            () => _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
     }
 
     [Fact]
-    public void ARecoveryAfterAStopBetweenTheTwoWindowsMovesInstallsTheNewImageAndKeepsTheOldOneForTheNextUpdate()
+    public async Task ARecoveryAfterAStopBetweenTheTwoWindowsMovesInstallsTheNewImageAndKeepsTheOldOneForTheNextUpdate()
     {
         _files.WriteAllText(Destination + ".old", "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
+        await _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
     }
 
     [Fact]
-    public void ARecoveryWhoseCommitFailsStillLeavesTheUserAnImage()
+    public async Task ARecoveryWhoseCommitFailsStillLeavesTheUserAnImage()
     {
         _files.WriteAllText(Destination + ".old", "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
@@ -230,21 +230,21 @@ public sealed class SelfUpdateSystemTests
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("denied"));
 
-        _ = Assert.Throws<IOException>(
-            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false));
+        _ = await Assert.ThrowsAsync<IOException>(
+            () => _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
         Assert.Equal([Destination + ".old"], _files.EnumerateFiles(Install, "*", recursive: true));
     }
 
     [Fact]
-    public void ANormalWindowsUpdateAfterARecoveryRemovesTheOldImage()
+    public async Task ANormalWindowsUpdateAfterARecoveryRemovesTheOldImage()
     {
         _files.WriteAllText(Destination, "current");
         _files.WriteAllText(Destination + ".old", "stray");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
+        await _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
     }
@@ -278,7 +278,7 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void AnOldImageThatCannotBeRemovedStaysAndTheUpdateStillSucceeds()
+    public async Task AnOldImageThatCannotBeRemovedStaysAndTheUpdateStillSucceeds()
     {
         _files.WriteAllText(Destination, "old");
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
@@ -287,28 +287,28 @@ public sealed class SelfUpdateSystemTests
             operation => operation.Name == nameof(_files.DeleteFile) && operation.Path == Destination + ".old" && ++deletesOfTheOldImage == 2,
             new IOException("locked"));
 
-        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
+        await _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
     }
 
     [Fact]
-    public void AnExtractedBinaryThatIsMissingIsNamed()
+    public async Task AnExtractedBinaryThatIsMissingIsNamed()
     {
-        SelfUpdateException failure = Assert.Throws<SelfUpdateException>(
-            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false));
+        SelfUpdateException failure = await Assert.ThrowsAsync<SelfUpdateException>(
+            () => _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false));
 
         Assert.Equal("archive did not contain kyber-weave", failure.Message);
         Assert.False(_files.FileExists(Destination));
     }
 
     [Fact]
-    public void OnMacOsTheQuarantineIsClearedOnTheStagedFileBeforeItIsMoved()
+    public async Task OnMacOsTheQuarantineIsClearedOnTheStagedFileBeforeItIsMoved()
     {
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: true);
+        await _system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: true);
 
         ProcessStartInfo xattr = Assert.Single(_processes.Calls);
         Assert.Equal("xattr", xattr.FileName);
@@ -318,14 +318,14 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void AFailingQuarantineClearDoesNotStopTheReplacement()
+    public async Task AFailingQuarantineClearDoesNotStopTheReplacement()
     {
         ScriptedProcessExecutor failing = new(_ => throw new TimeoutException("xattr hung"));
         SelfUpdateSystem system = new(
             _files, new FakePathResolver(_files), failing, _console, _modes);
         _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: true);
+        await system.ReplaceBinaryAsync(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: true);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
     }
@@ -409,9 +409,9 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void ACapturedVerbRunsThroughTheBoundedExecutorWithTwoMinutes()
+    public async Task ACapturedVerbRunsThroughTheBoundedExecutorWithTwoMinutes()
     {
-        ProcessResult result = _system.RunCapture("kyberdash", ["engine", "ensure"]);
+        ProcessResult result = await _system.RunCaptureAsync("kyberdash", ["engine", "ensure"], CancellationToken.None);
 
         Assert.Equal("out", result.StandardOutput);
         Assert.Equal([TimeSpan.FromMinutes(2)], _processes.Timeouts);

@@ -12,13 +12,17 @@ public interface IPlanTaskTargetService
 {
     /// <summary>
     /// The task in this checkout's plans — the one in flight first, then the ones still in review — or in another
-    /// worktree's active plan, or null with the reason when there is not exactly one match.
+    /// worktree's active plan, or null with the reason when there is not exactly one match, without blocking a thread.
     /// </summary>
     /// <param name="root">The repository root.</param>
     /// <param name="config">The effective configuration.</param>
     /// <param name="typedTask">The task id as the worker typed it, for example <c>T1</c>.</param>
-    /// <param name="reason">Why nothing was found; null when a task was found.</param>
-    PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason);
+    /// <param name="cancellationToken">Cancels the task-file reads.</param>
+    Task<PlanTaskTargetLookup> FindAsync(
+        string root,
+        KyberWeaveConfig config,
+        string typedTask,
+        CancellationToken cancellationToken = default);
 
     /// <summary>The task's Test contract row in <paramref name="plan"/>, or null when it has none or the plan cannot be read.</summary>
     /// <param name="root">The repository root.</param>
@@ -42,3 +46,8 @@ public interface IPlanTaskTargetService
     /// <param name="row">The task's Test contract row, or null when the plan has none for it.</param>
     IReadOnlyList<string> DeclaredClasses(PlanContractRow? row);
 }
+
+/// <summary>The task a lookup found, or null with the reason there was not exactly one match.</summary>
+/// <param name="Match">The task and the plan it belongs to, or null when nothing matched.</param>
+/// <param name="Reason">Why nothing was found; null when <paramref name="Match"/> is not null.</param>
+public sealed record PlanTaskTargetLookup(PlanTaskTargetMatch? Match, string? Reason);

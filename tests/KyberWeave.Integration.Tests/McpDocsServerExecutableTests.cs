@@ -27,9 +27,9 @@ public sealed class McpDocsServerExecutableTests : IDisposable
     /// unregistered is exercised rather than assumed.
     /// </remarks>
     [Fact]
-    public void TheDocsServerExecutableAnswersRealToolCalls()
+    public async Task TheDocsServerExecutableAnswersRealToolCalls()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_repository.Path);
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(_repository.Path);
 
         const string Requests =
             """
@@ -54,7 +54,7 @@ public sealed class McpDocsServerExecutableTests : IDisposable
         startInfo.ArgumentList.Add(_repository.Path);
         startInfo.ArgumentList.Add("--no-codegraph-refresh");
 
-        ProcessResult result = ProcessRunner.Run(startInfo, Requests, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, Requests, TimeSpan.FromSeconds(60));
 
         string answered = ToolCallText(result.StandardOutput, 3);
         Assert.True(

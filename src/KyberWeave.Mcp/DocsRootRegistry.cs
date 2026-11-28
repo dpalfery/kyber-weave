@@ -171,9 +171,9 @@ public sealed class DocsRootRegistry
         bool codeGraphRefreshEnabled,
         DocsRootRegistry? registry,
         IServiceProvider? services = null,
-        IProcessExecutor? deliveryExecutor = null,
+        IProcessRunner? deliveryExecutor = null,
         string? deliveryHome = null,
-        IProcessExecutor? toolingExecutor = null,
+        IProcessRunner? toolingExecutor = null,
         string? toolingMcpExecutable = null)
     {
         IServiceProvider provider = DocsToolsComposition.ServicesOrDefault(services);
@@ -241,21 +241,22 @@ public sealed class DocsRootRegistry
     /// the tools bound to that worktree. In any-repo mode a success always carries tools, and a blank path is refused.
     /// A refusal comes back as a message and no tools.
     /// </summary>
-    internal bool TryResolve(string? projectPath, out DocsTools? tools, out string? refusal)
+    internal async Task<DocsRootResolution> TryResolveAsync(
+        string? projectPath,
+        CancellationToken cancellationToken = default)
     {
-        tools = null;
-        refusal = null;
         if (string.IsNullOrWhiteSpace(projectPath))
         {
-            if (!IsAnyRepo) return true;
-            refusal = "projectPath is required: this server runs in any-repo mode.";
-            return false;
+            if (!IsAnyRepo) return new DocsRootResolution(true, null, null);
+            return new DocsRootResolution(false, null, "projectPath is required: this server runs in any-repo mode.");
         }
 
-        if (!TryCandidate(projectPath, out string candidate, out refusal)) return false;
+        if (!TryCandidate(projectPath, out string candidate, out string? refusal))
+            return new DocsRootResolution(false, null, refusal);
+
         return IsAnyRepo
-            ? TryResolveAnyRepo(candidate, out tools, out refusal)
-            : TryResolveBound(candidate, out tools, out refusal);
+            ? await TryResolveAnyRepoAsync(candidate, cancellationToken).ConfigureAwait(false)
+            : await TryResolveBoundAsync(candidate, cancellationToken).ConfigureAwait(false);
     }
 
     private bool TryCandidate(string projectPath, out string candidate, out string? refusal)
@@ -277,67 +278,83 @@ public sealed class DocsRootRegistry
         return false;
     }
 
-    private bool TryResolveBound(string candidate, out DocsTools? tools, out string? refusal)
+    private async Task<DocsRootResolution> TryResolveBoundAsync(
+        string candidate,
+        CancellationToken cancellationToken)
     {
-        tools = null;
-        refusal = null;
-        (string? serverTop, string? serverCommon, string? serverError) = ServerIdentity();
+        (string? serverTop, string? serverCommon, string? serverError) = await ServerIdentityAsync(cancellationToken).ConfigureAwait(false);
         if (serverCommon is null)
         {
-            refusal = $"projectPath was refused: the server root '{_serverRoot}' is not a git repository ({serverError}), "
-                + "so a worktree cannot be matched to it. Omit projectPath.";
-            return false;
+            return new DocsRootResolution(false, null,
+                $"projectPath was refused: the server root '{_serverRoot}' is not a git repository ({serverError}), "
+                + "so a worktree cannot be matched to it. Omit projectPath.");
         }
 
-        if (!TryRoots(candidate, out string topLevel, out string common, out string? error))
+        GitWorktreeRoots roots = await TryRootsAsync(candidate, cancellationToken).ConfigureAwait(false);
+        if (!roots.Found)
         {
-            refusal = $"projectPath '{candidate}' is not inside a git repository ({error}). "
-                + "Pass the absolute path of a worktree of this repository.";
-            return false;
+            return new DocsRootResolution(false, null,
+                $"projectPath '{candidate}' is not inside a git repository ({roots.Failure}). "
+                + "Pass the absolute path of a worktree of this repository.");
         }
 
-        if (!string.Equals(common, serverCommon, PathComparison))
+        if (!string.Equals(roots.CommonDirectory, serverCommon, PathComparison))
         {
-            refusal = $"projectPath '{candidate}' belongs to a different repository than this server "
-                + $"(its git directory is '{common}', the server's is '{serverCommon}'). "
-                + "Only a worktree of the server's own repository can be queried.";
-            return false;
+            return new DocsRootResolution(false, null,
+                $"projectPath '{candidate}' belongs to a different repository than this server "
+                + $"(its git directory is '{roots.CommonDirectory}', the server's is '{serverCommon}'). "
+                + "Only a worktree of the server's own repository can be queried.");
         }
 
-        if (string.Equals(topLevel, serverTop, PathComparison)) return true;
-        return TryHeldOrBuild(topLevel, out tools, out refusal);
+        if (roots.TopLevel is not { } topLevel)
+        {
+            return new DocsRootResolution(false, null,
+                $"projectPath '{candidate}' is not inside a git repository (git named no top level). "
+                + "Pass the absolute path of a worktree of this repository.");
+        }
+
+        if (string.Equals(topLevel, serverTop, PathComparison)) return new DocsRootResolution(true, null, null);
+        return TryHeldOrBuild(topLevel);
     }
 
-    private bool TryResolveAnyRepo(string candidate, out DocsTools? tools, out string? refusal)
+    private async Task<DocsRootResolution> TryResolveAnyRepoAsync(
+        string candidate,
+        CancellationToken cancellationToken)
     {
-        tools = null;
-        if (!TryRoots(candidate, out string topLevel, out _, out string? error))
+        GitWorktreeRoots roots = await TryRootsAsync(candidate, cancellationToken).ConfigureAwait(false);
+        if (!roots.Found)
         {
-            refusal = $"projectPath '{candidate}' is not inside a git repository ({error}). "
-                + "Pass the absolute path of a directory inside an initialized repository.";
-            return false;
+            return new DocsRootResolution(false, null,
+                $"projectPath '{candidate}' is not inside a git repository ({roots.Failure}). "
+                + "Pass the absolute path of a directory inside an initialized repository.");
+        }
+
+        if (roots.TopLevel is not { } topLevel)
+        {
+            return new DocsRootResolution(false, null,
+                $"projectPath '{candidate}' is not inside a git repository (git named no top level). "
+                + "Pass the absolute path of a directory inside an initialized repository.");
         }
 
         if (_configs is null || _configs.FindConfigPath(topLevel) is null)
         {
-            refusal = $"the repository '{topLevel}' that projectPath '{candidate}' is in has no Kyber-Weave host configuration. "
-                + $"Run 'kyber-weave docs init \"{topLevel}\"' once in it, then call again.";
-            return false;
+            return new DocsRootResolution(false, null,
+                $"the repository '{topLevel}' that projectPath '{candidate}' is in has no Kyber-Weave host configuration. "
+                + $"Run 'kyber-weave docs init \"{topLevel}\"' once in it, then call again.");
         }
 
-        return TryHeldOrBuild(topLevel, out tools, out refusal);
+        return TryHeldOrBuild(topLevel);
     }
 
     /// <summary>
     /// The held tools for <paramref name="root"/>, or new ones from the factory, which runs outside the lock. A root
     /// another call stored while this one was building wins, so every caller ends on one instance.
     /// </summary>
-    private bool TryHeldOrBuild(string root, out DocsTools? tools, out string? refusal)
+    private DocsRootResolution TryHeldOrBuild(string root)
     {
-        refusal = null;
         lock (_gate)
         {
-            if (TryTakeHeld(root, out tools)) return true;
+            if (TryTakeHeld(root, out DocsTools? held)) return new DocsRootResolution(true, held, null);
         }
 
         DocsTools created;
@@ -348,23 +365,15 @@ public sealed class DocsRootRegistry
         catch (Exception exception) when (exception is InvalidOperationException or IOException
             or UnauthorizedAccessException or InvalidDataException or ArgumentException or NotSupportedException)
         {
-            refusal = $"the tools for '{root}' could not be built: {exception.Message}";
-            return false;
-        }
-
-        if (IsAnyRepo && created is null)
-        {
-            refusal = $"the tools for '{root}' could not be built.";
-            return false;
+            return new DocsRootResolution(false, null, $"the tools for '{root}' could not be built: {exception.Message}");
         }
 
         lock (_gate)
         {
-            if (TryTakeHeld(root, out tools)) return true;
+            if (TryTakeHeld(root, out DocsTools? held)) return new DocsRootResolution(true, held, null);
             _recent.AddFirst((root, created));
             while (_recent.Count > Capacity) _recent.RemoveLast();
-            tools = created;
-            return true;
+            return new DocsRootResolution(true, created, null);
         }
     }
 
@@ -388,35 +397,36 @@ public sealed class DocsRootRegistry
     /// The top level and common git directory of <paramref name="directory"/>, from memory when this path was answered
     /// before. Git runs outside the lock; only a success is remembered, and the memory is cleared when it is full.
     /// </summary>
-    private bool TryRoots(string directory, out string topLevel, out string commonDirectory, out string? error)
+    private async Task<GitWorktreeRoots> TryRootsAsync(string directory, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
             if (_pathRoots.TryGetValue(directory, out (string TopLevel, string CommonDirectory) known))
             {
-                (topLevel, commonDirectory, error) = (known.TopLevel, known.CommonDirectory, null);
-                return true;
+                return new GitWorktreeRoots(known.TopLevel, known.CommonDirectory, null);
             }
         }
 
-        if (!_git.TryRoots(directory, out string? top, out string? common, out error) || top is null || common is null)
+        GitWorktreeRoots roots = await _git.TryRootsAsync(directory, cancellationToken).ConfigureAwait(false);
+        if (roots.TopLevel is not { } topLevel || roots.CommonDirectory is not { } commonDirectory)
         {
-            (topLevel, commonDirectory) = (string.Empty, string.Empty);
-            error ??= "git named no top level";
-            return false;
+            return new GitWorktreeRoots(
+                roots.TopLevel,
+                roots.CommonDirectory,
+                roots.Failure ?? "git named no top level");
         }
 
         lock (_gate)
         {
             if (_pathRoots.Count >= PathCacheCapacity) _pathRoots.Clear();
-            _pathRoots[directory] = (top, common);
+            _pathRoots[directory] = (topLevel, commonDirectory);
         }
 
-        (topLevel, commonDirectory) = (top, common);
-        return true;
+        return new GitWorktreeRoots(topLevel, commonDirectory, null);
     }
 
-    private (string? TopLevel, string? CommonDirectory, string? Error) ServerIdentity()
+    private async Task<(string? TopLevel, string? CommonDirectory, string? Error)> ServerIdentityAsync(
+        CancellationToken cancellationToken)
     {
         lock (_gate)
         {
@@ -426,9 +436,10 @@ public sealed class DocsRootRegistry
         (string? TopLevel, string? CommonDirectory, string? Error) identity = (null, null, "this server holds no root");
         if (_serverRoot is not null)
         {
-            identity = _git.TryRoots(_serverRoot, out string? top, out string? common, out string? error)
-                ? (top, common, null)
-                : (null, null, error);
+            GitWorktreeRoots roots = await _git.TryRootsAsync(_serverRoot, cancellationToken).ConfigureAwait(false);
+            identity = roots.Found
+                ? (roots.TopLevel, roots.CommonDirectory, null)
+                : (null, null, roots.Failure);
         }
 
         lock (_gate)
@@ -438,6 +449,12 @@ public sealed class DocsRootRegistry
 
         return identity;
     }
+
+    /// <summary>The tools for a project path, or the refusal that kept them from being resolved.</summary>
+    /// <param name="Resolved">True when the path was resolved; false when it was refused.</param>
+    /// <param name="Tools">The tools for that path, or null for the server's own root.</param>
+    /// <param name="Refusal">The one-line refusal when <paramref name="Resolved"/> is false.</param>
+    internal sealed record DocsRootResolution(bool Resolved, DocsTools? Tools, string? Refusal);
 
     private StringComparison PathComparison =>
         _environment.OperatingSystem is OperatingSystemKind.Windows or OperatingSystemKind.MacOS

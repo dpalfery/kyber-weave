@@ -60,7 +60,7 @@ public sealed class SquadCopilotGlobalLinksUnitTests
             globalRoots: _roots,
             renderer: Renderer());
 
-        CommandExecution execution = CaptureDoctor(command);
+        CommandExecution execution = await CaptureDoctor(command);
 
         string output = string.Join(' ', execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         Assert.True(output.Contains("Global unmanaged collisions: none", StringComparison.OrdinalIgnoreCase), output);
@@ -141,10 +141,11 @@ public sealed class SquadCopilotGlobalLinksUnitTests
         string.Equals(file.RelativePath, ConductorPath, StringComparison.Ordinal)
         && string.Equals(file.Target, "copilot", StringComparison.Ordinal);
 
-    private static CommandExecution CaptureDoctor(SquadDoctorCommand command)
+    private static async Task<CommandExecution> CaptureDoctor(SquadDoctorCommand command)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, new SquadDoctorSettings { Path = Path.GetFullPath("/kw/work"), Global = true }));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(() =>
+            command.ExecuteAsync(null!, new SquadDoctorSettings { Path = Path.GetFullPath("/kw/work"), Global = true },
+                CancellationToken.None));
         return new CommandExecution(execution.Result, execution.Output);
     }
 

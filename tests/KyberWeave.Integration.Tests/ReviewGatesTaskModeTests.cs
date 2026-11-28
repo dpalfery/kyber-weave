@@ -16,17 +16,23 @@ namespace KyberWeave.Tests;
 /// evidence, and the run prints a short result instead of the raw output. The gate is a shell script that prints a
 /// test runner's or compiler's output, so the cases do not build a project.
 /// </summary>
-public sealed class ReviewGatesTaskModeTests : IDisposable
+public sealed class ReviewGatesTaskModeTests : IAsyncLifetime
 {
-    private readonly DocFixture _fixture = Ready();
+    private DocFixture _fixture = null!;
 
-    public void Dispose() => _fixture.Dispose();
+    public async ValueTask InitializeAsync() => _fixture = await ReadyAsync();
 
-    private static DocFixture Ready()
+    public ValueTask DisposeAsync()
+    {
+        _fixture.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private static async Task<DocFixture> ReadyAsync()
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus();
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        DocsTestCommands.Tasks().Execute(
+        _ = await DocsTestCommands.Tasks().ExecuteAsync(
             null!,
             new DocsTasksSettings { Path = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath), Format = "json", Write = true },
             CancellationToken.None);

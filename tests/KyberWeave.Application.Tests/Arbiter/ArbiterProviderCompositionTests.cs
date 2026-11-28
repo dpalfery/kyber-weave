@@ -41,14 +41,14 @@ public sealed class ArbiterProviderCompositionTests
     }
 
     [Fact]
-    public void TheConfiguredFactoryReadsTheKeyThroughTheEnvironmentSeam()
+    public async Task TheConfiguredFactoryReadsTheKeyThroughTheEnvironmentSeam()
     {
         ServiceCollection services = new();
         services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(readVariable: name => name == "TYPESAFE_API_KEY" ? "env-key" : null));
         _ = services.AddWeaveApplication();
         using ServiceProvider provider = services.BuildServiceProvider();
 
-        IArbiterProvider? client = provider.GetRequiredService<ConfiguredArbiterProviderFactory>().TryCreate(
+        IArbiterProvider? client = await provider.GetRequiredService<ConfiguredArbiterProviderFactory>().TryCreateAsync(
             new ArbiterProviderConfig(ArbiterProviderKind.Systemone, "https://api.typesafe.ai/v1", "jev-1.13.0", 5000),
             "/kw/home");
 

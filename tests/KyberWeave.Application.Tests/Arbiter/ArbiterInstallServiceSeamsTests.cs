@@ -42,40 +42,90 @@ public sealed class ArbiterInstallServiceSeamsTests
     }
 
     /// <summary>
-    /// A relative <c>--path</c> is resolved against the working directory the environment seam names. Before the class
-    /// took the path seam it resolved the option with the process's own working directory, so a test could only prove
-    /// this by starting in the directory it wanted.
+    /// <summary>
+    /// The asynchronous preparation resolves the same root as the synchronous one, so a caller moving to it keeps the
+    /// behaviour it had.
     /// </summary>
     [Fact]
-    public void Prepare_ResolvesARelativeProjectPathAgainstTheInjectedWorkingDirectory()
+    public async Task PrepareAsync_ResolvesTheSameRelativeProjectPath()
     {
         ArbiterInstallService service = Service();
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: "repo", projectScope: true));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
+            Request(pathOption: "repo", projectScope: true), TestContext.Current.CancellationToken);
 
         Assert.Equal(0, prepared.ExitCode);
         Assert.NotNull(prepared.Plan);
         Assert.Equal(WorkingDirectory + "/repo", prepared.Plan.Root);
     }
 
+    /// <summary>
+    /// The asynchronous application writes the key through the store's asynchronous member and verifies the install,
+    /// so the credential write never blocks a thread.
+    /// </summary>
+    [Fact]
+    public async Task ApplyAsync_WritesTheKeyThroughTheAsyncStoreAndVerifies()
+    {
+        RecordingStore store = new();
+        FakeArbiterUserSettings settings = OverrideToSystemone();
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService service = Service(
+            settings,
+            configs: configs,
+            lifecycle: new SucceedingLifecycle(),
+            store: store);
+
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
+            Request(pathOption: null, projectScope: false, providerOption: "systemone", arbiterKey: "typed-key", dryRun: false),
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(prepared.Plan);
+
+        ArbiterInstallApplied applied = await service.ApplyAsync(prepared.Plan, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, applied.ExitCode);
+        Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
+        Assert.Equal(1, store.AsyncWrites);
+        Assert.Equal("typed-key", await store.ReadAsync(OverrideOrigin, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The asynchronous preparation reads the credential store through its asynchronous member, so no thread blocks on
+    /// the store.
+    /// </summary>
+    [Fact]
+    public async Task PrepareAsync_ReadsTheStoredKeyThroughTheAsyncStore()
+    {
+        RecordingStore store = new();
+        store.Seed(OverrideOrigin, "override-key");
+        IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
+        ArbiterInstallService service = Service(OverrideToSystemone(), configs: configs, store: store);
+
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
+            Request(pathOption: null, projectScope: true, providerOption: "systemone"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, prepared.ExitCode);
+        Assert.True(store.AsyncReads > 0, "The asynchronous preparation must read the store through ReadAsync.");
+    }
+
     /// <summary>An absolute option is its own root, whatever the working directory is.</summary>
     [Fact]
-    public void Prepare_KeepsAnAbsoluteProjectPathUnchanged()
+    public async Task Prepare_KeepsAnAbsoluteProjectPathUnchanged()
     {
         ArbiterInstallService service = Service();
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: "/elsewhere/repo", projectScope: true));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: "/elsewhere/repo", projectScope: true));
 
         Assert.Equal("/elsewhere/repo", prepared.Plan?.Root);
     }
 
     /// <summary>The global scope plans against the home directory the environment seam names.</summary>
     [Fact]
-    public void Prepare_PlansTheGlobalScopeAtTheInjectedHomeDirectory()
+    public async Task Prepare_PlansTheGlobalScopeAtTheInjectedHomeDirectory()
     {
         ArbiterInstallService service = Service();
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: false));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: false));
 
         Assert.Equal(Home, prepared.Plan?.Root);
         Assert.Equal(SquadDeploymentScope.Global, prepared.Plan?.Scope);
@@ -87,12 +137,12 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// stored key sits under the override origin, so the run completes with no key demand.
     /// </summary>
     [Fact]
-    public void Prepare_SystemoneWithOverrideEndpoint_ResolvesTheKeyFromTheOverrideOrigin()
+    public async Task Prepare_SystemoneWithOverrideEndpoint_ResolvesTheKeyFromTheOverrideOrigin()
     {
         _store.Seed(OverrideOrigin, "override-key");
         ArbiterInstallService service = Service(OverrideToSystemone());
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(0, prepared.ExitCode);
         Assert.NotNull(prepared.Plan);
@@ -109,13 +159,13 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// override endpoint is the one the environment key is bound to.
     /// </summary>
     [Fact]
-    public void Prepare_OverrideEndpoint_ServesTheEnvironmentKeyForTheOverrideOriginOnly()
+    public async Task Prepare_OverrideEndpoint_ServesTheEnvironmentKeyForTheOverrideOriginOnly()
     {
         ArbiterInstallService service = Service(
             OverrideToSystemone(),
             readVariable: name => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key" : null);
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(0, prepared.ExitCode);
         Assert.NotNull(prepared.Plan);
@@ -128,14 +178,14 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// host config naming a foreign endpoint, the run stops with the key finding naming that origin.
     /// </summary>
     [Fact]
-    public void Prepare_RepositoryEndpoint_NeverServesTheEnvironmentKey()
+    public async Task Prepare_RepositoryEndpoint_NeverServesTheEnvironmentKey()
     {
         const string repositoryOrigin = "https://repo.example.net";
         ArbiterInstallService service = Service(
             configs: new RepositoryEndpointConfigs("https://repo.example.net/v1"),
             readVariable: name => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key" : null);
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(2, prepared.ExitCode);
         Assert.Null(prepared.Plan);
@@ -149,7 +199,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// is read or written.
     /// </summary>
     [Fact]
-    public void Prepare_MalformedOverride_StopsWithOneError()
+    public async Task Prepare_MalformedOverride_StopsWithOneError()
     {
         FakeArbiterUserSettings userSettings = new()
         {
@@ -157,7 +207,7 @@ public sealed class ArbiterInstallServiceSeamsTests
         };
         ArbiterInstallService service = Service(userSettings);
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(1, prepared.ExitCode);
         Assert.Null(prepared.Plan);
@@ -169,11 +219,11 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// present: only the endpoint, origin and key resolution become override-aware, never the key demand.
     /// </summary>
     [Fact]
-    public void Prepare_OmittedProvider_KeepsNoneAndSkipsTheKey()
+    public async Task Prepare_OmittedProvider_KeepsNoneAndSkipsTheKey()
     {
         ArbiterInstallService service = Service(OverrideToSystemone());
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true));
 
         Assert.Equal(0, prepared.ExitCode);
         ArbiterInstallProviderLine provider = Assert.Single(prepared.Events.OfType<ArbiterInstallProviderLine>());
@@ -190,7 +240,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// environment key to the TypeSafe origin only, fails this test.
     /// </summary>
     [Fact]
-    public void Apply_VerifyWithOverrideEndpointAndEnvironmentKey_SucceedsWithoutAStoredKey()
+    public async Task Apply_VerifyWithOverrideEndpointAndEnvironmentKey_SucceedsWithoutAStoredKey()
     {
         Func<string, string?> readVariable = name =>
             string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
@@ -200,7 +250,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -211,7 +261,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(0, applied.ExitCode);
         Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
@@ -223,7 +273,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// design, so <c>Verify</c> validates the override explicitly first.
     /// </summary>
     [Fact]
-    public void Apply_MalformedOverrideAfterPrepare_ReportsTheMalformedOverride()
+    public async Task Apply_MalformedOverrideAfterPrepare_ReportsTheMalformedOverride()
     {
         Func<string, string?> readVariable = name =>
             string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
@@ -233,7 +283,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -249,7 +299,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -265,7 +315,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     [InlineData("not-a-url")]
     [InlineData("ftp://openrouter.ai/api/v1")]
     [InlineData("")]
-    public void Prepare_InvalidOverrideEndpoint_FailsClosedWithConfigError(string invalidEndpoint)
+    public async Task Prepare_InvalidOverrideEndpoint_FailsClosedWithConfigError(string invalidEndpoint)
     {
         FakeArbiterUserSettings userSettings = new()
         {
@@ -273,7 +323,7 @@ public sealed class ArbiterInstallServiceSeamsTests
         };
         ArbiterInstallService service = Service(userSettings);
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(1, prepared.ExitCode);
         Assert.Null(prepared.Plan);
@@ -289,7 +339,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// resolution, so a later read cannot switch the endpoint between validation and key binding.
     /// </summary>
     [Fact]
-    public void Apply_VerifyReadsOverrideOnce_SucceedsWhenSubsequentReadWouldDiffer()
+    public async Task Apply_VerifyReadsOverrideOnce_SucceedsWhenSubsequentReadWouldDiffer()
     {
         Func<string, string?> readVariable = name =>
             string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
@@ -299,7 +349,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -320,7 +370,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(0, applied.ExitCode);
         Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
@@ -332,7 +382,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// the plan recorded, a later change back to the planned endpoint cannot bypass verification.
     /// </summary>
     [Fact]
-    public void Apply_VerifyReadsOverrideOnce_FailsWhenSingleReadDiffersFromPlanEndpoint()
+    public async Task Apply_VerifyReadsOverrideOnce_FailsWhenSingleReadDiffersFromPlanEndpoint()
     {
         Func<string, string?> readVariable = name =>
             string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
@@ -342,7 +392,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -363,7 +413,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -378,7 +428,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// fails closed with the configuration error naming the override file.
     /// </summary>
     [Fact]
-    public void Apply_InvalidOverrideEndpointAfterPrepare_ReportsConfigErrorNamingOverrideFile()
+    public async Task Apply_InvalidOverrideEndpointAfterPrepare_ReportsConfigErrorNamingOverrideFile()
     {
         Func<string, string?> readVariable = name =>
             string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key-for-verify" : null;
@@ -388,7 +438,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -403,7 +453,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -417,7 +467,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// systemone provider.
     /// </summary>
     [Fact]
-    public void Prepare_ReadsOverrideOnce()
+    public async Task Prepare_ReadsOverrideOnce()
     {
         int reads = 0;
         FakeArbiterUserSettings counting = new()
@@ -432,7 +482,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             counting,
             readVariable: name => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? "env-key" : null);
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: null, projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(0, prepared.ExitCode);
         Assert.NotNull(prepared.Plan);
@@ -444,13 +494,13 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// fail-closed naming the host configuration path rather than falling back to the TypeSafe origin.
     /// </summary>
     [Fact]
-    public void Prepare_InvalidHostConfigEndpoint_FailsClosedNamingHostConfig()
+    public async Task Prepare_InvalidHostConfigEndpoint_FailsClosedNamingHostConfig()
     {
         const string hostConfigPath = "/kw/work/repo/.kyber-weave/kyber-weave.yml";
         ArbiterInstallService service = Service(
             configs: new RepositoryEndpointConfigs("not-a-url", hostConfigPath));
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(1, prepared.ExitCode);
         Assert.Null(prepared.Plan);
@@ -466,7 +516,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// stale planned endpoint against a mismatched override.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_WhenOverrideSwitchesToDifferentEndpointWithStoredKeysOnBothOrigins()
+    public async Task Apply_VerifyFailsClosed_WhenOverrideSwitchesToDifferentEndpointWithStoredKeysOnBothOrigins()
     {
         const string secondOrigin = "https://other.example.com";
         const string secondEndpoint = "https://other.example.com/v1";
@@ -478,7 +528,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -492,7 +542,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             switched,
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -505,7 +555,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// diverges from the planned endpoint and must fail closed.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_WhenOverrideChangesPathOnSameOrigin()
+    public async Task Apply_VerifyFailsClosed_WhenOverrideChangesPathOnSameOrigin()
     {
         const string changedPathEndpoint = "https://openrouter.ai/api/v2";
         _store.Seed(OverrideOrigin, "override-key");
@@ -515,7 +565,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -529,7 +579,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             switched,
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -542,7 +592,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// must also fail closed rather than verifying against the stale remote plan.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_WhenOverrideSwitchesToLoopbackAfterRemotePlan()
+    public async Task Apply_VerifyFailsClosed_WhenOverrideSwitchesToLoopbackAfterRemotePlan()
     {
         const string loopbackEndpoint = "http://127.0.0.1:11434/v1";
         _store.Seed(OverrideOrigin, "override-key");
@@ -552,7 +602,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -566,7 +616,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             switched,
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -579,7 +629,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// <c>Verify</c> mismatch error truncates them instead of embedding unbounded strings.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_LongMismatchEndpointsAndOrigins_AreTruncatedInError()
+    public async Task Apply_VerifyFailsClosed_LongMismatchEndpointsAndOrigins_AreTruncatedInError()
     {
         string longPlannedOrigin = "https://" + string.Join('.', Enumerable.Repeat(new string('a', 55), 4)) + ".example.com";
         string longPlannedEndpoint = longPlannedOrigin + "/v1/planned";
@@ -592,7 +642,7 @@ public sealed class ArbiterInstallServiceSeamsTests
         ArbiterInstallService prepareService = Service(
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -606,7 +656,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             switched,
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -628,7 +678,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// fail closed in <c>Verify</c>, remain bounded, and disambiguate the colliding displays.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_LongEndpointsDifferingAfterTruncationLimit_StillFailClosedAndTruncate()
+    public async Task Apply_VerifyFailsClosed_LongEndpointsDifferingAfterTruncationLimit_StillFailClosedAndTruncate()
     {
         string sharedPrefix = "https://openrouter.ai/api/" + new string('x', 200);
         string plannedEndpoint = sharedPrefix + "/planned";
@@ -643,7 +693,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             },
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -656,7 +706,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             },
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -683,7 +733,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// still disambiguated by content hash so the error never shows identical strings.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_LongEndpointsDifferingAtSameIndexAndLength_AreDisambiguated()
+    public async Task Apply_VerifyFailsClosed_LongEndpointsDifferingAtSameIndexAndLength_AreDisambiguated()
     {
         string sharedPrefix = "https://openrouter.ai/api/" + new string('x', 200);
         string plannedEndpoint = sharedPrefix + "/v1";
@@ -698,7 +748,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             },
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -711,7 +761,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             },
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -730,7 +780,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// disambiguated in the <c>Verify</c> mismatch error while keeping both origins bounded.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_LongOriginsDifferingAfterTruncationLimit_AreDisambiguated()
+    public async Task Apply_VerifyFailsClosed_LongOriginsDifferingAfterTruncationLimit_AreDisambiguated()
     {
         string sharedHostPrefix = string.Join('.', Enumerable.Repeat(new string('a', 55), 4));
         string plannedOrigin = "https://" + sharedHostPrefix + ".p.example.com";
@@ -744,7 +794,7 @@ public sealed class ArbiterInstallServiceSeamsTests
         ArbiterInstallService prepareService = Service(
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -757,7 +807,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             },
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -781,7 +831,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// representation) are still disambiguated in the <c>Verify</c> mismatch error.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_EndpointsDifferingOnlyInLineEndings_AreDisambiguated()
+    public async Task Apply_VerifyFailsClosed_EndpointsDifferingOnlyInLineEndings_AreDisambiguated()
     {
         const string spaceEndpoint = "https://openrouter.ai/api/a b";
         const string multilineEndpoint = "https://openrouter.ai/api/a\r\nb";
@@ -792,7 +842,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -809,7 +859,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             },
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(multilinePlan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(multilinePlan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -831,7 +881,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// mismatch error so the message remains single-line.
     /// </summary>
     [Fact]
-    public void Apply_VerifyFailsClosed_MultilinePlannedValuesInMismatchError_AreSanitizedToSingleLine()
+    public async Task Apply_VerifyFailsClosed_MultilinePlannedValuesInMismatchError_AreSanitizedToSingleLine()
     {
         _store.Seed(OverrideOrigin, "override-key");
         IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
@@ -840,7 +890,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -855,7 +905,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(multilinePlan, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(multilinePlan, CancellationToken.None);
 
         Assert.Equal(1, applied.ExitCode);
         ArbiterInstallError error = Assert.Single(applied.Events.OfType<ArbiterInstallError>());
@@ -870,7 +920,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// endpoint and still receives the environment key across both <c>Prepare</c> and <c>Verify</c>.
     /// </summary>
     [Fact]
-    public void PrepareAndApply_OverrideEndpointWithTrailingSpace_HonorsEnvironmentKey()
+    public async Task PrepareAndApply_OverrideEndpointWithTrailingSpace_HonorsEnvironmentKey()
     {
         string overridePath = ArbiterUserSettings.GetPath(Home);
         _files.CreateDirectory(Path.GetDirectoryName(overridePath)!);
@@ -885,7 +935,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs: configs,
             readVariable: readVariable,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = service.Prepare(
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -893,7 +943,7 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.Equal(OverrideEndpoint, prepared.Plan.Endpoint);
         Assert.Equal(OverrideOrigin, prepared.Plan.Origin);
 
-        ArbiterInstallApplied applied = service.Apply(prepared.Plan, CancellationToken.None);
+        ArbiterInstallApplied applied = await service.ApplyAsync(prepared.Plan, CancellationToken.None);
 
         Assert.Equal(0, applied.ExitCode);
         Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
@@ -905,7 +955,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// masking the override behind raw string equality.
     /// </summary>
     [Fact]
-    public void Prepare_BothHostConfigAndOverrideSetSameInvalidEndpoint_NamesOverrideFile()
+    public async Task Prepare_BothHostConfigAndOverrideSetSameInvalidEndpoint_NamesOverrideFile()
     {
         const string hostConfigPath = "/kw/work/repo/.kyber-weave/kyber-weave.yml";
         string overridePath = ArbiterUserSettings.GetPath(Home);
@@ -915,7 +965,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             new FileArbiterUserSettings(_files),
             configs: new RepositoryEndpointConfigs("not-a-url", hostConfigPath));
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(1, prepared.ExitCode);
         Assert.Null(prepared.Plan);
@@ -931,7 +981,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// configuration rather than blaming the override file.
     /// </summary>
     [Fact]
-    public void Prepare_HostConfigInvalidAndOverrideSetsOnlyModel_NamesHostConfig()
+    public async Task Prepare_HostConfigInvalidAndOverrideSetsOnlyModel_NamesHostConfig()
     {
         const string hostConfigPath = "/kw/work/repo/.kyber-weave/kyber-weave.yml";
         string overridePath = ArbiterUserSettings.GetPath(Home);
@@ -941,7 +991,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             new FileArbiterUserSettings(_files),
             configs: new RepositoryEndpointConfigs("not-a-url", hostConfigPath));
 
-        ArbiterInstallPrepared prepared = service.Prepare(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(1, prepared.ExitCode);
         Assert.Null(prepared.Plan);
@@ -956,7 +1006,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// which is the case of a supplied endpoint equal to the repository endpoint.
     /// </summary>
     [Fact]
-    public void Prepare_ExplicitEndpointOverriddenWithoutMerge_NamesOverrideFile()
+    public async Task Prepare_ExplicitEndpointOverriddenWithoutMerge_NamesOverrideFile()
     {
         const string hostConfigPath = "/kw/work/repo/.kyber-weave/kyber-weave.yml";
         string overridePath = ArbiterUserSettings.GetPath(Home);
@@ -964,7 +1014,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             new FakeArbiterUserSettings { EndpointOverridden = true },
             configs: new RepositoryEndpointConfigs("not-a-url", hostConfigPath));
 
-        ArbiterInstallPrepared prepared = service.Prepare(
+        ArbiterInstallPrepared prepared = await service.PrepareAsync(
             Request(pathOption: "repo", projectScope: true, providerOption: "systemone"));
 
         Assert.Equal(1, prepared.ExitCode);
@@ -977,7 +1027,7 @@ public sealed class ArbiterInstallServiceSeamsTests
     /// A planned endpoint that differs from the effective one only by surrounding space still verifies.
     /// </summary>
     [Fact]
-    public void Apply_Verify_PlanEndpointTrailingSpace_MatchesTheTrimmedEffectiveEndpoint()
+    public async Task Apply_Verify_PlanEndpointTrailingSpace_MatchesTheTrimmedEffectiveEndpoint()
     {
         _store.Seed(OverrideOrigin, "override-key");
         IArbiterConfigResolver configs = new RepositoryEndpointConfigs(ArbiterProviderConfig.DefaultNone.Endpoint);
@@ -985,7 +1035,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallPrepared prepared = prepareService.Prepare(
+        ArbiterInstallPrepared prepared = await prepareService.PrepareAsync(
             Request(pathOption: null, projectScope: false, providerOption: "systemone", dryRun: false));
 
         Assert.Equal(0, prepared.ExitCode);
@@ -996,7 +1046,7 @@ public sealed class ArbiterInstallServiceSeamsTests
             OverrideToSystemone(),
             configs: configs,
             lifecycle: new SucceedingLifecycle());
-        ArbiterInstallApplied applied = applyService.Apply(spaced, CancellationToken.None);
+        ArbiterInstallApplied applied = await applyService.ApplyAsync(spaced, CancellationToken.None);
 
         Assert.Equal(0, applied.ExitCode);
     }
@@ -1062,7 +1112,8 @@ public sealed class ArbiterInstallServiceSeamsTests
         IArbiterKeyService? keys = null,
         IArbiterConfigResolver? configs = null,
         Func<string, string?>? readVariable = null,
-        IArbiterInstallLifecycle? lifecycle = null)
+        IArbiterInstallLifecycle? lifecycle = null,
+        ICredentialStore? store = null)
     {
         IArbiterUserSettings effectiveSettings = userSettings ?? new NoOverride();
         FakeProcessEnvironment environment = readVariable is null
@@ -1071,6 +1122,7 @@ public sealed class ArbiterInstallServiceSeamsTests
                 currentDirectory: WorkingDirectory,
                 homeDirectory: Home,
                 readVariable: readVariable);
+        ICredentialStore credentials = store ?? _store;
         return new ArbiterInstallService(
             environment,
             _paths,
@@ -1078,14 +1130,14 @@ public sealed class ArbiterInstallServiceSeamsTests
             configs ?? new ProductConfigs(),
             effectiveSettings,
             new NoKeyInput(),
-            _store,
+            credentials,
             _files,
             new FakeSquadStateStore(new FakeSquadUserPaths(Home)),
             lifecycle ?? new NoLifecycle(),
             new FakeSquadGlobalRootResolver(Home),
             new PresentBinary(),
             new NoScaffolder(),
-            keys ?? new ArbiterKeyService(_store, environment, effectiveSettings));
+            keys ?? new ArbiterKeyService(credentials, environment, effectiveSettings));
     }
 
     /// <summary>The shipped provider config, with no per-user override over it.</summary>
@@ -1209,20 +1261,46 @@ public sealed class ArbiterInstallServiceSeamsTests
     {
         public string CliVersion => "1.0.0";
 
-        public ToolProbeResult Probe() => new(true, "1.0.0", null);
+        public Task<ToolProbeResult> ProbeAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ToolProbeResult(true, "1.0.0", null));
     }
 
     /// <summary>A preparation-only test never scaffolds; the branch that would is skipped by the dry run.</summary>
     private sealed class NoScaffolder : IDocsScaffoldingService
     {
-        public ScaffoldResult Scaffold(
+        public Task<ScaffoldResult> ScaffoldAsync(
             string repoRoot,
             string? docsRoot = null,
             string owner = "unassigned",
             bool force = false,
             bool kyberStandards = false,
             bool reviewGates = true,
-            IReadOnlyList<string>? standards = null) =>
+            IReadOnlyList<string>? standards = null,
+            CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("A preparation must not scaffold.");
+    }
+
+    /// <summary>A credential store that counts the async reads and writes a test proves the run made.</summary>
+    private sealed class RecordingStore : ICredentialStore
+    {
+        private readonly FakeCredentialStore _inner = new();
+
+        public int AsyncReads { get; private set; }
+
+        public int AsyncWrites { get; private set; }
+
+        public void Seed(string origin, string key) => _inner.Seed(origin, key);
+
+        public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
+        {
+            AsyncReads++;
+            return _inner.ReadAsync(origin, cancellationToken);
+        }
+
+        public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
+        {
+            AsyncWrites++;
+            return _inner.WriteAsync(origin, key, cancellationToken);
+        }
     }
 }

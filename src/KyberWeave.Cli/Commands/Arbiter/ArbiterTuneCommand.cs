@@ -20,7 +20,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// change side at each candidate threshold. A decision whose ledger event carries a return shows that return's
 /// <c>RESULT</c> beside its score.
 /// </remarks>
-public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole console) : Command<ArbiterSettings>
+public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole console) : AsyncCommand<ArbiterSettings>
 {
     /// <summary>The candidate thresholds when <c>--thresholds</c> is not given.</summary>
     public static readonly double[] DefaultThresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
@@ -31,7 +31,7 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole co
     private const string CommandName = "arbiter tune";
 
     /// <summary>Reports the scored answers per rule. Exits 1 only when the logs cannot be read whole.</summary>
-    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
@@ -47,7 +47,8 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole co
             return 1;
         }
 
-        if (tune.Score(settings.Path, thresholds, settings.Rule, report) is not { } scored)
+        ArbiterTuneReport? scored = await tune.ScoreAsync(settings.Path, thresholds, settings.Rule, report, cancellationToken).ConfigureAwait(false);
+        if (scored is not { } tally)
         {
             CommandHelpers.Finish(console, report, settings, CommandName, "Event");
             return 1;
@@ -57,24 +58,20 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole co
         {
             if (settings.Json)
             {
-                WriteJson(scored);
+                WriteJson(tally);
             }
             else
             {
-                if (scored.TruncationNote is not null)
+                if (tally.TruncationNote is not null)
                 {
-                    console.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {scored.TruncationNote} The tallies below cover only the newest records.");
+                    console.WriteLine($"warning {ArbiterAuditCommand.LogWindowTruncated}: {tally.TruncationNote} The tallies below cover only the newest records.");
                 }
 
-                WriteText(scored);
+                WriteText(tally);
             }
         });
         return 0;
     }
-
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     /// <summary>Parses <c>--thresholds</c>: a comma-separated list of values in [0, 1]; the defaults when absent.</summary>
     public static bool TryParseThresholds(

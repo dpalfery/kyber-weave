@@ -63,7 +63,7 @@ internal sealed class SelfUpdateCrashScenario(bool windows)
     /// <param name="workspace">The workspace.</param>
     /// <param name="installedVersion">The version the running image reports.</param>
     /// <returns>The outcome.</returns>
-    public SelfUpdateOutcome Run(SelfUpdateCrashWorkspace workspace, string installedVersion)
+    public async Task<SelfUpdateOutcome> RunAsync(SelfUpdateCrashWorkspace workspace, string installedVersion)
     {
         ArgumentNullException.ThrowIfNull(workspace);
         string rid = Windows ? "win-x64" : "linux-x64";
@@ -77,7 +77,9 @@ internal sealed class SelfUpdateCrashScenario(bool windows)
             workspace.Modes);
         using ReleaseHandler handler = new(this, rid);
         using SelfUpdater updater = new(handler, host, workspace.Files, workspace.Paths, workspace.Environment, system);
-        return updater.Run(new SelfUpdateOptions(NewVersion, ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
+        return await updater
+            .RunAsync(new SelfUpdateOptions(NewVersion, ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true))
+            .ConfigureAwait(false);
     }
 
     /// <summary>Gets the version the image installed as the running binary reports.</summary>

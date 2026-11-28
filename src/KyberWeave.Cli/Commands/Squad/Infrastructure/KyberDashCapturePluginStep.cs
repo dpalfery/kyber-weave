@@ -54,39 +54,43 @@ internal sealed class KyberDashCapturePluginStep
     /// </summary>
     private static readonly TimeSpan PluginVerbTimeout = TimeSpan.FromSeconds(120);
 
-    private readonly IProcessExecutor _executor;
+    private readonly IProcessRunner _runner;
     private readonly Func<string?> _locateKyberDash;
     private readonly SquadConsole _console;
 
-    /// <summary>Creates a step over an executor, a locator for the <c>kyberdash</c> executable and a console.</summary>
-    /// <param name="executor">Runs the verb. Injected so tests never start a real process.</param>
+    /// <summary>Creates a step over a process runner, a locator for the <c>kyberdash</c> executable and a console.</summary>
+    /// <param name="runner">Runs the verb. Injected so tests never start a real process.</param>
     /// <param name="locateKyberDash">Returns the full path of <c>kyberdash</c>, or null when it is not installed.</param>
     /// <param name="console">Where the verdict, the guidance and the warnings are written.</param>
-    public KyberDashCapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash, SquadConsole console)
+    public KyberDashCapturePluginStep(IProcessRunner runner, Func<string?> locateKyberDash, SquadConsole console)
     {
-        ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(locateKyberDash);
         ArgumentNullException.ThrowIfNull(console);
-        _executor = executor;
+        _runner = runner;
         _locateKyberDash = locateKyberDash;
         _console = console;
     }
 
-    /// <summary>The production step: the shared process executor bounded for the verb, and the given locator.</summary>
+    /// <summary>The production step: the async process runner bounded for the verb, and the given locator.</summary>
     /// <param name="locator">Finds <c>kyberdash</c> beside the running binary or on <c>PATH</c>.</param>
     /// <param name="console">Where the step writes.</param>
     public static KyberDashCapturePluginStep Create(KyberDashLocator locator, SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(locator);
-        return new KyberDashCapturePluginStep(ProcessExecutor.WithTimeout(PluginVerbTimeout), locator.Locate, console);
+        return new KyberDashCapturePluginStep(new CapturePluginProcessRunner(PluginVerbTimeout), locator.Locate, console);
     }
 
     /// <summary>Runs the verb against one OpenCode global root, prints its verdict, and relays its OpenCode guidance.</summary>
     /// <param name="openCodeRoot">The OpenCode global root Squad resolved, passed as <c>--config-dir</c>.</param>
     /// <param name="dryRun">Whether the Squad run is a dry run; passed through as <c>--dry-run</c>.</param>
-    public CapturePluginStepOutcome Run(string openCodeRoot, bool dryRun)
+    /// <param name="cancellationToken">Cancels the plugin verb run.</param>
+    public Task<CapturePluginStepOutcome> RunAsync(
+        string openCodeRoot,
+        bool dryRun,
+        CancellationToken cancellationToken = default)
     {
-        return Run(SquadTarget.OpenCode, openCodeRoot, dryRun);
+        return RunAsync(SquadTarget.OpenCode, openCodeRoot, dryRun, cancellationToken);
     }
 
     /// <summary>Runs the verb for one harness, against the root that harness resolves.</summary>
@@ -96,7 +100,12 @@ internal sealed class KyberDashCapturePluginStep
     ///     refuses that flag and resolves its own root, so its call names none.
     /// </param>
     /// <param name="dryRun">Whether the Squad run is a dry run; passed through as <c>--dry-run</c>.</param>
-    internal CapturePluginStepOutcome Run(SquadTarget harness, string? globalRoot, bool dryRun)
+    /// <param name="cancellationToken">Cancels the plugin verb run.</param>
+    internal async Task<CapturePluginStepOutcome> RunAsync(
+        SquadTarget harness,
+        string? globalRoot,
+        bool dryRun,
+        CancellationToken cancellationToken = default)
     {
         string name = DisplayName(harness);
         string? kyberdash = _locateKyberDash();
@@ -121,7 +130,8 @@ internal sealed class KyberDashCapturePluginStep
         ProcessResult result;
         try
         {
-            result = _executor.Run(start, string.Empty);
+            result = await _runner.RunAsync(start, string.Empty, PluginVerbTimeout, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or Win32Exception
                                        or UnauthorizedAccessException or TimeoutException)
@@ -175,12 +185,13 @@ internal sealed class KyberDashCapturePluginStep
     ///     Factory step is handed no root: that verb resolves the Factory harness's own root itself, so the two
     ///     steps can never share one root.
     /// </remarks>
-    internal static void RunForGlobal(
+    internal static async Task RunForGlobalAsync(
         KyberDashCapturePluginStep? step,
         IReadOnlyList<SquadTarget> deployedTargets,
         bool noCapturePlugin,
         bool dryRun,
-        ISquadGlobalRootResolver globalRoots)
+        ISquadGlobalRootResolver globalRoots,
+        CancellationToken cancellationToken = default)
     {
         if (step is null || noCapturePlugin)
             return;
@@ -192,7 +203,7 @@ internal sealed class KyberDashCapturePluginStep
 
             if (harness == SquadTarget.Factory)
             {
-                step.Run(harness, null, dryRun);
+                _ = await step.RunAsync(harness, null, dryRun, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
@@ -206,7 +217,72 @@ internal sealed class KyberDashCapturePluginStep
                 continue;
             }
 
-            step.Run(harness, roots[0].GlobalRoot, dryRun);
+            _ = await step.RunAsync(harness, roots[0].GlobalRoot, dryRun, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class CapturePluginProcessRunner(TimeSpan defaultTimeout) : IProcessRunner
+    {
+        public bool IsAlive(int processId) => throw new NotSupportedException();
+
+        public string? FindOnPath(string program) => throw new NotSupportedException();
+
+        public async Task<ProcessRunResult> RunAsync(
+            ProcessRunRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            ArgumentException.ThrowIfNullOrWhiteSpace(request.Program);
+
+            ProcessStartInfo startInfo = new(request.Program)
+            {
+                WorkingDirectory = request.WorkingDirectory ?? string.Empty,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            foreach (string argument in request.Arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            if (request.Environment is { } environment)
+            {
+                startInfo.Environment.Clear();
+                foreach (KeyValuePair<string, string?> pair in environment)
+                {
+                    if (pair.Value is not null)
+                        startInfo.Environment[pair.Key] = pair.Value;
+                }
+            }
+
+            try
+            {
+                ProcessResult result = await ProcessRunner.RunAsync(
+                    startInfo,
+                    request.StandardInput ?? string.Empty,
+                    request.Timeout ?? defaultTimeout,
+                    request.MaxOutputBytes,
+                    time: null,
+                    cancellationToken).ConfigureAwait(false);
+
+                return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)
+                {
+                    StandardOutput = result.StandardOutput,
+                    StandardError = result.StandardError
+                };
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 2)
+            {
+                throw new FileNotFoundException($"command not found: {request.Program}", request.Program, ex);
+            }
+            catch (TimeoutException)
+            {
+                return new ProcessRunResult(-1, string.Empty, TimedOut: true)
+                {
+                    StandardOutput = string.Empty,
+                    StandardError = string.Empty
+                };
+            }
         }
     }
 

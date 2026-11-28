@@ -109,12 +109,13 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -122,15 +123,15 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         if (IsAgentLifecycle(payload))
         {
-            return HandleSubagentStop(payload, config, context);
+            return await HandleSubagentStopAsync(payload, config, context, cancellationToken).ConfigureAwait(false);
         }
 
         CopilotSchema schema = DetectSchema(payload);
         LogSchemaDetection(schema, context);
 
         return schema == CopilotSchema.Local
-            ? HandleLocal(payload, renderedCaller, config, context)
-            : HandleCli(payload, renderedCaller, config, context);
+            ? await HandleLocalAsync(payload, renderedCaller, config, context, cancellationToken).ConfigureAwait(false)
+            : await HandleCliAsync(payload, renderedCaller, config, context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -207,7 +208,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private HookOutcome DecidePre(
+    private async Task<HookOutcome> DecidePreAsync(
         string harness,
         JsonElement payload,
         string caller,
@@ -215,19 +216,22 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         string prompt,
         KyberWeaveConfig config,
         HookContext context,
-        string? deliveredPrompt = null)
+        string? deliveredPrompt = null,
+        CancellationToken cancellationToken = default)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePreDispatch(
+            return await contextual.DecidePreDispatchAsync(
                 harness, caller, target, prompt, config, context,
-                CliCallId(payload), sessionId: GetString(payload, "sessionId"), dispatchModel: null, deliveredPrompt: deliveredPrompt);
+                CliCallId(payload), sessionId: GetString(payload, "sessionId"), dispatchModel: null,
+                deliveredPrompt: deliveredPrompt, cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePreDispatch(caller, target, prompt, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, target, prompt, config, cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePostAsync(
         string harness,
         JsonElement payload,
         string caller,
@@ -235,16 +239,18 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         string prompt,
         string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
+            return await contextual.DecidePostDispatchAsync(
                 harness, caller, target, prompt, toolOutput, config, context,
-                CliCallId(payload), sessionId: GetString(payload, "sessionId"));
+                CliCallId(payload), sessionId: GetString(payload, "sessionId"), cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        return await _engine.DecidePostDispatchAsync(
+            caller, target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -258,7 +264,11 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         && !payload.TryGetProperty("toolCalls", out _)
         && !string.IsNullOrWhiteSpace(GetString(payload, "agentId"));
 
-    private string HandleSubagentStop(JsonElement payload, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleSubagentStopAsync(
+        JsonElement payload,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         string? sessionId = GetString(payload, "sessionId");
         string? response = GetString(payload, "response");
@@ -271,15 +281,17 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             && !string.IsNullOrEmpty(sessionId)
             && GetString(payload, "agentId") is { Length: > 0 } agentId)
         {
-            outcome = background.DecideBackgroundReturn(CliToken, sessionId, agentId, response, config, context);
+            outcome = await background.DecideBackgroundReturnAsync(
+                CliToken, sessionId, agentId, response, config, context, cancellationToken).ConfigureAwait(false);
         }
 
         // The agent's turn is over, whether or not its return hook reached us. One still-open dispatch of that agent
         // is closed, so a hook killed at its timeout cannot leave the dispatch holding its task's files all run.
         if (_engine is ILostReturnRecovery recovery)
         {
-            recovery.RecoverLostReturn(
-                CliToken, sessionId, AgentNamesOf(payload), context, GetString(payload, "agentId"));
+            await recovery.RecoverLostReturnAsync(
+                CliToken, sessionId, AgentNamesOf(payload), context, GetString(payload, "agentId"),
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
         // The stop hook can only rewrite the response the dispatching agent reads, so a note rides at its end.
@@ -346,7 +358,12 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         }
     }
 
-    private string HandleLocal(JsonElement payload, string? renderedCaller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleLocalAsync(
+        JsonElement payload,
+        string? renderedCaller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         string? eventName = GetString(payload, "hook_event_name");
         string? tool = GetString(payload, "tool_name");
@@ -354,25 +371,28 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandleLocalPre(payload, tool, caller, renderedCaller, config, context);
+            return await HandleLocalPreAsync(
+                payload, tool, caller, renderedCaller, config, context, cancellationToken).ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandleLocalPost(payload, tool, caller, config, context);
+            return await HandleLocalPostAsync(
+                payload, tool, caller, config, context, cancellationToken).ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
             $"Malformed Copilot hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
-    private string HandleLocalPre(
+    private async Task<string> HandleLocalPreAsync(
         JsonElement payload,
         string? tool,
         string caller,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (IsLocalDispatchTool(tool))
         {
@@ -394,13 +414,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                     toolUseId, GetString(toolInput, "agentName"), promptDigest, tool ?? string.Empty, cwd);
             if (key is not null && TrustedDecisions.TryGetValue(key.Value, out string? stored))
             {
-                context.Log.WriteLine(
-                    $"Reusing trusted-caller decision already logged for tool_use_id '{toolUseId}'.");
+                await context.Log.WriteLineAsync(
+                    $"Reusing trusted-caller decision already logged for tool_use_id '{toolUseId}'.").ConfigureAwait(false);
                 return stored;
             }
 
-            HookOutcome outcome = DecidePre(
-                _harnessToken, payload, caller, target, prompt, config, context);
+            HookOutcome outcome = await DecidePreAsync(
+                _harnessToken, payload, caller, target, prompt, config, context,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
 
             // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
             DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
@@ -464,7 +485,13 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             : RenderLocalPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
     }
 
-    private string HandleLocalPost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleLocalPostAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsLocalDispatchTool(tool))
         {
@@ -487,8 +514,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
-        HookOutcome outcome = DecidePost(
-            _harnessToken, payload, caller, target, prompt, response.GetRawText(), config, context);
+        HookOutcome outcome = await DecidePostAsync(
+            _harnessToken, payload, caller, target, prompt, response.GetRawText(), config, context, cancellationToken)
+            .ConfigureAwait(false);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -510,7 +538,12 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandleCli(JsonElement payload, string? renderedCaller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleCliAsync(
+        JsonElement payload,
+        string? renderedCaller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         // The CLI hook is project-wide. A rendered caller is honoured when present, but the file Squad renders
         // carries none. Inside a subagent the CLI adds the calling agent's type at the top level, where tool
@@ -536,7 +569,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                     continue;
                 }
 
-                string document = HandleCliCall(single, caller, config, context);
+                string document = await HandleCliCallAsync(single, caller, config, context, cancellationToken)
+                    .ConfigureAwait(false);
                 if (document.Contains("\"permissionDecision\":\"deny\"", StringComparison.Ordinal))
                 {
                     // Fail closed: one call the rules refuse refuses the batch, as a refused single call would.
@@ -552,10 +586,15 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             return firstDocument;
         }
 
-        return HandleCliCall(payload, caller, config, context);
+        return await HandleCliCallAsync(payload, caller, config, context, cancellationToken).ConfigureAwait(false);
     }
 
-    private string HandleCliCall(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleCliCallAsync(
+        JsonElement payload,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         JsonObject args = ParseCliArgs(payload);
         string? target = GetNodeString(args, "agent_type");
@@ -566,23 +605,26 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             || (FirstCliCall(payload) is { } call && call.TryGetProperty("result", out _));
 
         return isPost
-            ? HandleCliPostCall(payload, caller, target, prompt, config, context)
-            : HandleCliPreCall(payload, args, caller, target, prompt, config, context);
+            ? await HandleCliPostCallAsync(payload, caller, target, prompt, config, context, cancellationToken)
+                .ConfigureAwait(false)
+            : await HandleCliPreCallAsync(payload, args, caller, target, prompt, config, context, cancellationToken)
+                .ConfigureAwait(false);
     }
 
-    private string HandleCliPreCall(
+    private async Task<string> HandleCliPreCallAsync(
         JsonElement payload,
         JsonObject args,
         string caller,
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         // The rules judge the short dispatch; the insertion is computed first because the ledger pairs the return
         // with the prompt the worker runs, and an inserted packet replaces the dispatch the post event carries.
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context, target);
-        HookOutcome outcome = DecidePre(
+        HookOutcome outcome = await DecidePreAsync(
             _harnessToken,
             payload,
             caller,
@@ -590,7 +632,8 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             prompt,
             config,
             context,
-            insertion.Kind == DispatchInsertionKind.Inserted ? insertion.Text : null);
+            insertion.Kind == DispatchInsertionKind.Inserted ? insertion.Text : null,
+            cancellationToken).ConfigureAwait(false);
 
         // The prompt is inserted only for a dispatch the rules allowed.
         if (outcome.Kind == HookOutcomeKind.Deny)
@@ -634,13 +677,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandleCliPostCall(
+    private async Task<string> HandleCliPostCallAsync(
         JsonElement payload,
         string caller,
         string? target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!payload.TryGetProperty("toolResult", out JsonElement result)
             || result.ValueKind != JsonValueKind.Object)
@@ -665,14 +709,17 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             }
             else
             {
-                context.Log.WriteLine("Arbiter: a background dispatch could not be followed; its return is not recorded.");
+                await context.Log.WriteLineAsync(
+                    "Arbiter: a background dispatch could not be followed; its return is not recorded.")
+                    .ConfigureAwait(false);
             }
 
             return pending.Length > 0 ? RenderCliPostAnnotation(pending) : string.Empty;
         }
 
-        HookOutcome postOutcome = DecidePost(
-            _harnessToken, payload, caller, target, prompt, result.GetRawText(), config, context);
+        HookOutcome postOutcome = await DecidePostAsync(
+            _harnessToken, payload, caller, target, prompt, result.GetRawText(), config, context, cancellationToken)
+            .ConfigureAwait(false);
         string? note = PostCallNote(postOutcome);
         string combined = string.Join("\n\n", new[] { note, pending }.Where(text => !string.IsNullOrEmpty(text)));
         return combined.Length > 0 ? RenderCliPostAnnotation(combined) : string.Empty;

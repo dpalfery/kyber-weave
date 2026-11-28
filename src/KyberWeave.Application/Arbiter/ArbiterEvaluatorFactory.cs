@@ -17,7 +17,7 @@ public sealed class ArbiterEvaluatorFactory(
     /// <inheritdoc />
     public IArbiterEvaluator Create(
         IArbiterProvider provider,
-        Func<Uri, string?> keyResolver,
+        Func<Uri, CancellationToken, Task<string?>> keyResolver,
         string arbiterDirectory,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,

@@ -18,12 +18,28 @@ public sealed class ReviewSuppressionsService(
     IProcessEnvironment environment) : IReviewSuppressionsService
 {
     /// <inheritdoc />
-    public ReviewCommandResult Run(ReviewSuppressionsRequest request, CancellationToken cancellationToken = default)
+    public async Task<ReviewCommandResult> RunAsync(
+        ReviewSuppressionsRequest request,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        DiagnosticReport report = new();
-        string root;
+        if (!TryPrepare(request, out string root, out string baseRef, out DiagnosticReport report, out ReviewCommandResult? failure))
+            return failure;
+
+        SuppressionScanResult result = await scanner.ScanAsync(root, baseRef, cancellationToken).ConfigureAwait(false);
+        return Report(result, baseRef, report);
+    }
+
+    /// <summary>The directory the request names and the ref it is judged against, or the refusal to return.</summary>
+    private bool TryPrepare(
+        ReviewSuppressionsRequest request,
+        out string root,
+        out string baseRef,
+        out DiagnosticReport report,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ReviewCommandResult? failure)
+    {
+        report = new DiagnosticReport();
         try
         {
             root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
@@ -31,18 +47,36 @@ public sealed class ReviewSuppressionsService(
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)
         {
-            return ReviewCommandResultFactory.Refused($"{ReviewDiagnosticCodes.InvalidInput}: Cannot resolve path '{request.Path}': {ex.Message}");
+            root = string.Empty;
+            baseRef = string.Empty;
+            failure = ReviewCommandResultFactory.Refused($"{ReviewDiagnosticCodes.InvalidInput}: Cannot resolve path '{request.Path}': {ex.Message}");
+            return false;
         }
 
         if (!files.DirectoryExists(root))
-            return ReviewCommandResultFactory.Refused($"{ReviewDiagnosticCodes.InvalidInput}: '{root}' is not a directory");
+        {
+            baseRef = string.Empty;
+            failure = ReviewCommandResultFactory.Refused($"{ReviewDiagnosticCodes.InvalidInput}: '{root}' is not a directory");
+            return false;
+        }
 
-        string baseRef = request.BaseRef ?? SuppressionScan.DefaultBase;
+        baseRef = request.BaseRef ?? SuppressionScan.DefaultBase;
         if (GitChangeParsing.ValidateBase(baseRef) is { } baseProblem)
-            return ReviewCommandResultFactory.Refused($"{ReviewDiagnosticCodes.InvalidInput}: {baseProblem}");
+        {
+            failure = ReviewCommandResultFactory.Refused($"{ReviewDiagnosticCodes.InvalidInput}: {baseProblem}");
+            return false;
+        }
 
-        SuppressionScanResult result = scanner.Scan(root, baseRef);
+        failure = null;
+        return true;
+    }
 
+    /// <summary>The report for what the scan found: a failure to read the change, or each unreasoned suppression.</summary>
+    private static ReviewCommandResult Report(
+        SuppressionScanResult result,
+        string baseRef,
+        DiagnosticReport report)
+    {
         if (result.Failure is { } failure)
         {
             report.Add(new Diagnostic(

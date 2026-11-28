@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using KyberWeave.Core.Processes;
 
@@ -9,20 +8,10 @@ namespace KyberWeave.Contracts.Repositories;
 /// <summary>The one process seam: start a program, ask about a running process, and find a program on the path.</summary>
 /// <remarks>
 /// <para>
-/// <see cref="IProgramRunner"/>, <see cref="IBoundedProcessExecutor"/> and
-/// <see cref="IProcessExecutor"/> stay as role views so their callers keep compiling while they move here.
-/// Each role is implemented by default in terms of <see cref="RunAsync(ProcessRunRequest, CancellationToken)"/>,
-/// translated back to the exceptions its callers already handle.
-/// </para>
-/// <para>
 /// A scripted fake implements this interface and is proven against the real adapter by one shared contract suite.
 /// </para>
 /// </remarks>
-[SuppressMessage(
-    "Design",
-    "CA1033:Interface methods should be callable by child types",
-    Justification = "The three role methods are deliberate explicit defaults over the seam; a caller holds the role view, not IProcessRunner, so there is no child-facing overload to expose.")]
-public interface IProcessRunner : IProgramRunner, IBoundedProcessExecutor, IProcessExecutor
+public interface IProcessRunner
 {
     /// <summary>Runs a program to completion and captures its output.</summary>
     /// <param name="request">The program, its arguments, and the conditions of the run.</param>
@@ -80,8 +69,52 @@ public interface IProcessRunner : IProgramRunner, IBoundedProcessExecutor, IProc
             return new ProcessRunResult(-1, exception.Message, TimedOut: false);
         }
     }
+}
 
-    ProcessResult IProgramRunner.Run(
+/// <summary>The asynchronous twins of the role views over <see cref="IProcessRunner"/>.</summary>
+/// <remarks>
+/// Each awaits <see cref="IProcessRunner.RunAsync(ProcessRunRequest, CancellationToken)"/> and keeps the exception
+/// contract of the synchronous role view it twins: a program that could not be started is a
+/// <see cref="Win32Exception"/>, and a run killed for running too long is a <see cref="TimeoutException"/>. A caller
+/// moving to these methods keeps every catch clause it had.
+/// </remarks>
+public static class ProcessRunnerAsyncViews
+{
+    /// <summary>Runs a configured process to completion without blocking a thread.</summary>
+    /// <param name="runner">The process seam to run through.</param>
+    /// <param name="startInfo">The configured program; its argument list is copied, never its argument string.</param>
+    /// <param name="standardInput">The text written to standard input.</param>
+    /// <param name="timeout">The longest the process may run; null for no limit.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    /// <exception cref="Win32Exception">The program could not be started.</exception>
+    /// <exception cref="TimeoutException">The program outlived <paramref name="timeout"/>.</exception>
+    public static async Task<ProcessResult> RunAsync(
+        this IProcessRunner runner,
+        ProcessStartInfo startInfo,
+        string standardInput,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+
+        ProcessRunRequest request = ProcessRunRequest.FromStartInfo(startInfo, standardInput, timeout);
+        return await ToProcessResultAsync(runner, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs a program with argv to completion without blocking a thread.</summary>
+    /// <param name="runner">The process seam to run through.</param>
+    /// <param name="program">The program to start.</param>
+    /// <param name="arguments">One element per argument.</param>
+    /// <param name="workingDirectory">The directory to run in.</param>
+    /// <param name="timeout">Longest the program may run before its process tree is killed; null for no limit.</param>
+    /// <param name="maxOutputBytes">When set, the most bytes of output read before the process tree is killed.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    /// <exception cref="Win32Exception">The program could not be started.</exception>
+    /// <exception cref="TimeoutException">The program outlived <paramref name="timeout"/>.</exception>
+    public static async Task<ProcessResult> RunAsync(
+        this IProcessRunner runner,
         string program,
         IReadOnlyList<string> arguments,
         string workingDirectory,
@@ -89,6 +122,8 @@ public interface IProcessRunner : IProgramRunner, IBoundedProcessExecutor, IProc
         long? maxOutputBytes,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(runner);
+
         ProcessRunRequest request = new()
         {
             Program = program,
@@ -98,21 +133,23 @@ public interface IProcessRunner : IProgramRunner, IBoundedProcessExecutor, IProc
             MaxOutputBytes = maxOutputBytes
         };
 
-        return RunToProcessResult(request, cancellationToken);
+        return await ToProcessResultAsync(runner, request, cancellationToken).ConfigureAwait(false);
     }
 
-    ProcessResult IProcessExecutor.Run(ProcessStartInfo startInfo, string standardInput) =>
-        RunToProcessResult(ProcessRunRequest.FromStartInfo(startInfo, standardInput, timeout: null), CancellationToken.None);
-
-    ProcessResult IBoundedProcessExecutor.Run(ProcessStartInfo startInfo, string standardInput, TimeSpan timeout) =>
-        RunToProcessResult(ProcessRunRequest.FromStartInfo(startInfo, standardInput, timeout), CancellationToken.None);
-
-    private ProcessResult RunToProcessResult(ProcessRunRequest request, CancellationToken cancellationToken)
+    /// <summary>Runs one request and translates its result the way the synchronous role views do.</summary>
+    /// <param name="runner">The process seam to run through.</param>
+    /// <param name="request">The program, its arguments, and the conditions of the run.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    private static async Task<ProcessResult> ToProcessResultAsync(
+        IProcessRunner runner,
+        ProcessRunRequest request,
+        CancellationToken cancellationToken)
     {
         ProcessRunResult result;
         try
         {
-            result = RunAsync(request, cancellationToken).GetAwaiter().GetResult();
+            result = await runner.RunAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {

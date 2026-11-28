@@ -49,10 +49,10 @@ public sealed class ReviewSeatsService(
     private const string DefaultBase = "origin/HEAD";
 
     /// <inheritdoc />
-    public ReviewCommandResult Prepare(
+    public async Task<ReviewCommandResult> PrepareAsync(
         ReviewSeatsRequest request,
-        Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
-        IProcessExecutor indexExecutor,
+        Func<string, KyberWeaveConfig, CancellationToken, Task<IReviewDecisionModel>> decisionModel,
+        IProcessRunner indexExecutor,
         TextWriter output,
         CancellationToken cancellationToken = default)
     {
@@ -60,6 +60,7 @@ public sealed class ReviewSeatsService(
         ArgumentNullException.ThrowIfNull(indexExecutor);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(decisionModel);
+        cancellationToken.ThrowIfCancellationRequested();
 
         string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         DiagnosticReport report = new();
@@ -71,21 +72,23 @@ public sealed class ReviewSeatsService(
             return failure ?? ReviewCommandResultFactory.Reported(1, report);
 
         // The index is synced before any seat starts, so no seat reads an index older than the diff.
-        WorktreeIndexOutcome index = worktreeIndex.Ensure(
+        WorktreeIndexOutcome index = await worktreeIndex.EnsureAsync(
             setup.Tree,
             DoctorOptions.Defaults,
             indexExecutor,
-            environment.TempDirectory);
+            environment.TempDirectory,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         string folder = Path.Combine(setup.ReviewFolder, ScratchLayout.CycleFolder(setup.Plan.Number));
         string gatesPath = Path.Combine(folder, ScratchLayout.GatesFileName);
         string baseRef = request.BaseRef ?? DefaultBase;
-        IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
+        IReadOnlyList<string>? changed = await ChangedPathsAsync(root, baseRef, cancellationToken).ConfigureAwait(false);
 
-        IReviewDecisionModel model = decisionModel(root, config);
+        IReviewDecisionModel model = await decisionModel(root, config, cancellationToken).ConfigureAwait(false);
         CouncilSeatPlan seats = setup.Plan.Prior is { } verified && !request.Full
-            ? VerifierSeats(setup.Tree, verified, setup.Recheck)
-            : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
+            ? await VerifierSeatsAsync(setup.Tree, verified, setup.Recheck, cancellationToken).ConfigureAwait(false)
+            : await WithDecisionModelAsync(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken)
+                .ConfigureAwait(false);
 
         if (!WriteSeats(folder, root, baseRef, gatesPath, setup, changed, seats, index, report, out string evidence))
             return ReviewCommandResultFactory.Reported(1, report);
@@ -266,10 +269,10 @@ public sealed class ReviewSeatsService(
         task is null ? "kyber-weave review verdict ." : $"kyber-weave review verdict . --task {task}";
 
     /// <summary>
-    /// Leaves out each judgement lens the decision model confidently finds does not apply to the change. With no model
-    /// configured, or no changed-file list, the seating is returned unchanged.
+    /// Leaves out each judgement lens the decision model confidently finds does not apply to the change, asking
+    /// without blocking a thread. With no model configured, or no changed-file list, the seating is returned unchanged.
     /// </summary>
-    private CouncilSeatPlan WithDecisionModel(
+    private async Task<CouncilSeatPlan> WithDecisionModelAsync(
         string root,
         string baseRef,
         IReadOnlyList<string>? changed,
@@ -283,17 +286,16 @@ public sealed class ReviewSeatsService(
         string patch;
         try
         {
-            patch = git.DiffSinceMergeBase(root, baseRef).Patch;
+            patch = (await git.DiffSinceMergeBaseAsync(root, baseRef, cancellationToken).ConfigureAwait(false)).Patch;
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {
             patch = string.Empty;
         }
 
-        IReadOnlyDictionary<string, string> ruledOut = decisionSteps.NotApplicableLensesAsync(
+        IReadOnlyDictionary<string, string> ruledOut = await decisionSteps.NotApplicableLensesAsync(
                 model, seats.Now, ReviewLensRules.Summarize(changed, patch), cancellationToken)
-            .GetAwaiter()
-            .GetResult();
+            .ConfigureAwait(false);
         if (ruledOut.Count == 0)
             return seats;
 
@@ -307,7 +309,8 @@ public sealed class ReviewSeatsService(
     ///     The verifier cycle's seats, measured on the fix delta from the prior cycle's head: what the fix changed, and how
     ///     many lines. A head git cannot compare with leaves the files unknown, which still seats the narrow set.
     /// </summary>
-    private CouncilSeatPlan VerifierSeats(string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck)
+    private async Task<CouncilSeatPlan> VerifierSeatsAsync(
+        string tree, ReviewCycleRecord prior, IReadOnlyList<ReviewFinding> recheck, CancellationToken cancellationToken)
     {
         IReadOnlyList<string>? fixPaths = null;
         int fixLines = 0;
@@ -316,7 +319,7 @@ public sealed class ReviewSeatsService(
             fixPaths = selector.ChangedSince(tree, head);
             try
             {
-                fixLines = ChangedLineCount(git.DiffSince(tree, head));
+                fixLines = ChangedLineCount(await git.DiffSinceAsync(tree, head, cancellationToken).ConfigureAwait(false));
             }
             catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
             {
@@ -358,11 +361,11 @@ public sealed class ReviewSeatsService(
             files.WriteAllText(Path.Combine(packets, lens + ".md"), CouncilSeating.Packet(context, lens));
     }
 
-    private IReadOnlyList<string>? ChangedPaths(string root, string baseRef)
+    private async Task<IReadOnlyList<string>?> ChangedPathsAsync(string root, string baseRef, CancellationToken cancellationToken)
     {
         try
         {
-            return [.. git.ResolveSinceMergeBase(root, baseRef).Select(change => change.Path)];
+            return [.. (await git.ResolveSinceMergeBaseAsync(root, baseRef, cancellationToken).ConfigureAwait(false)).Select(change => change.Path)];
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
         {

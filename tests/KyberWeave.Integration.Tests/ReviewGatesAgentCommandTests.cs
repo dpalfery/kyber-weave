@@ -272,10 +272,10 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     [Fact]
-    public void WithoutBaseTheDiffIsAgainstHeadSoCommittedWorkIsNotChanged()
+    public async Task WithoutBaseTheDiffIsAgainstHeadSoCommittedWorkIsNotChanged()
     {
         WriteConfiguration(TrackedProbeConfiguration);
-        CommitFile("src/later.cs");
+        await CommitFile("src/later.cs");
 
         CliRun run = Cli(GatesCommand("--agent", "csharp-dev"));
 
@@ -286,10 +286,10 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     [Fact]
-    public void ABaseRefWidensTheDiffToCommitsSinceThatRef()
+    public async Task ABaseRefWidensTheDiffToCommitsSinceThatRef()
     {
         WriteConfiguration(TrackedProbeConfiguration);
-        CommitFile("src/later.cs");
+        await CommitFile("src/later.cs");
 
         CliRun run = Cli(GatesCommand("--agent", "csharp-dev", "--base", "HEAD~1"));
 
@@ -367,7 +367,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     [InlineData("absolute")]
     [InlineData("escaping")]
     [InlineData("leading-dash")]
-    public void AnUnsafePathIsRefusedBeforeAnyGateStarts(string kind)
+    public async Task AnUnsafePathIsRefusedBeforeAnyGateStarts(string kind)
     {
         WriteConfiguration(MustNotRunConfiguration);
         ChangeTracked("src/a.cs");
@@ -382,7 +382,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
 
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
-        Assert.False(MarkerWasSet());
+        Assert.False(await MarkerWasSet());
     }
 
     /// <summary>
@@ -390,7 +390,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     ///     so it is refused before the agent is looked up and before any gate starts.
     /// </summary>
     [Fact]
-    public void ALeadingDashBaseRefIsRefusedBeforeAnyGateStarts()
+    public async Task ALeadingDashBaseRefIsRefusedBeforeAnyGateStarts()
     {
         WriteConfiguration(MustNotRunConfiguration);
         ChangeTracked("src/a.cs");
@@ -399,7 +399,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
 
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
-        Assert.False(MarkerWasSet());
+        Assert.False(await MarkerWasSet());
     }
 
     /// <summary>
@@ -432,14 +432,14 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     [Theory]
     [InlineData("file")]
     [InlineData("directory")]
-    public void ASymlinkLeadingOutsideTheRepositoryIsRefusedBeforeAnyGateStarts(string kind)
+    public async Task ASymlinkLeadingOutsideTheRepositoryIsRefusedBeforeAnyGateStarts(string kind)
     {
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
         string outside = Path.Combine(_temp.Path, "outside");
         Directory.CreateDirectory(outside);
-        File.WriteAllText(Path.Combine(outside, "escape.cs"), "// outside\n");
+        await File.WriteAllTextAsync(Path.Combine(outside, "escape.cs"), "// outside\n");
         WriteConfiguration(MustNotRunConfiguration);
 
         string changed;
@@ -458,7 +458,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
 
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
-        Assert.False(MarkerWasSet());
+        Assert.False(await MarkerWasSet());
     }
 
     /// <summary>Whether this host lets the test process create a symbolic link, probed in the temporary root.</summary>
@@ -478,7 +478,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     [Fact]
-    public void ATaskPlaceholderWithoutTaskFlagIsRefusedBeforeAnyGateStarts()
+    public async Task ATaskPlaceholderWithoutTaskFlagIsRefusedBeforeAnyGateStarts()
     {
         WriteConfiguration(TaskPlaceholderConfiguration);
         ChangeTracked("src/a.cs");
@@ -487,14 +487,14 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
 
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
-        Assert.False(MarkerWasSet());
+        Assert.False(await MarkerWasSet());
     }
 
     [Theory]
     [InlineData("../")]
     [InlineData("---")]
     [InlineData("/")]
-    public void ATaskIdWithNothingToNameItIsRefusedBeforeAnyGateStarts(string slug)
+    public async Task ATaskIdWithNothingToNameItIsRefusedBeforeAnyGateStarts(string slug)
     {
         WriteConfiguration(TaskPlaceholderConfiguration);
         ChangeTracked("src/a.cs");
@@ -503,7 +503,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
 
         AssertExitCode(1, run);
         AssertRendered(run, InvalidInput);
-        Assert.False(MarkerWasSet());
+        Assert.False(await MarkerWasSet());
     }
 
     [Theory]
@@ -521,11 +521,11 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     [Fact]
-    public void AValidTaskSlugIsSubstitutedIntoEveryPlaceholder()
+    public async Task AValidTaskSlugIsSubstitutedIntoEveryPlaceholder()
     {
         WriteRepositoryFile(".agent_scratchpad/t2r-probe/marker.txt", "marker\n");
-        MustGit("add", "-A");
-        Commit("add marker for probe");
+        await MustGit("add", "-A");
+        await Commit("add marker for probe");
         WriteConfiguration(ScratchpadProbeConfiguration);
         ChangeTracked("src/a.cs");
 
@@ -555,7 +555,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     [Fact]
-    public void WithoutFixTheFixStepIsNotRunAndTheVerifyStepDecides()
+    public async Task WithoutFixTheFixStepIsNotRunAndTheVerifyStepDecides()
     {
         WriteConfiguration(FixConfiguration);
         ChangeTracked("src/a.cs");
@@ -563,7 +563,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
         CliRun run = Cli(GatesCommand("--agent", "csharp-dev"));
 
         AssertExitCode(1, run);
-        Assert.False(FixWasApplied());
+        Assert.False(await FixWasApplied());
         using JsonDocument report = ReadReport();
         Assert.False(GatePassed(report, "formatted"));
     }
@@ -669,10 +669,10 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     ///     than assumed.
     /// </summary>
     [Fact]
-    public void AMappedChangeRunsTheTestsGateWithTheTestClassThatExists()
+    public async Task AMappedChangeRunsTheTestsGateWithTheTestClassThatExists()
     {
         WriteRepositoryFile("tests/KyberWeave.Tests/ATests.cs", "// the test class the convention resolves\r\n");
-        MustGit("add", "tests/KyberWeave.Tests/ATests.cs");
+        await MustGit("add", "tests/KyberWeave.Tests/ATests.cs");
         WriteConfiguration("""
                            review:
                              task-gates:
@@ -687,7 +687,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
 
         AssertTestsTokenAccepted(run);
         AssertExitCode(0, run);
-        (int exitCode, string output) = Git("config", "--local", "--get", "t46.tests");
+        (int exitCode, string output) = await Git("config", "--local", "--get", "t46.tests");
         Assert.True(exitCode == 0, "the gate did not record the expanded {tests} value.");
         Assert.Contains("ATests", output, StringComparison.Ordinal);
         Assert.Contains(".", output, StringComparison.Ordinal);
@@ -879,14 +879,14 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
         return false;
     }
 
-    private bool MarkerWasSet()
+    private async Task<bool> MarkerWasSet()
     {
-        return Git("config", "--local", "--get", StartedMarkerKey).ExitCode == 0;
+        return (await Git("config", "--local", "--get", StartedMarkerKey)).ExitCode == 0;
     }
 
-    private bool FixWasApplied()
+    private async Task<bool> FixWasApplied()
     {
-        return Git("config", "--local", "--get", FixedMarkerKey).ExitCode == 0;
+        return (await Git("config", "--local", "--get", FixedMarkerKey)).ExitCode == 0;
     }
 
     // -----------------------------------------------------------------------------------------
@@ -919,29 +919,29 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
     }
 
     /// <summary>Adds a file and commits it, so it is part of history but not of the working diff.</summary>
-    private void CommitFile(string relativePath)
+    private async Task CommitFile(string relativePath)
     {
         WriteRepositoryFile(relativePath, "// committed\n");
-        MustGit("add", "-A");
-        Commit($"add {relativePath}");
+        await MustGit("add", "-A");
+        await Commit($"add {relativePath}");
     }
 
-    private void Commit(string message)
+    private async Task Commit(string message)
     {
-        MustGit(
+        await MustGit(
             "-c", "user.name=t2r",
             "-c", "user.email=t2r@example.invalid",
             "-c", "commit.gpgsign=false",
             "commit", "--quiet", "--allow-empty", "-m", message);
     }
 
-    private void MustGit(params string[] arguments)
+    private async Task MustGit(params string[] arguments)
     {
-        (int exitCode, string output) = Git(arguments);
+        (int exitCode, string output) = await Git(arguments);
         Assert.True(exitCode == 0, $"git {string.Join(' ', arguments)} failed: {output}");
     }
 
-    private (int ExitCode, string Output) Git(params string[] arguments)
+    private async Task<(int ExitCode, string Output)> Git(params string[] arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -955,7 +955,7 @@ public sealed class ReviewGatesAgentCommandTests : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         return (result.ExitCode, result.StandardOutput);
     }
 

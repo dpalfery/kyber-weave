@@ -139,18 +139,26 @@ public sealed record ArbiterInstallApplied(int ExitCode, IReadOnlyList<ArbiterIn
 /// <summary>Runs <c>arbiter install</c>: prepare everything it means to write, then write it.</summary>
 /// <remarks>
 /// Split in two so the host can ask the operator to confirm the root it is about to write under, which is console I/O
-/// the host owns. Neither half writes before <see cref="Apply"/>.
+/// the host owns. Neither half writes before <see cref="ApplyAsync"/>.
 /// </remarks>
 public interface IArbiterInstallService
 {
-    /// <summary>A second identical run is an idempotent no-op: no config rewrite, no duplicate key write, no re-render.</summary>
+    /// <summary>
+    /// Prepares the install plan without blocking a thread: the docs scaffold, the credential-store lookup and the
+    /// key resolution are awaited rather than waited on. A second identical run is an idempotent no-op: no config
+    /// rewrite, no duplicate key write, no re-render.
+    /// </summary>
     /// <param name="request">What the command was asked to do.</param>
+    /// <param name="cancellationToken">Cancels the scaffold and the credential-store lookups.</param>
     /// <returns>The events so far, and the plan the host confirms and applies.</returns>
-    ArbiterInstallPrepared Prepare(ArbiterInstallRequest request);
+    Task<ArbiterInstallPrepared> PrepareAsync(ArbiterInstallRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Writes the plan, installs the deployment and verifies the result.</summary>
-    /// <param name="plan">The plan <see cref="Prepare"/> produced.</param>
-    /// <param name="cancellationToken">Cancels the deployment.</param>
+    /// <summary>
+    /// Writes the plan, installs the deployment and verifies the result without blocking a thread: the
+    /// credential-store write and the deployment are awaited rather than waited on.
+    /// </summary>
+    /// <param name="plan">The plan <see cref="PrepareAsync"/> produced.</param>
+    /// <param name="cancellationToken">Cancels the credential-store write, the deployment and the verification.</param>
     /// <returns>The events, and the exit code the host returns.</returns>
-    ArbiterInstallApplied Apply(ArbiterInstallPlan plan, CancellationToken cancellationToken);
+    Task<ArbiterInstallApplied> ApplyAsync(ArbiterInstallPlan plan, CancellationToken cancellationToken = default);
 }

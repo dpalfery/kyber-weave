@@ -86,13 +86,14 @@ internal sealed class MemoryScaffoldHost
     public AnalysisCacheSafety CacheSafety { get; }
 
     /// <summary>Scaffolds <see cref="Root"/>.</summary>
-    public ScaffoldResult Scaffold(
+    public Task<ScaffoldResult> ScaffoldAsync(
         string? docsRoot = null,
         string owner = "unassigned",
         bool force = false,
         bool kyberStandards = false,
-        bool reviewGates = true) =>
-        Scaffolder.Scaffold(Root, docsRoot, owner, force, kyberStandards, reviewGates);
+        bool reviewGates = true,
+        CancellationToken cancellationToken = default) =>
+        Scaffolder.ScaffoldAsync(Root, docsRoot, owner, force, kyberStandards, reviewGates, cancellationToken: cancellationToken);
 
     /// <summary>Loads the host configuration of <see cref="Root"/>.</summary>
     public KyberWeaveConfig LoadConfig() => Configs.Load(Root);
@@ -142,15 +143,13 @@ internal sealed class MemoryScaffoldHost
         [.. Memory.EnumerateFiles(directory ?? Root, "*", recursive: true)];
 
     /// <summary>A program runner for which git is not installed, so a lister walks the file system instead.</summary>
-    private sealed class GitlessProgramRunner : IProgramRunner
+    private sealed class GitlessProgramRunner : IProcessRunner
     {
-        public ProcessResult Run(
-            string program,
-            IReadOnlyList<string> arguments,
-            string workingDirectory,
-            TimeSpan? timeout = null,
-            long? maxOutputBytes = null,
-            CancellationToken cancellationToken = default) =>
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default) =>
             throw new Win32Exception(2);
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

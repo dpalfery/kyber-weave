@@ -64,7 +64,7 @@ internal sealed partial class InMemoryArbiterHost : IDisposable
         _ = services.AddSingleton<IIdGenerator>(Ids);
         _ = services.AddSingleton<IArbiterLogStore>(State.Log);
         _ = services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
-        _ = services.AddSingleton<IProcessExecutor>(Processes);
+        _ = services.AddSingleton<IProcessRunner>(Processes);
         _ = services.AddSingleton<IProcessRunner>(Runner);
         _ = services.AddSingleton<ICredentialStore>(Credentials);
         _ = services.AddSingleton<IGitRepositoryFacts>(Git);
@@ -183,6 +183,19 @@ internal sealed partial class InMemoryArbiterHost : IDisposable
         ArgumentNullException.ThrowIfNull(execute);
         int before = Console.Output.Length;
         int exitCode = execute();
+        return new ArbiterCommandRun(exitCode, Console.Output[before..]);
+    }
+
+    /// <summary>
+    /// Runs an async command and reports its exit code with only what it wrote to the console during the call;
+    /// the token it hands to the command is <see cref="CancellationToken.None"/>, so the run cannot be cancelled.
+    /// </summary>
+    /// <param name="execute">Runs the command, passed the token the run hands it.</param>
+    internal async Task<ArbiterCommandRun> RunAsync(Func<CancellationToken, Task<int>> execute)
+    {
+        ArgumentNullException.ThrowIfNull(execute);
+        int before = Console.Output.Length;
+        int exitCode = await execute(CancellationToken.None).ConfigureAwait(false);
         return new ArbiterCommandRun(exitCode, Console.Output[before..]);
     }
 

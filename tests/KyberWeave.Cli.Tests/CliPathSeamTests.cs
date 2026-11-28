@@ -40,37 +40,37 @@ public sealed class CliPathSeamTests : IDisposable
     public void Dispose() => _console.Dispose();
 
     [Fact]
-    public void RunDeliver_ARelativePath_IsDeliveredFromTheDirectoryUnderTheEnvironmentsWorkingDirectory()
+    public async Task RunDeliver_ARelativePath_IsDeliveredFromTheDirectoryUnderTheEnvironmentsWorkingDirectory()
     {
         RecordingDelivery delivery = new();
 
-        int exitCode = new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
-            .Execute(null!, new RunDeliverSettings { Path = "repo", Format = "json" }, CancellationToken.None);
+        int exitCode = await new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
+            .ExecuteAsync(null!, new RunDeliverSettings { Path = "repo", Format = "json" }, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(Repo, delivery.RepoRoot);
     }
 
     [Fact]
-    public void RunDeliver_AnAbsolutePath_IsDeliveredFromThatPathNotTheWorkingDirectory()
+    public async Task RunDeliver_AnAbsolutePath_IsDeliveredFromThatPathNotTheWorkingDirectory()
     {
         RecordingDelivery delivery = new();
 
-        _ = new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
-            .Execute(null!, new RunDeliverSettings { Path = "/kw/elsewhere", Format = "json" }, CancellationToken.None);
+        await new RunDeliverCommand(delivery, new AcceptingConfigs(), _paths, _environment, _console)
+            .ExecuteAsync(null!, new RunDeliverSettings { Path = "/kw/elsewhere", Format = "json" }, CancellationToken.None);
 
         Assert.Equal("/kw/elsewhere", delivery.RepoRoot);
     }
 
     [Fact]
-    public void Sections_LooksForTheGitRootFromTheEnvironmentsWorkingDirectory()
+    public async Task Sections_LooksForTheGitRootFromTheEnvironmentsWorkingDirectory()
     {
         RecordingLocator locator = new(Repo);
         FileFacts facts = new(containedFile: "/kw/work/repo/doc.md");
         SectionSelector selector = new();
 
-        int exitCode = new ArbiterSectionsCommand(facts, locator, new FixedLength(10), selector, _paths, _environment, _console)
-            .Execute(null!, new ArbiterSectionsSettings { Path = "doc.md", Task = "t" }, CancellationToken.None);
+        int exitCode = await new ArbiterSectionsCommand(facts, locator, new FixedLength(10), selector, _paths, _environment, _console)
+            .ExecuteAsync(null!, new ArbiterSectionsSettings { Path = "doc.md", Task = "t" }, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(Work, locator.Start);
@@ -79,42 +79,42 @@ public sealed class CliPathSeamTests : IDisposable
     }
 
     [Fact]
-    public void Sections_ADocumentOutsideTheRoot_ExitsOneWithoutSelecting()
+    public async Task Sections_ADocumentOutsideTheRoot_ExitsOneWithoutSelecting()
     {
         SectionSelector selector = new();
 
-        int exitCode = new ArbiterSectionsCommand(new FileFacts(containedFile: null), new RecordingLocator(Repo), new FixedLength(10), selector, _paths, _environment, _console)
-            .Execute(null!, new ArbiterSectionsSettings { Path = "../out.md", Task = "t" }, CancellationToken.None);
+        int exitCode = await new ArbiterSectionsCommand(new FileFacts(containedFile: null), new RecordingLocator(Repo), new FixedLength(10), selector, _paths, _environment, _console)
+            .ExecuteAsync(null!, new ArbiterSectionsSettings { Path = "../out.md", Task = "t" }, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Null(selector.Document);
     }
 
     [Fact]
-    public void Comment_ARelativeRoot_IsContainedAgainstTheEnvironmentsWorkingDirectory()
+    public async Task Comment_ARelativeRoot_IsContainedAgainstTheEnvironmentsWorkingDirectory()
     {
         FileFacts facts = new(containedFile: null);
 
-        int exitCode = new ArbiterCommentCommand(facts, null!, null!, null!, _paths, _environment, _console)
-            .Execute(null!, new ArbiterCommentSettings { Root = "repo", Path = "doc.md", Body = "b" }, CancellationToken.None);
+        int exitCode = await new ArbiterCommentCommand(facts, null!, null!, null!, _paths, _environment, _console)
+            .ExecuteAsync(null!, new ArbiterCommentSettings { Root = "repo", Path = "doc.md", Body = "b" }, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Equal(Repo, facts.WithinRoot);
     }
 
     [Fact]
-    public void Comment_AnAbsoluteRoot_IsUsedAsGiven()
+    public async Task Comment_AnAbsoluteRoot_IsUsedAsGiven()
     {
         FileFacts facts = new(containedFile: null);
 
-        _ = new ArbiterCommentCommand(facts, null!, null!, null!, _paths, _environment, _console)
-            .Execute(null!, new ArbiterCommentSettings { Root = "/kw/other", Path = "doc.md", Body = "b" }, CancellationToken.None);
+        _ = await new ArbiterCommentCommand(facts, null!, null!, null!, _paths, _environment, _console)
+            .ExecuteAsync(null!, new ArbiterCommentSettings { Root = "/kw/other", Path = "doc.md", Body = "b" }, CancellationToken.None);
 
         Assert.Equal("/kw/other", facts.WithinRoot);
     }
 
     [Fact]
-    public void Audit_AnEventPlanIsMatchedByItsPathUnderTheRoot_WhetherOrNotThePlanFileExists()
+    public async Task Audit_AnEventPlanIsMatchedByItsPathUnderTheRoot_WhetherOrNotThePlanFileExists()
     {
         _files.CreateDirectory("/kw/work/repo/docs/plans");
         _files.WriteAllText("/kw/work/repo/docs/plans/2026-11-13-a.md", "# A\n");
@@ -122,8 +122,8 @@ public sealed class CliPathSeamTests : IDisposable
         InMemoryRepositoryFileStore store = new(_files);
         PlanArguments plans = new(new ArbiterRepoRoot(_files, _paths, _environment), _files, _paths, _environment, _console);
 
-        int exitCode = new ArbiterAuditCommand(new FixedConfigs(), new RecordingLocator(Repo), audits, store, _paths, _console, plans)
-            .Execute(null!, new ArbiterSettings { Path = Repo, Plan = "docs/plans/2026-11-13-a.md", WorkingDirectory = Repo, Format = "json" }, CancellationToken.None);
+        int exitCode = await new ArbiterAuditCommand(new FixedConfigs(), new RecordingLocator(Repo), audits, store, _paths, _console, plans)
+            .ExecuteAsync(null!, new ArbiterSettings { Path = Repo, Plan = "docs/plans/2026-11-13-a.md", WorkingDirectory = Repo, Format = "json" }, CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.True(audits.Matches("docs/plans/2026-11-13-a.md"));
@@ -159,16 +159,23 @@ public sealed class CliPathSeamTests : IDisposable
             _matches = matchesPlan;
             return new ArbiterAuditReport(0, 0, [], 0, 0);
         }
+
+        public Task<ArbiterAuditReport?> AuditAsync(string repositoryPath, KyberWeaveConfig config, DateTimeOffset? since, string? session, Func<string?, bool>? matchesPlan, DiagnosticReport report, CancellationToken cancellationToken = default)
+        {
+            _matches = matchesPlan;
+            ArbiterAuditReport? audit = new ArbiterAuditReport(0, 0, [], 0, 0);
+            return Task.FromResult<ArbiterAuditReport?>(audit);
+        }
     }
 
     private sealed class RecordingDelivery : IRunDeliveryRunner
     {
         public string? RepoRoot { get; private set; }
 
-        public DeliveryOutcome Run(string repoRoot, KyberWeaveConfig config, DeliveryRequest request)
+        public Task<DeliveryOutcome> RunAsync(string repoRoot, KyberWeaveConfig config, DeliveryRequest request, CancellationToken cancellationToken = default)
         {
             RepoRoot = repoRoot;
-            return new DeliveryOutcome(new DiagnosticReport(), Delivered: false);
+            return Task.FromResult(new DeliveryOutcome(new DiagnosticReport(), Delivered: false));
         }
     }
 
@@ -196,6 +203,12 @@ public sealed class CliPathSeamTests : IDisposable
         public string ResolveRepositoryRoot(string path) => gitRoot;
 
         public string ResolveArbiterDirectory(string path) => throw new NotSupportedException();
+
+        public Task<string> ResolveRepositoryRootAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(gitRoot);
+
+        public Task<string> ResolveArbiterDirectoryAsync(string path, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public string FindGitRoot(string start)
         {

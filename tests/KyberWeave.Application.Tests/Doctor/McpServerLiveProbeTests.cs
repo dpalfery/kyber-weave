@@ -24,33 +24,33 @@ public sealed class McpServerLiveProbeTests
     [InlineData("/kw/repo")]
     [InlineData("/kw/repo/")]
     [InlineData("/kw/other/../repo")]
-    public void AServedRootThatNamesTheSameDirectoryPasses(string served)
+    public async Task AServedRootThatNamesTheSameDirectoryPasses(string served)
     {
-        DoctorCheck check = RootCheck(Probe(served).Run("/kw/repo", Options));
+        DoctorCheck check = RootCheck(await Probe(served).RunAsync("/kw/repo", Options));
 
         Assert.True(check.Passed);
     }
 
     [Fact]
-    public void ARelativeServedRootIsReadAgainstTheWorkingDirectory()
+    public async Task ARelativeServedRootIsReadAgainstTheWorkingDirectory()
     {
-        DoctorCheck check = RootCheck(Probe("../work/../work/repo").Run("/kw/work/repo", Options));
+        DoctorCheck check = RootCheck(await Probe("../work/../work/repo").RunAsync("/kw/work/repo", Options));
 
         Assert.True(check.Passed);
     }
 
     [Fact]
-    public void AServedRootThatNamesAnotherDirectoryFails()
+    public async Task AServedRootThatNamesAnotherDirectoryFails()
     {
-        DoctorCheck check = RootCheck(Probe("/kw/elsewhere").Run("/kw/repo", Options));
+        DoctorCheck check = RootCheck(await Probe("/kw/elsewhere").RunAsync("/kw/repo", Options));
 
         Assert.False(check.Passed);
     }
 
     [Fact]
-    public void AServedRootThePlatformCannotResolveFailsInsteadOfThrowing()
+    public async Task AServedRootThePlatformCannotResolveFailsInsteadOfThrowing()
     {
-        DoctorCheck check = RootCheck(Probe("/kw/re\0po").Run("/kw/repo", Options));
+        DoctorCheck check = RootCheck(await Probe("/kw/re\0po").RunAsync("/kw/repo", Options));
 
         Assert.False(check.Passed);
     }
@@ -75,11 +75,17 @@ public sealed class McpServerLiveProbeTests
 
         public string? WaitForFirstErrorLine(TimeSpan wait) => null;
 
+        public Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
+
         public void SendLine(string line)
         {
         }
 
         public string ReadLine() => _replies.Dequeue();
+
+        public Task<string> ReadLineAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ReadLine());
 
         public void Dispose()
         {

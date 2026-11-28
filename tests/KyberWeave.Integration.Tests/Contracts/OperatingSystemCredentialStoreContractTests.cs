@@ -12,15 +12,22 @@ namespace KyberWeave.Integration.Tests.Contracts;
 /// </summary>
 public sealed class OperatingSystemCredentialStoreContractTests : CredentialStoreContractTests
 {
-    private static readonly Lazy<string?> Unavailable = new(() =>
-        CredentialStoreAvailability.Probe(
+    private string? _unavailable;
+
+    /// <summary>Probes the host's store once, so each test skips rather than fails where there is none.</summary>
+    /// <returns>A task that completes once the probe has answered.</returns>
+    public override async ValueTask InitializeAsync()
+    {
+        await base.InitializeAsync().ConfigureAwait(false);
+        _unavailable = await CredentialStoreAvailability.ProbeAsync(
             OperatingSystemCredentialStore.Create(new ProcessEnvironment()),
-            $"https://kyber-weave-contract-probe-{Guid.NewGuid():N}.invalid"));
+            $"https://kyber-weave-contract-probe-{Guid.NewGuid():N}.invalid").ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     protected override ICredentialStore CreateStore()
     {
-        if (Unavailable.Value is { } reason)
+        if (_unavailable is { } reason)
         {
             Assert.Skip(reason);
         }

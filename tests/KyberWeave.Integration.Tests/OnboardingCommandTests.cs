@@ -18,15 +18,21 @@ namespace KyberWeave.Integration.Tests;
 /// in a test would prove only that the test can register it.
 /// </para>
 /// </remarks>
-public sealed class OnboardingCommandTests : IDisposable
+public sealed class OnboardingCommandTests : IAsyncLifetime
 {
     private const string ConfigRelativePath = ".kyber-weave/kyber-weave.yml";
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary><c>docs onboarding done</c> writes the value and exits zero.</summary>
@@ -36,37 +42,37 @@ public sealed class OnboardingCommandTests : IDisposable
     /// whether it succeeded.
     /// </remarks>
     [Fact]
-    public void DocsOnboardingDoneRecordsTheValueAndExitsZero()
+    public async Task DocsOnboardingDoneRecordsTheValueAndExitsZero()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\n");
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done");
 
         Assert.True(result.ExitCode == 0, $"docs onboarding done exited {result.ExitCode}. {result.Output}");
         Assert.Contains("onboarding: done", ReadConfig().Split('\n').Select(l => l.TrimEnd('\r')), StringComparer.Ordinal);
     }
 
     [Fact]
-    public void DocsOnboardingCanRepairInvalidOnboardingValue()
+    public async Task DocsOnboardingCanRepairInvalidOnboardingValue()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\nonboarding: dnoe\n");
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done");
 
         Assert.True(result.ExitCode == 0, $"docs onboarding done exited {result.ExitCode}. {result.Output}");
         Assert.Contains("onboarding: done", ReadConfig().Split('\n').Select(l => l.TrimEnd('\r')), StringComparer.Ordinal);
     }
 
     [Fact]
-    public void DocsOnboardingNonExistentDirectoryRefusesWithExitTwo()
+    public async Task DocsOnboardingNonExistentDirectoryRefusesWithExitTwo()
     {
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done", Path.Combine(_probe.Root, "non-existent-directory"));
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done", Path.Combine(_probe.Root, "non-existent-directory"));
 
         Assert.True(result.ExitCode == 2, $"Expected exit code 2, got {result.ExitCode}. {result.Output}");
     }
 
     [Fact]
-    public void DocsOnboardingRefusesSymlinkedConfig()
+    public async Task DocsOnboardingRefusesSymlinkedConfig()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\n");
         string configPath = Path.Combine(_probe.Root, ConfigRelativePath);
@@ -74,7 +80,7 @@ public sealed class OnboardingCommandTests : IDisposable
         File.Move(configPath, realPath);
         File.CreateSymbolicLink(configPath, realPath);
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done");
 
         Assert.True(result.ExitCode == 1, $"Expected exit code 1 for symlink, got {result.ExitCode}. {result.Output}");
         Assert.Contains("symbolic link", result.Output, StringComparison.OrdinalIgnoreCase);
@@ -89,11 +95,11 @@ public sealed class OnboardingCommandTests : IDisposable
     /// "done" and "never asked", so declining would leave the run asking on every start.
     /// </remarks>
     [Fact]
-    public void DocsOnboardingDeclinedRecordsTheRefusalAndExitsZero()
+    public async Task DocsOnboardingDeclinedRecordsTheRefusalAndExitsZero()
     {
         _probe.WriteHostConfig("ontology:\n  docs-root: docs\n");
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "declined");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "declined");
 
         Assert.True(result.ExitCode == 0, $"docs onboarding declined exited {result.ExitCode}. {result.Output}");
         Assert.Contains("onboarding: declined", SettingLines(), StringComparer.Ordinal);
@@ -108,7 +114,7 @@ public sealed class OnboardingCommandTests : IDisposable
     /// case pins that the file a repository gets back is its own with one line changed.
     /// </remarks>
     [Fact]
-    public void WritingTheSettingKeepsTheOperatorsCommentsAndKeys()
+    public async Task WritingTheSettingKeepsTheOperatorsCommentsAndKeys()
     {
         string original = """
             # Ours, not the tool's.
@@ -120,7 +126,7 @@ public sealed class OnboardingCommandTests : IDisposable
             """;
         _probe.WriteHostConfig(original + "\n");
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done");
 
         Assert.True(result.ExitCode == 0, $"docs onboarding done exited {result.ExitCode}. {result.Output}");
         string written = ReadConfig();
@@ -138,12 +144,12 @@ public sealed class OnboardingCommandTests : IDisposable
     /// onboarded would be asked again on the next start with no way to see why.
     /// </remarks>
     [Fact]
-    public void AValueOutsideTheTwoIsRefusedAndNothingIsWritten()
+    public async Task AValueOutsideTheTwoIsRefusedAndNothingIsWritten()
     {
         string original = "ontology:\n  docs-root: docs\n";
         _probe.WriteHostConfig(original);
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "maybe");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "maybe");
 
         Assert.True(result.ExitCode != 0, $"docs onboarding maybe exited 0. {result.Output}");
         Assert.Contains("done", result.Output, StringComparison.Ordinal);
@@ -157,33 +163,33 @@ public sealed class OnboardingCommandTests : IDisposable
     /// never added to the composition compiles, and does nothing else.
     /// </remarks>
     [Fact]
-    public void TheDocsBranchHelpListsOnboarding()
+    public async Task TheDocsBranchHelpListsOnboarding()
     {
-        ProbeResult result = _probe.RunCli("docs", "--help");
+        ProbeResult result = await _probe.RunCliAsync("docs", "--help");
 
         Assert.True(result.ExitCode == 0, $"docs --help exited {result.ExitCode}. {result.Output}");
         Assert.Contains("onboarding", result.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PassingAnExistingFileInsteadOfADirectoryReportsItIsAFile()
+    public async Task PassingAnExistingFileInsteadOfADirectoryReportsItIsAFile()
     {
         string filePath = Path.Combine(_probe.Root, "somefile.txt");
-        File.WriteAllText(filePath, "hello");
+        await File.WriteAllTextAsync(filePath, "hello");
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done", filePath);
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done", filePath);
 
         Assert.Equal(2, result.ExitCode);
         ConsoleOutputAssert.ContainsUnwrapped("is a file, not a directory", result.Output);
     }
 
     [Fact]
-    public void RecordingAnswerAgainstBlockOnboardingFailsGracefully()
+    public async Task RecordingAnswerAgainstBlockOnboardingFailsGracefully()
     {
         string original = "ontology:\n  docs-root: docs\nonboarding:\n  nested: block\n";
         _probe.WriteHostConfig(original);
 
-        ProbeResult result = _probe.RunCli("docs", "onboarding", "done");
+        ProbeResult result = await _probe.RunCliAsync("docs", "onboarding", "done");
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("invalid onboarding configuration", result.Output, StringComparison.Ordinal);

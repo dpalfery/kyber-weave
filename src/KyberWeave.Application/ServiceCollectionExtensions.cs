@@ -124,14 +124,14 @@ internal static class ApplicationCoreRegistration
             sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IExclusiveFileWriter>(),
             sp.GetRequiredService<IDocumentSourceFactory>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanFinalizeService>(sp => new PlanFinalizeService(
             sp.GetRequiredService<IRepositoryFileStore>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IDocsSchemaGate>(),
             sp.GetRequiredService<IDocumentSourceFactory>(),
             sp.GetRequiredService<IPlanTaskAgentPickerFactory>(),
@@ -147,7 +147,7 @@ internal static class ApplicationCoreRegistration
     {
         services.TryAddSingleton(sp => new RunDeliveryPorts(
             sp.GetRequiredService<IRepositoryFileStore>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IRunStateStore>(),
             sp.GetRequiredService<IReviewCycleStore>(),
             sp.GetRequiredService<IProcessEnvironment>(),
@@ -291,12 +291,12 @@ internal static class ApplicationAdapterRegistration
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<INotSeatedStore>(sp => new FileNotSeatedStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(
-            sp.GetRequiredService<IProgramRunner>(), sp.GetRequiredService<IFileSystem>()));
+            sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassSources>(sp => new FileTestClassSources(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IPathResolver>()));
-        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
+        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICoverageReportSource>(sp => new FileCoverageReportSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IContainedFileReader>(sp => new FileContainedFileReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICitedSourceFiles>(sp => new FileCitedSourceFiles(

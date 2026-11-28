@@ -34,7 +34,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
     /// completes, because the run is not stopped by the cut.
     /// </summary>
     [Fact]
-    public void ADeadlineCutsAConcurrentGateAndTheRunReturnsWithItsProcessGone()
+    public async Task ADeadlineCutsAConcurrentGateAndTheRunReturnsWithItsProcessGone()
     {
         if (OperatingSystem.IsWindows())
             Assert.Skip("The gates use POSIX sleep and sh.");
@@ -43,7 +43,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
         ReviewGate quick = new("quick", ["git", "--version"], TimeoutSeconds: 30);
 
         long start = Stopwatch.GetTimestamp();
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = await ReviewTestServices.Gates.RunAsync(
             new ReviewConfig { Gates = [slow, quick] }, _root.Path, deadline: TimeSpan.FromSeconds(2));
 
         Assert.True(
@@ -61,7 +61,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
     /// the run. A sequential gate the same cut touches is also not a stop, so the gate declared after it has a result.
     /// </summary>
     [Fact]
-    public void ADeadlineCutOfAConcurrentBlockingGateDoesNotStopTheRun()
+    public async Task ADeadlineCutOfAConcurrentBlockingGateDoesNotStopTheRun()
     {
         if (OperatingSystem.IsWindows())
             Assert.Skip("The gates use POSIX sleep and sh.");
@@ -71,7 +71,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
         ReviewGate after = new("after", ["git", "--version"], TimeoutSeconds: 30);
 
         long start = Stopwatch.GetTimestamp();
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = await ReviewTestServices.Gates.RunAsync(
             new ReviewConfig { Gates = [slow, pivot, after] },
             _root.Path,
             stopOnBlockingFailure: true,
@@ -90,14 +90,14 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
     /// is started for it: its marker file must not exist.
     /// </summary>
     [Fact]
-    public void AConcurrentGateStartedAfterTheDeadlineNeverStartsItsProcess()
+    public async Task AConcurrentGateStartedAfterTheDeadlineNeverStartsItsProcess()
     {
         if (OperatingSystem.IsWindows())
             Assert.Skip("The gate uses sh.");
 
         ReviewGate late = new("late", MarkStartedThenSleep30(), TimeoutSeconds: 60) { Concurrent = true };
 
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = await ReviewTestServices.Gates.RunAsync(
             new ReviewConfig { Gates = [late] }, _root.Path, deadline: TimeSpan.Zero);
 
         GateResult result = Assert.Single(report.Gates);
@@ -112,7 +112,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
     /// outcome and the stop on a failed or still-running concurrent gate, but not this one.
     /// </summary>
     [Fact]
-    public void AConcurrentGateTimedOutOnItsOwnLimitStopsTheRunWithoutADeadline()
+    public async Task AConcurrentGateTimedOutOnItsOwnLimitStopsTheRunWithoutADeadline()
     {
         if (OperatingSystem.IsWindows())
             Assert.Skip("The gates use POSIX sleep.");
@@ -121,7 +121,7 @@ public sealed class GateRunnerConcurrentDeadlineTests : IDisposable
         ReviewGate pivot = new("pivot", Sleep3(), TimeoutSeconds: 30);
         ReviewGate never = new("never-started", ["git", "--version"], TimeoutSeconds: 30);
 
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = await ReviewTestServices.Gates.RunAsync(
             new ReviewConfig { Gates = [slow, pivot, never] }, _root.Path, stopOnBlockingFailure: true);
 
         Assert.Equal(["slow", "pivot"], report.Gates.Select(gate => gate.Id));

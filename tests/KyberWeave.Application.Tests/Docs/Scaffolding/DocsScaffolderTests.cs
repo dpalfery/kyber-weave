@@ -71,23 +71,23 @@ public sealed class DocsScaffolderTests
     [InlineData("6-Docs")]
     [InlineData("doc")]
     [InlineData("documentation")]
-    public void DetectsAnExistingConventionalDocsRoot(string existing)
+    public async Task DetectsAnExistingConventionalDocsRoot(string existing)
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, existing));
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal(existing, result.DocsRoot);
         Assert.Equal(DocsRootSource.Convention, result.DocsRootSource);
     }
 
     [Fact]
-    public void PrefersDocsWhenSeveralConventionalRootsExist()
+    public async Task PrefersDocsWhenSeveralConventionalRootsExist()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "6-Docs"));
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs"));
 
-        Assert.Equal("docs", _host.Scaffolder.Scaffold(_host.Root).DocsRoot);
+        Assert.Equal("docs", (await _host.Scaffolder.ScaffoldAsync(_host.Root)).DocsRoot);
     }
 
     /// <summary>
@@ -97,7 +97,7 @@ public sealed class DocsScaffolderTests
     /// <c>6-Docs</c>) would scaffold into a different tree than validate then reads.
     /// </summary>
     [Fact]
-    public void AnExistingConfigDocsRootWinsOverConventionalDetection()
+    public async Task AnExistingConfigDocsRootWinsOverConventionalDetection()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, ".kyber-weave"));
         WriteFile(
@@ -111,7 +111,7 @@ public sealed class DocsScaffolderTests
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs"));
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "6-Docs"));
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal("6-Docs", result.DocsRoot);
         Assert.Equal(DocsRootSource.Configuration, result.DocsRootSource);
@@ -126,7 +126,7 @@ public sealed class DocsScaffolderTests
     /// default). A re-detected conventional root would diverge.
     /// </summary>
     [Fact]
-    public void InitResolvesToTheSameRootValidateUsesWhenConfigOmitsDocsRoot()
+    public async Task InitResolvesToTheSameRootValidateUsesWhenConfigOmitsDocsRoot()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, ".kyber-weave"));
         WriteFile(
@@ -139,7 +139,7 @@ public sealed class DocsScaffolderTests
         // A docs/ directory would be detected by convention, but validate ignores it.
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs"));
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
         string validateRoot = _host.LoadConfig().Ontology.DocsRoot;
 
         Assert.Equal(validateRoot, result.DocsRoot);
@@ -154,13 +154,13 @@ public sealed class DocsScaffolderTests
     [Theory]
     [InlineData(null)]
     [InlineData("handbook")]
-    public void InvalidHostConfigStopsBeforeAnyScaffoldWrite(string? docsRoot)
+    public async Task InvalidHostConfigStopsBeforeAnyScaffoldWrite(string? docsRoot)
     {
         const string yaml = "ontology: [unclosed";
         WriteHostConfig(yaml);
 
-        InvalidDataException exception = Assert.Throws<InvalidDataException>(
-            () => _host.Scaffolder.Scaffold(_host.Root, docsRoot));
+        InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot));
 
         Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, exception.Message, StringComparison.Ordinal);
         Assert.Contains("kyber-weave.yml", exception.Message, StringComparison.Ordinal);
@@ -169,9 +169,9 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void FallsBackToDocsWhenNoConventionalRootExists()
+    public async Task FallsBackToDocsWhenNoConventionalRootExists()
     {
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal("docs", result.DocsRoot);
         Assert.Equal(DocsRootSource.Convention, result.DocsRootSource);
@@ -179,11 +179,11 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void AnExplicitDocsRootOverridesDetection()
+    public async Task AnExplicitDocsRootOverridesDetection()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs"));
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook");
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook");
 
         Assert.Equal("handbook", result.DocsRoot);
         Assert.Equal(DocsRootSource.Explicit, result.DocsRootSource);
@@ -191,9 +191,9 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void TheEmittedConfigPointsAtTheResolvedDocsRoot()
+    public async Task TheEmittedConfigPointsAtTheResolvedDocsRoot()
     {
-        _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook");
 
         KyberWeaveConfig config = _host.LoadConfig();
 
@@ -205,9 +205,9 @@ public sealed class DocsScaffolderTests
     /// was first built for. A fresh host must not inherit them.
     /// </summary>
     [Fact]
-    public void TheEmittedConfigClearsInheritedFileExclusions()
+    public async Task TheEmittedConfigClearsInheritedFileExclusions()
     {
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         KyberWeaveConfig config = _host.LoadConfig();
 
@@ -215,12 +215,12 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void ExistingFilesAreLeftAloneAndReportedAsSuch()
+    public async Task ExistingFilesAreLeftAloneAndReportedAsSuch()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs"));
         WriteFile(Path.Combine(_host.Root, "docs", "catalog.md"), "hand written");
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal("hand written", Read("docs/catalog.md"));
         ScaffoldedFile catalog = result.Files.Single(f => f.RelativePath == "docs/catalog.md");
@@ -231,12 +231,12 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void ForceOverwritesExistingFiles()
+    public async Task ForceOverwritesExistingFiles()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs"));
         WriteFile(Path.Combine(_host.Root, "docs", "catalog.md"), "hand written");
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, force: true);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, force: true);
 
         Assert.NotEqual("hand written", Read("docs/catalog.md"));
         Assert.True(result.Files.Single(f => f.RelativePath == "docs/catalog.md").Written);
@@ -249,12 +249,12 @@ public sealed class DocsScaffolderTests
     /// reviewed senses.
     /// </summary>
     [Fact]
-    public void FreshInitCreatesOnlyTheNarrowLocalStateIgnoresAndNoEmptyGlossary()
+    public async Task FreshInitCreatesOnlyTheNarrowLocalStateIgnoresAndNoEmptyGlossary()
     {
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
-        Assert.True(_host.CacheSafety.IsSafe(_host.Root));
+        Assert.True(await _host.CacheSafety.IsSafeAsync(_host.Root));
         Assert.False(_host.Memory.FileExists(Path.Combine(_host.Root, "docs", "glossary.md")));
         ScaffoldedFile entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
         Assert.Equal(ScaffoldOutcome.Created, entry.Outcome);
@@ -266,18 +266,18 @@ public sealed class DocsScaffolderTests
     /// not regenerate the rest.
     /// </summary>
     [Fact]
-    public void ForceMergesCacheIgnoreWithoutReplacingExistingLines()
+    public async Task ForceMergesCacheIgnoreWithoutReplacingExistingLines()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, ".kyber-weave"));
         const string existing = "# operator entry\nlocal-notes/";
         WriteFile(Path.Combine(_host.Root, ".kyber-weave", ".gitignore"), existing);
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, force: true);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, force: true);
 
         // The operator's bytes are an exact prefix; the boundary newline and the two narrow
         // entries are the only thing appended.
         Assert.Equal(existing + "\ncache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
-        Assert.True(_host.CacheSafety.IsSafe(_host.Root));
+        Assert.True(await _host.CacheSafety.IsSafeAsync(_host.Root));
         ScaffoldedFile entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
         Assert.Equal(ScaffoldOutcome.Updated, entry.Outcome);
     }
@@ -288,17 +288,17 @@ public sealed class DocsScaffolderTests
     /// safely, while preserving the operator's original lines for inspection.
     /// </summary>
     [Fact]
-    public void InitRepairsAnIneffectiveCacheIgnoreWithoutDiscardingItsLines()
+    public async Task InitRepairsAnIneffectiveCacheIgnoreWithoutDiscardingItsLines()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, ".kyber-weave"));
         const string existing = "cache/\n!cache/docs-analysis.sqlite3\n";
         WriteFile(Path.Combine(_host.Root, ".kyber-weave", ".gitignore"), existing);
-        Assert.False(_host.CacheSafety.IsSafe(_host.Root));
+        Assert.False(await _host.CacheSafety.IsSafeAsync(_host.Root));
 
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal(existing + "cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
-        Assert.True(_host.CacheSafety.IsSafe(_host.Root));
+        Assert.True(await _host.CacheSafety.IsSafeAsync(_host.Root));
     }
 
     /// <summary>
@@ -307,14 +307,14 @@ public sealed class DocsScaffolderTests
     /// nothing, so the merge stays byte-stable for hosts that maintain other local-state rules.
     /// </summary>
     [Fact]
-    public void CacheIgnoreMergeIsIdempotentAndPreservesExistingBytes()
+    public async Task CacheIgnoreMergeIsIdempotentAndPreservesExistingBytes()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, ".kyber-weave"));
         const string existing = "# local state\ncache/\nlocal-notes/\n";
         WriteFile(Path.Combine(_host.Root, ".kyber-weave", ".gitignore"), existing);
 
-        ScaffoldResult first = _host.Scaffolder.Scaffold(_host.Root);
-        ScaffoldResult second = _host.Scaffolder.Scaffold(_host.Root, force: true);
+        ScaffoldResult first = await _host.Scaffolder.ScaffoldAsync(_host.Root);
+        ScaffoldResult second = await _host.Scaffolder.ScaffoldAsync(_host.Root, force: true);
 
         // The operator's bytes are an exact prefix and the receipts entry joins the cache
         // entry without the cache line being regenerated or repeated.
@@ -341,7 +341,7 @@ public sealed class DocsScaffolderTests
     /// Unicode text, and CRLF bytes remain an exact prefix of the result.
     /// </summary>
     [Fact]
-    public void CacheIgnoreMergePreservesExistingEncodingPreambleAndBytePrefix()
+    public async Task CacheIgnoreMergePreservesExistingEncodingPreambleAndBytePrefix()
     {
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, ".kyber-weave"));
         string path = Path.Combine(_host.Root, ".kyber-weave", ".gitignore");
@@ -349,11 +349,11 @@ public sealed class DocsScaffolderTests
         WriteFile(path, existing, Encoding.Unicode);
         byte[] originalBytes = _host.Memory.ReadAllBytes(path);
 
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         byte[] appendedBytes = Encoding.Unicode.GetBytes("\r\ncache/\r\nreceipts/\r\n");
         Assert.Equal(originalBytes.Concat(appendedBytes), _host.Memory.ReadAllBytes(path));
-        Assert.True(_host.CacheSafety.IsSafe(_host.Root));
+        Assert.True(await _host.CacheSafety.IsSafeAsync(_host.Root));
     }
 
     /// <summary>
@@ -363,11 +363,11 @@ public sealed class DocsScaffolderTests
     /// already had. The one thing the run adds is the MCP declaration the file lacks.
     /// </summary>
     [Fact]
-    public void ForceDoesNotOverwriteTheHostConfig()
+    public async Task ForceDoesNotOverwriteTheHostConfig()
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, force: true);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, force: true);
 
         // The operator's file is an exact prefix of what was written; the declaration is the
         // only thing appended after it.
@@ -386,11 +386,11 @@ public sealed class DocsScaffolderTests
     /// never emits, has to survive the edit.
     /// </summary>
     [Fact]
-    public void AnExplicitDocsRootRewritesThatKeyAndNothingElse()
+    public async Task AnExplicitDocsRootRewritesThatKeyAndNothingElse()
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook", force: true);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook", force: true);
 
         KyberWeaveConfig config = _host.LoadConfig();
         Assert.Equal("handbook", config.Ontology.DocsRoot);
@@ -420,17 +420,17 @@ public sealed class DocsScaffolderTests
     /// nothing.
     /// </summary>
     [Fact]
-    public void AnUnchangedDocsRootAppendsOnlyTheMcpDeclaration()
+    public async Task AnUnchangedDocsRootAppendsOnlyTheMcpDeclaration()
     {
         WriteHostConfig(HandMaintainedConfig);
 
-        ScaffoldResult first = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult first = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         string afterFirst = HandMaintainedConfig + McpWiringFixture.AppendedDeclaration();
         Assert.Equal(afterFirst, Read(ConfigPath));
         Assert.Equal(ScaffoldOutcome.Updated, first.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
 
-        ScaffoldResult second = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult second = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal(afterFirst, Read(ConfigPath));
         Assert.Equal(ScaffoldOutcome.Preserved, second.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
@@ -441,7 +441,7 @@ public sealed class DocsScaffolderTests
     /// keys around it stay put.
     /// </summary>
     [Fact]
-    public void AConfigWithoutADocsRootGainsTheKeyInPlace()
+    public async Task AConfigWithoutADocsRootGainsTheKeyInPlace()
     {
         WriteHostConfig(
             """
@@ -450,7 +450,7 @@ public sealed class DocsScaffolderTests
                 - archive
             """);
 
-        _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook");
 
         KyberWeaveConfig config = _host.LoadConfig();
         Assert.Equal("handbook", config.Ontology.DocsRoot);
@@ -462,7 +462,7 @@ public sealed class DocsScaffolderTests
     /// nested mapping may legitimately use the same key name and must remain operator state.
     /// </summary>
     [Fact]
-    public void ANestedDocsRootIsNotMistakenForTheOntologyDocsRoot()
+    public async Task ANestedDocsRootIsNotMistakenForTheOntologyDocsRoot()
     {
         WriteHostConfig(
             """
@@ -471,7 +471,7 @@ public sealed class DocsScaffolderTests
                 docs-root: extension-docs
             """);
 
-        _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook");
 
         string text = Read(ConfigPath);
         Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
@@ -483,7 +483,7 @@ public sealed class DocsScaffolderTests
     /// an inserted key when direct ontology children already establish the block depth.
     /// </summary>
     [Fact]
-    public void AnInsertedDocsRootUsesTheShallowestContentIndent()
+    public async Task AnInsertedDocsRootUsesTheShallowestContentIndent()
     {
         WriteHostConfig(
             """
@@ -492,7 +492,7 @@ public sealed class DocsScaffolderTests
               excluded-files: []
             """);
 
-        _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook");
 
         string text = Read(ConfigPath);
         Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
@@ -504,7 +504,7 @@ public sealed class DocsScaffolderTests
     /// without losing the block it does have.
     /// </summary>
     [Fact]
-    public void AConfigWithoutAnOntologyBlockGainsOne()
+    public async Task AConfigWithoutAnOntologyBlockGainsOne()
     {
         WriteHostConfig(
             """
@@ -514,7 +514,7 @@ public sealed class DocsScaffolderTests
                   directory-name: .agents/agents
             """);
 
-        _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook");
 
         KyberWeaveConfig config = _host.LoadConfig();
         Assert.Equal("handbook", config.Ontology.DocsRoot);
@@ -527,11 +527,11 @@ public sealed class DocsScaffolderTests
     /// overwrite it, but would shadow it — the same loss by a different route.
     /// </summary>
     [Fact]
-    public void TheLegacyRootConfigIsUpdatedRatherThanShadowed()
+    public async Task TheLegacyRootConfigIsUpdatedRatherThanShadowed()
     {
         WriteFile(Path.Combine(_host.Root, "kyber-weave.yml"), HandMaintainedConfig);
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, docsRoot: "handbook", force: true);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot: "handbook", force: true);
 
         Assert.False(_host.Memory.FileExists(Path.Combine(_host.Root, ".kyber-weave", "kyber-weave.yml")));
         Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
@@ -548,18 +548,18 @@ public sealed class DocsScaffolderTests
     /// that hint pointed at a file the tool never produced.
     /// </summary>
     [Fact]
-    public void TheOntologyReferenceTheDiagnosticHintNamesIsEmitted()
+    public async Task TheOntologyReferenceTheDiagnosticHintNamesIsEmitted()
     {
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.True(_host.Memory.FileExists(
             Path.Combine(_host.Root, result.DocsRoot, "documentation-ontology.md")));
     }
 
     [Fact]
-    public void TheSeededCatalogSuppliesTheOwnerTheScaffoldedDocumentsClaim()
+    public async Task TheSeededCatalogSuppliesTheOwnerTheScaffoldedDocumentsClaim()
     {
-        _host.Scaffolder.Scaffold(_host.Root, owner: "platform-team");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, owner: "platform-team");
 
         DocumentSet set = _host.Loader("docs").Load();
 
@@ -576,10 +576,10 @@ public sealed class DocsScaffolderTests
     [InlineData("../escaped")]
     [InlineData("../../escaped")]
     [InlineData("docs/../../escaped")]
-    public void RefusesADocsRootThatEscapesTheRepositoryRoot(string escaping)
+    public async Task RefusesADocsRootThatEscapesTheRepositoryRoot(string escaping)
     {
-        ArgumentException error = Assert.Throws<ArgumentException>(
-            () => _host.Scaffolder.Scaffold(_host.Root, escaping));
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(
+            () => _host.Scaffolder.ScaffoldAsync(_host.Root, escaping));
 
         Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
 
@@ -590,13 +590,13 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void RefusesAnAbsoluteDocsRoot()
+    public async Task RefusesAnAbsoluteDocsRoot()
     {
         string elsewhere = Path.Combine(_host.Memory.Root, "elsewhere");
         _host.Memory.CreateDirectory(elsewhere);
 
-        Assert.Throws<ArgumentException>(
-            () => _host.Scaffolder.Scaffold(_host.Root, Path.Combine(elsewhere, "pwned")));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _host.Scaffolder.ScaffoldAsync(_host.Root, Path.Combine(elsewhere, "pwned")));
 
         Assert.Empty(_host.AllFiles(elsewhere));
     }
@@ -636,18 +636,18 @@ public sealed class DocsScaffolderTests
     [InlineData("platform\nstatus: current")]
     [InlineData("platform | Injected")]
     [InlineData("platform\r\nid: hijacked")]
-    public void RefusesAnOwnerThatWouldInjectStructure(string owner)
+    public async Task RefusesAnOwnerThatWouldInjectStructure(string owner)
     {
-        Assert.Throws<ArgumentException>(
-            () => _host.Scaffolder.Scaffold(_host.Root, owner: owner));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _host.Scaffolder.ScaffoldAsync(_host.Root, owner: owner));
 
         Assert.Empty(_host.AllFiles(_host.Root));
     }
 
     [Fact]
-    public void AcceptsOrdinaryOwnerAndDocsRootValues()
+    public async Task AcceptsOrdinaryOwnerAndDocsRootValues()
     {
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, "team-docs", "platform-team");
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, "team-docs", "platform-team");
 
         Assert.Equal("team-docs", result.DocsRoot);
         Assert.All(result.Files, f => Assert.True(f.Written));
@@ -658,12 +658,12 @@ public sealed class DocsScaffolderTests
     /// document frontmatter parsing without being mistaken for a mapping or comment.
     /// </summary>
     [Fact]
-    public void QuotesYamlSpecialCharactersWithoutChangingTheirValues()
+    public async Task QuotesYamlSpecialCharactersWithoutChangingTheirValues()
     {
         const string docsRoot = "docs'root#manual";
         const string owner = "platform's: \"core\" #1";
 
-        _host.Scaffolder.Scaffold(_host.Root, docsRoot, owner);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot, owner);
 
         OntologyConfig ontology = _host.LoadConfig().Ontology;
         DocumentSet set = _host.Loader(ontology).Load();
@@ -677,11 +677,11 @@ public sealed class DocsScaffolderTests
     /// owner that contains YAML punctuation fails validation only on the --kyber-standards path.
     /// </summary>
     [Fact]
-    public void QuotesYamlSpecialCharactersInKyberStandardsFrontmatter()
+    public async Task QuotesYamlSpecialCharactersInKyberStandardsFrontmatter()
     {
         const string owner = "platform's: \"core\" #1";
 
-        _host.Scaffolder.Scaffold(_host.Root, owner: owner, kyberStandards: true);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, owner: owner, kyberStandards: true);
 
         OntologyConfig ontology = _host.LoadConfig().Ontology;
         DocumentSet set = _host.Loader(ontology).Load();
@@ -693,9 +693,9 @@ public sealed class DocsScaffolderTests
 
     /// <summary>Owner whitespace is canonicalized once so YAML and catalog agree.</summary>
     [Fact]
-    public void TrimsOwnerBeforeWritingFrontmatterAndCatalog()
+    public async Task TrimsOwnerBeforeWritingFrontmatterAndCatalog()
     {
-        _host.Scaffolder.Scaffold(_host.Root, owner: " platform ");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, owner: " platform ");
 
         OntologyConfig ontology = _host.LoadConfig().Ontology;
         DocumentSet set = _host.Loader(ontology).Load();
@@ -707,12 +707,12 @@ public sealed class DocsScaffolderTests
 
     /// <summary>Loaded config values pass the same pre-write validation as CLI values.</summary>
     [Fact]
-    public void RefusesAControlCharacterDecodedFromExistingConfig()
+    public async Task RefusesAControlCharacterDecodedFromExistingConfig()
     {
         const string yaml = "ontology:\n  docs-root: \"docs\\nstatus\"\n";
         WriteHostConfig(yaml);
 
-        Assert.Throws<ArgumentException>(() => _host.Scaffolder.Scaffold(_host.Root));
+        await Assert.ThrowsAsync<ArgumentException>(() => _host.Scaffolder.ScaffoldAsync(_host.Root));
 
         Assert.Equal(yaml, Read(ConfigPath));
         Assert.Single(_host.AllFiles(_host.Root));
@@ -766,7 +766,7 @@ public sealed class DocsScaffolderTests
     /// until someone repairs the file by hand.
     /// </summary>
     [Fact]
-    public void EditsALoneCrHostConfigInPlaceInsteadOfAppendingASecondOntologyBlock()
+    public async Task EditsALoneCrHostConfigInPlaceInsteadOfAppendingASecondOntologyBlock()
     {
         WriteHostConfig(
             "# Ours, not the tool's.\r" +
@@ -775,7 +775,7 @@ public sealed class DocsScaffolderTests
             "  technologies:\r" +
             "    - go\r");
 
-        _host.Scaffolder.Scaffold(_host.Root, "docs", reviewGates: false);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs", reviewGates: false);
 
         // The load is the assertion that matters: it is what raised a duplicate-key error before
         // the writer read the file under its own line endings.
@@ -796,9 +796,9 @@ public sealed class DocsScaffolderTests
     [Theory]
     [InlineData(null)]
     [InlineData("handbook")]
-    public void AFreshlyScaffoldedCorpusPassesDocsValidate(string? docsRoot)
+    public async Task AFreshlyScaffoldedCorpusPassesDocsValidate(string? docsRoot)
     {
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, docsRoot);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, docsRoot);
 
         OntologyConfig ontology = _host.LoadConfig().Ontology;
         DocumentSet set = _host.Loader(ontology).Load();
@@ -816,9 +816,9 @@ public sealed class DocsScaffolderTests
     /// someone remembered to make it is a folder half the repositories will not have.
     /// </summary>
     [Fact]
-    public void CreatesEveryCanonicalFolderWithItsOwnIndex()
+    public async Task CreatesEveryCanonicalFolderWithItsOwnIndex()
     {
-        _host.Scaffolder.Scaffold(_host.Root, "docs");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs");
 
         foreach (string folder in DocsLayout.Folders)
         {
@@ -828,9 +828,9 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void PublishesTheRegistryInANewAgentsFileWhenTheRepositoryHasNone()
+    public async Task PublishesTheRegistryInANewAgentsFileWhenTheRepositoryHasNone()
     {
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, "docs");
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs");
 
         string agents = Read("AGENTS.md");
         Assert.Contains(ConfigRegMarkdown.StartMarker, agents, StringComparison.Ordinal);
@@ -845,7 +845,7 @@ public sealed class DocsScaffolderTests
     /// registry sends agents to paths that moved.
     /// </summary>
     [Fact]
-    public void RewritesOnlyTheGeneratedRegionOfAHandAuthoredAgentsFile()
+    public async Task RewritesOnlyTheGeneratedRegionOfAHandAuthoredAgentsFile()
     {
         WriteFile(Path.Combine(_host.Root, "AGENTS.md"),
             $"""
@@ -862,7 +862,7 @@ public sealed class DocsScaffolderTests
             Also hand-authored.
             """);
 
-        _host.Scaffolder.Scaffold(_host.Root, "docs", force: false);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs", force: false);
 
         string agents = Read("AGENTS.md");
         Assert.Contains("Hand-authored guidance that must survive.", agents, StringComparison.Ordinal);
@@ -872,47 +872,47 @@ public sealed class DocsScaffolderTests
     }
 
     [Fact]
-    public void RendersAutonomyAsAPropertyLineOnlyWhenTheKeyIsSet()
+    public async Task RendersAutonomyAsAPropertyLineOnlyWhenTheKeyIsSet()
     {
-        _host.Scaffolder.Scaffold(_host.Root, "docs");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs");
         Assert.DoesNotContain("<autonomy>", Read("AGENTS.md"), StringComparison.Ordinal);
 
         WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: autonomous\n");
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Contains("- **<autonomy>**: `autonomous`\n", Read("AGENTS.md"), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AutonomyRenderingIsIdempotentAndFollowsTheSetting()
+    public async Task AutonomyRenderingIsIdempotentAndFollowsTheSetting()
     {
         WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: supervised\n");
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
         string first = Read("AGENTS.md");
 
-        ScaffoldResult second = _host.Scaffolder.Scaffold(_host.Root);
+        ScaffoldResult second = await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         Assert.Equal(first, Read("AGENTS.md"));
         Assert.Contains(second.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Preserved });
 
         WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: autonomous\n");
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
         string agents = Read("AGENTS.md");
         Assert.Contains("`autonomous`", agents, StringComparison.Ordinal);
         Assert.DoesNotContain("`supervised`", agents, StringComparison.Ordinal);
 
         WriteHostConfig("ontology:\n  docs-root: docs\n");
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
         Assert.DoesNotContain("<autonomy>", Read("AGENTS.md"), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RerunningLeavesAnAlreadyCurrentRegistryAlone()
+    public async Task RerunningLeavesAnAlreadyCurrentRegistryAlone()
     {
-        _host.Scaffolder.Scaffold(_host.Root, "docs");
+        await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs");
         string first = Read("AGENTS.md");
 
-        ScaffoldResult second = _host.Scaffolder.Scaffold(_host.Root, "docs");
+        ScaffoldResult second = await _host.Scaffolder.ScaffoldAsync(_host.Root, "docs");
 
         Assert.Equal(first, Read("AGENTS.md"));
         Assert.Contains(second.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Preserved });
@@ -923,11 +923,11 @@ public sealed class DocsScaffolderTests
     /// the frontmatter value — so a freshly scaffolded standard validates without an edit.
     /// </summary>
     [Fact]
-    public void ADeclaredTechnologyIsScaffoldedPublishedAndValid()
+    public async Task ADeclaredTechnologyIsScaffoldedPublishedAndValid()
     {
         WriteHostConfig("ontology:\n  docs-root: docs\n  technologies:\n    - github-actions\n");
 
-        _host.Scaffolder.Scaffold(_host.Root);
+        await _host.Scaffolder.ScaffoldAsync(_host.Root);
 
         string standard = Read("docs/standards/github-actions/github-actions.standards.md");
         Assert.Contains("doc-type: coding-standard", standard, StringComparison.Ordinal);
@@ -948,12 +948,12 @@ public sealed class DocsScaffolderTests
     /// unclosed marker, and which content that is cannot be known here.
     /// </summary>
     [Fact]
-    public void RefusesToGuessAtAnUnclosedMarker()
+    public async Task RefusesToGuessAtAnUnclosedMarker()
     {
         WriteFile(Path.Combine(_host.Root, "AGENTS.md"),
             $"# Working here\n\n{ConfigRegMarkdown.StartMarker}\n\n## Mine\n\nKeep me.\n");
 
-        Assert.Throws<InvalidDataException>(() => _host.Scaffolder.Scaffold(_host.Root, "docs"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => _host.Scaffolder.ScaffoldAsync(_host.Root, "docs"));
         Assert.Contains("Keep me.", Read("AGENTS.md"), StringComparison.Ordinal);
     }
 
@@ -963,11 +963,11 @@ public sealed class DocsScaffolderTests
     /// and AGENTS.md Config Reg, and passes docs validation cleanly.
     /// </summary>
     [Fact]
-    public void ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllRichStandardsAndUpdatesConfig()
+    public async Task ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllRichStandardsAndUpdatesConfig()
     {
         string today = MemoryScaffoldHost.Today;
 
-        ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, kyberStandards: true);
+        ScaffoldResult result = await _host.Scaffolder.ScaffoldAsync(_host.Root, kyberStandards: true);
 
         // All 11 standards under <docs-root>/standards/<tech>/ are created with their four files
         Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
@@ -1022,7 +1022,7 @@ public sealed class DocsScaffolderTests
     /// and overwrites them with the rich template when force is true.
     /// </summary>
     [Fact]
-    public void ScaffoldWithKyberStandardsSkipsExistingWithoutForceAndOverwritesWithForce()
+    public async Task ScaffoldWithKyberStandardsSkipsExistingWithoutForceAndOverwritesWithForce()
     {
         string today = MemoryScaffoldHost.Today;
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs", "standards", "csharp"));
@@ -1044,14 +1044,14 @@ public sealed class DocsScaffolderTests
         WriteFile(Path.Combine(_host.Root, "docs", "standards", "csharp", "csharp.standards.md"), customText);
 
         // Run without force -> Skipped, file untouched
-        ScaffoldResult result1 = _host.Scaffolder.Scaffold(_host.Root, kyberStandards: true, force: false);
+        ScaffoldResult result1 = await _host.Scaffolder.ScaffoldAsync(_host.Root, kyberStandards: true, force: false);
         ScaffoldedFile csharpFile1 = result1.Files.Single(f => f.RelativePath == "docs/standards/csharp/csharp.standards.md");
         Assert.Equal(ScaffoldOutcome.Skipped, csharpFile1.Outcome);
         Assert.False(csharpFile1.Written);
         Assert.Equal(customText, Read("docs/standards/csharp/csharp.standards.md"));
 
         // Run with force -> Updated, file overwritten with rich template
-        ScaffoldResult result2 = _host.Scaffolder.Scaffold(_host.Root, kyberStandards: true, force: true);
+        ScaffoldResult result2 = await _host.Scaffolder.ScaffoldAsync(_host.Root, kyberStandards: true, force: true);
         ScaffoldedFile csharpFile2 = result2.Files.Single(f => f.RelativePath == "docs/standards/csharp/csharp.standards.md");
         Assert.Equal(ScaffoldOutcome.Updated, csharpFile2.Outcome);
         Assert.True(csharpFile2.Written);

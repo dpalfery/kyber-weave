@@ -56,6 +56,23 @@ public sealed class CursorHookAdapterTests
             SeenPostToolOutput = toolOutput;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private sealed class ContextualEngine : IContextualHookDecisionEngine
@@ -117,6 +134,53 @@ public sealed class CursorHookAdapterTests
             SeenPostSessionId = sessionId;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel,
+            string? deliveredPrompt,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(
+                harness, caller, target, prompt, config, context, toolCallId, sessionId));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context, toolCallId, sessionId));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
@@ -125,7 +189,7 @@ public sealed class CursorHookAdapterTests
     private static string Fixture(string name) =>
         EmbeddedFixtureText.Read(typeof(CursorHookAdapterTests).Assembly, $"arbiter-hooks/cursor/{name}");
 
-    private static (int Exit, string Stdout, string Log) Run(
+    private static async Task<(int Exit, string Stdout, string Log)> Run(
         string stdin,
         string? caller,
         IHookDecisionEngine engine,
@@ -137,18 +201,18 @@ public sealed class CursorHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(CursorHookAdapter.Token, caller, stdin, stdout, log);
+        int exit = await command.RunAsync(CursorHookAdapter.Token, caller, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
     [Fact]
-    public void PreDispatch_Deny_WritesDenyShape()
+    public async Task PreDispatch_Deny_WritesDenyShape()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -158,9 +222,9 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
+    public async Task PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
     {
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("pre-task-dispatch.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -177,12 +241,12 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_Allow_NonSpecialistTarget_WritesAllowOnly()
+    public async Task PreDispatch_Allow_NonSpecialistTarget_WritesAllowOnly()
     {
         string stdin = Fixture("pre-task-dispatch.json").Replace(
             "\"subagent_type\": \"dev-medium\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
-        (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(stdin, null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -191,7 +255,7 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_AllowWithRewrite_WritesRewrittenInput()
+    public async Task PreDispatch_AllowWithRewrite_WritesRewrittenInput()
     {
         const string rewritten = """{"prompt":"Hello.","subagent_type":"dev-medium"}""";
         ScriptedEngine engine = new()
@@ -199,7 +263,7 @@ public sealed class CursorHookAdapterTests
             PreResult = new HookOutcome(HookOutcomeKind.AllowWithRewrite, RewrittenInputJson: rewritten),
         };
 
-        (int exit, string stdout, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -208,11 +272,11 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_TargetAndPrompt_ComeFromSubagentTypeAndPrompt()
+    public async Task PreDispatch_TargetAndPrompt_ComeFromSubagentTypeAndPrompt()
     {
         ScriptedEngine engine = new();
 
-        (int exit, _, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, _, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
         Assert.Equal("dev-medium", engine.SeenPreTarget);
@@ -221,7 +285,7 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_MissingTarget_CallsEngineWithAbsentTarget()
+    public async Task PreDispatch_MissingTarget_CallsEngineWithAbsentTarget()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: undecidable (step 0)";
@@ -236,7 +300,7 @@ public sealed class CursorHookAdapterTests
 
         // The target fact is absent, so the rules answer undecidable (escalated
         // here): the event is classified, not pass-through.
-        int exit = command.Run(CursorHookAdapter.Token, null, Fixture("pre-task-no-target.json"), stdout, log);
+        int exit = await command.RunAsync(CursorHookAdapter.Token, null, Fixture("pre-task-no-target.json"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, loads);
@@ -249,7 +313,7 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_NonDispatchTool_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_NonDispatchTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -260,7 +324,7 @@ public sealed class CursorHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(CursorHookAdapter.Token, null, Fixture("pre-non-dispatch.json"), stdout, log);
+        int exit = await command.RunAsync(CursorHookAdapter.Token, null, Fixture("pre-non-dispatch.json"), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -269,7 +333,7 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PreDispatch_LowercaseTaskTool_PassesThroughWithoutLoadingConfig()
+    public async Task PreDispatch_LowercaseTaskTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -283,7 +347,7 @@ public sealed class CursorHookAdapterTests
         using StringWriter log = new();
 
         // The dispatch tool matches exactly: lowercase "task" is not a dispatch.
-        int exit = command.Run(CursorHookAdapter.Token, null, stdin, stdout, log);
+        int exit = await command.RunAsync(CursorHookAdapter.Token, null, stdin, stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -291,13 +355,13 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Block_WritesAdditionalContext()
+    public async Task PostDispatch_Block_WritesAdditionalContext()
     {
         const string note =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -305,13 +369,13 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Deny_AlsoWritesAdditionalContext()
+    public async Task PostDispatch_Deny_AlsoWritesAdditionalContext()
     {
         const string note =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.Deny, note) };
 
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -319,23 +383,23 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void PostDispatch_Allow_WritesEmptyObject()
+    public async Task PostDispatch_Allow_WritesEmptyObject()
     {
-        (int exit, string stdout, _) = Run(Fixture("post-task-completed.json"), null, new ScriptedEngine());
+        (int exit, string stdout, _) = await Run(Fixture("post-task-completed.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
         Assert.Equal("{}", stdout);
     }
 
     [Fact]
-    public void PostDispatch_AnExplicitNullToolOutput_AllowsRatherThanScanningTheWordNull()
+    public async Task PostDispatch_AnExplicitNullToolOutput_AllowsRatherThanScanningTheWordNull()
     {
         // An explicit `"tool_output": null` is not the four-letter string "null". Reading
         // it through GetRawText() handed the engine that literal and nothing else, so the
         // post-dispatch scan judged an absent result by its own spelling.
         ScriptedEngine engine = new();
 
-        (int exit, string stdout, string log) = Run(
+        (int exit, string stdout, string log) = await Run(
             """
             {"hook_event_name":"postToolUse","tool_name":"Task","tool_use_id":"toolu-cursor-post-1",
              "tool_input":{"prompt":"Implement the adapter.","subagent_type":"dev-medium"},
@@ -353,12 +417,12 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void Pairing_PreAndPost_UseToolUseId()
+    public async Task Pairing_PreAndPost_UseToolUseId()
     {
         ContextualEngine engine = new();
 
-        (int preExit, _, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
-        (int postExit, _, _) = Run(Fixture("post-task-completed.json"), null, engine);
+        (int preExit, _, _) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int postExit, _, _) = await Run(Fixture("post-task-completed.json"), null, engine);
 
         Assert.Equal(0, preExit);
         Assert.Equal(0, postExit);
@@ -370,11 +434,11 @@ public sealed class CursorHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_AllowsAndLogs()
+    public async Task InternalError_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, string log) = Run(Fixture("pre-task-dispatch.json"), null, engine);
+        (int exit, string stdout, string log) = await Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);

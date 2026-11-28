@@ -22,5 +22,7 @@ public interface IArbiterHookRefresher
     /// projects were refreshed and how many failed, so the caller can report the real outcome
     /// rather than the number of inputs.
     /// </summary>
-    ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots);
+    Task<ArbiterHookRefreshResult> RefreshAsync(
+        IReadOnlyList<string> projectRoots,
+        CancellationToken cancellationToken = default);
 }

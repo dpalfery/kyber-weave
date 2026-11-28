@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Core.Arbiter.Providers;
 
 namespace KyberWeave.Tests;
 
@@ -10,6 +11,6 @@ internal static class TestAssemblyDefaults
 {
     internal static void DisableLivePacketCheck()
     {
-        DocsTasksCommand.PacketProviderOverride = _ => null;
+        DocsTasksCommand.PacketProviderOverride = (_, _) => Task.FromResult<IArbiterProvider?>(null);
     }
 }

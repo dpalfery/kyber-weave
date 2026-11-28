@@ -157,9 +157,7 @@ internal sealed class MemoryDocsHost
         services.AddSingleton<IMcpConfigFiles>(new InMemoryMcpConfigFiles(Files));
         services.AddSingleton<IIdGenerator>(Ids);
         services.AddSingleton<IProcessRunner>(Processes);
-        services.AddSingleton<IBoundedProcessExecutor>(Processes);
-        services.AddSingleton<IProgramRunner>(Processes);
-        services.AddSingleton<IProcessExecutor>(Processes);
+        services.AddSingleton<IProcessRunner>(Processes);
         services.AddSingleton<TimeProvider>(Clock);
         services.AddSingleton<IConsole>(Streams);
         services.AddSingleton<Spectre.Console.IAnsiConsole>(Console);
@@ -181,10 +179,12 @@ internal sealed class MemoryDocsHost
 internal sealed class UnreachedAnalysisPersistenceFactory : KyberWeave.Contracts.Repositories.IAnalysisPersistenceFactory
 {
     /// <inheritdoc />
-    public bool IsCacheSafe(string repositoryRoot) => throw Unreached();
+    public Task<bool> IsCacheSafeAsync(string repositoryRoot, CancellationToken cancellationToken = default) => throw Unreached();
 
     /// <inheritdoc />
-    public KyberWeave.Core.Docs.Analysis.IAnalysisPersistence Open(string repositoryRoot) => throw Unreached();
+    public Task<KyberWeave.Core.Docs.Analysis.IAnalysisPersistence> OpenAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default) => throw Unreached();
 
     private static InvalidOperationException Unreached() => new("The case replaced the cache factory, so it must not be reached.");
 }

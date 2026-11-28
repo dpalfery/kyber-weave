@@ -118,7 +118,7 @@ public sealed class ArbiterConsoleSeamTests
     /// and the lifting applied to one console while rows were written to the other.
     /// </summary>
     [Fact]
-    public void Status_WritesItsGatingRowsToItsOwnConsole()
+    public async Task Status_WritesItsGatingRowsToItsOwnConsole()
     {
         TestConsole console = new();
         console.Profile.Width = 200;
@@ -131,7 +131,7 @@ public sealed class ArbiterConsoleSeamTests
             new OneRowGating(),
             console);
 
-        _ = command.Execute(null!, new ArbiterSettings { Path = NoRepository });
+        _ = await command.ExecuteAsync(null!, new ArbiterSettings { Path = NoRepository }, CancellationToken.None);
 
         Assert.Contains("GLOBAL scope", console.Output, StringComparison.Ordinal);
         Assert.Contains("PROJECT scope", console.Output, StringComparison.Ordinal);
@@ -167,7 +167,7 @@ public sealed class ArbiterConsoleSeamTests
     /// run and its own output is read back.
     /// </summary>
     [Fact]
-    public void Composition_HandsEveryArbiterCommandTheConsoleItRegistered()
+    public async Task Composition_HandsEveryArbiterCommandTheConsoleItRegistered()
     {
         using InMemoryArbiterHost host = InMemoryArbiterHost.Create();
         TestConsole console = host.Console;
@@ -175,37 +175,39 @@ public sealed class ArbiterConsoleSeamTests
 
         // Each command runs in a state that prints and changes nothing: a usage error, an unreadable path, or the
         // defaults an empty configuration yields.
-        List<(string Command, Func<int> Run)> commands =
+        // The converted commands run on their token; the still-synchronous commands are wrapped, so the list holds one
+        // shape and every entry awaits.
+        List<(string Command, Func<CancellationToken, Task<int>> Run)> commands =
         [
-            ("arbiter validate", () => host.Command<ArbiterValidateCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository, Format = "json" })),
-            ("arbiter rules", () => host.Command<ArbiterRulesCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository })),
-            ("arbiter plan", () => host.Command<ArbiterPlanCommand>()
-                .Execute(null!, new ArbiterSettings { Path = Path.Combine(noRepository, "plan.md"), Format = "json" })),
-            ("arbiter eval", () => host.Command<ArbiterEvalCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository, Format = "json" })),
-            ("arbiter audit", () => host.Command<ArbiterAuditCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository })),
-            ("arbiter tune", () => host.Command<ArbiterTuneCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository })),
-            ("arbiter setup", () => host.Command<ArbiterSetupCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository, Provider = "no-such-provider" })),
-            ("arbiter status", () => host.Command<ArbiterStatusCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository })),
-            ("arbiter doctor", () => host.Command<ArbiterDoctorCommand>()
-                .Execute(null!, new ArbiterSettings { Path = noRepository })),
-            ("arbiter sections", () => host.Command<ArbiterSectionsCommand>()
-                .Execute(null!, new ArbiterSectionsSettings())),
-            ("arbiter comment", () => host.Command<ArbiterCommentCommand>()
-                .Execute(null!, new ArbiterCommentSettings())),
-            ("arbiter install", () => host.Command<ArbiterInstallCommand>()
-                .Execute(null!, new ArbiterInstallSettings { Target = "no-such-target" })),
-            ("arbiter uninstall", () => host.Command<ArbiterUninstallCommand>()
-                .Execute(null!, new ArbiterUninstallSettings { Target = "no-such-target" })),
+            ("arbiter validate", token => Task.FromResult(host.Command<ArbiterValidateCommand>()
+                .Execute(null!, new ArbiterSettings { Path = noRepository, Format = "json" }, token))),
+            ("arbiter rules", token => Task.FromResult(host.Command<ArbiterRulesCommand>()
+                .Execute(null!, new ArbiterSettings { Path = noRepository }, token))),
+            ("arbiter plan", token => Task.FromResult(host.Command<ArbiterPlanCommand>()
+                .Execute(null!, new ArbiterSettings { Path = Path.Combine(noRepository, "plan.md"), Format = "json" }, token))),
+            ("arbiter eval", token => host.Command<ArbiterEvalCommand>()
+                .ExecuteAsync(null!, new ArbiterSettings { Path = noRepository, Format = "json" }, token)),
+            ("arbiter audit", token => host.Command<ArbiterAuditCommand>()
+                .ExecuteAsync(null!, new ArbiterSettings { Path = noRepository }, token)),
+            ("arbiter tune", token => host.Command<ArbiterTuneCommand>()
+                .ExecuteAsync(null!, new ArbiterSettings { Path = noRepository }, token)),
+            ("arbiter setup", token => host.Command<ArbiterSetupCommand>()
+                .ExecuteAsync(null!, new ArbiterSettings { Path = noRepository, Provider = "no-such-provider" }, token)),
+            ("arbiter status", token => host.Command<ArbiterStatusCommand>()
+                .ExecuteAsync(null!, new ArbiterSettings { Path = noRepository }, token)),
+            ("arbiter doctor", token => host.Command<ArbiterDoctorCommand>()
+                .ExecuteAsync(null!, new ArbiterSettings { Path = noRepository }, token)),
+            ("arbiter sections", token => host.Command<ArbiterSectionsCommand>()
+                .ExecuteAsync(null!, new ArbiterSectionsSettings(), token)),
+            ("arbiter comment", token => host.Command<ArbiterCommentCommand>()
+                .ExecuteAsync(null!, new ArbiterCommentSettings(), token)),
+            ("arbiter install", token => host.Command<ArbiterInstallCommand>()
+                .ExecuteAsync(null!, new ArbiterInstallSettings { Target = "no-such-target" }, token)),
+            ("arbiter uninstall", token => host.Command<ArbiterUninstallCommand>()
+                .ExecuteAsync(null!, new ArbiterUninstallSettings { Target = "no-such-target" }, token)),
         ];
 
-        foreach ((string command, Func<int> run) in commands)
+        foreach ((string command, Func<CancellationToken, Task<int>> run) in commands)
         {
             int before = console.Output.Length;
             int exitCode = 0;
@@ -213,7 +215,7 @@ public sealed class ArbiterConsoleSeamTests
             // The process-wide console is captured for the run, so a command that still reaches it is caught even when
             // it also writes something to the injected one.
             CapturedConsoleExecution<int> processConsole =
-                ProcessConsoleCapture.Run(() => exitCode = run(), width: 200);
+                await ProcessConsoleCapture.RunAsync(async () => exitCode = await run(CancellationToken.None).ConfigureAwait(false));
 
             Assert.True(
                 console.Output.Length > before,
@@ -254,15 +256,22 @@ public sealed class ArbiterConsoleSeamTests
     /// <summary>Resolves no key: the provider in these tests is <c>none</c>, which needs none.</summary>
     private sealed class NoKeyService : IArbiterKeyService
     {
-        public string? ResolveKey(KyberWeaveConfig config, string endpoint) => null;
+        public Task<string?> ResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
 
-        public string? ResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
+        public Task<string?> ResolveKeyAsync(
+            KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
 
-        public string? TryResolveKey(KyberWeaveConfig config, string endpoint) => null;
+        public Task<string?> TryResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
 
-        public string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint) => null;
+        public Task<string?> TryResolveKeyAsync(
+            KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
 
-        public Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config) => _ => null;
+        public Func<Uri, CancellationToken, Task<string?>> CreateKeyResolverAsync(KyberWeaveConfig config) =>
+            (_, _) => Task.FromResult<string?>(null);
     }
 
     /// <summary>Holds no global targets, so the status report's GLOBAL section is the empty notice.</summary>
@@ -287,6 +296,12 @@ public sealed class ArbiterConsoleSeamTests
         public string ResolveRepositoryRoot(string path) => path;
 
         public string ResolveArbiterDirectory(string path) => path + "/artifacts/arbiter";
+
+        public Task<string> ResolveRepositoryRootAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(path);
+
+        public Task<string> ResolveArbiterDirectoryAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromResult(path + "/artifacts/arbiter");
 
         public string FindGitRoot(string start) => start;
     }

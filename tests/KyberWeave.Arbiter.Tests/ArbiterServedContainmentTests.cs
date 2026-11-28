@@ -54,20 +54,20 @@ public sealed class ArbiterServedContainmentTests : IDisposable
 
     /// <summary>A document over the size cap through the served tool is an error answer, not a read of the whole file.</summary>
     [Fact]
-    public void AnOversizedDocumentThroughTheSectionsToolIsAnErrorAnswer()
+    public async Task AnOversizedDocumentThroughTheSectionsToolIsAnErrorAnswer()
     {
         _ = _host.Write(Path.Combine(_host.RepoRoot, "docs", "big.md"), "# Big\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
 
-        JsonElement root = ErrorOnly(Tools().SelectRelevantDocumentSections("docs/big.md", "Change the install steps."));
+        JsonElement root = ErrorOnly(await Tools().SelectRelevantDocumentSectionsAsync("docs/big.md", "Change the install steps."));
 
         Assert.Contains("larger than", root.GetProperty("error").GetString(), StringComparison.Ordinal);
     }
 
     /// <summary>A sections request for a file outside the root is refused with the containment error, the same wording the comment tool uses.</summary>
     [Fact]
-    public void ASectionsRequestOutsideTheRootIsAnErrorAnswer()
+    public async Task ASectionsRequestOutsideTheRootIsAnErrorAnswer()
     {
-        string json = Tools().SelectRelevantDocumentSections(WriteOutsideDocument(), "Change the install steps.");
+        string json = await Tools().SelectRelevantDocumentSectionsAsync(WriteOutsideDocument(), "Change the install steps.");
 
         string message = ErrorOnly(json).GetProperty("error").GetString() ?? string.Empty;
         Assert.Contains(OutsideMessageStem, message, StringComparison.Ordinal);
@@ -75,13 +75,13 @@ public sealed class ArbiterServedContainmentTests : IDisposable
 
     /// <summary>A comment on a file outside the root is refused with the same error shape and wording as the sections tool.</summary>
     [Fact]
-    public void ACommentOutsideTheRootHasTheSameErrorShapeAsTheSectionsTool()
+    public async Task ACommentOutsideTheRootHasTheSameErrorShapeAsTheSectionsTool()
     {
         string outside = WriteOutsideDocument();
         ArbiterTools tools = Tools();
 
-        string sections = tools.SelectRelevantDocumentSections(outside, "Change the install steps.");
-        string comment = tools.ClassifyBotReviewComment(outside, 2, "Shorten this heading.", null);
+        string sections = await tools.SelectRelevantDocumentSectionsAsync(outside, "Change the install steps.");
+        string comment = await tools.ClassifyBotReviewCommentAsync(outside, 2, "Shorten this heading.", null);
 
         Assert.Equal(
             ErrorOnly(sections).GetProperty("error").GetString(),
@@ -91,10 +91,10 @@ public sealed class ArbiterServedContainmentTests : IDisposable
 
     /// <summary>The CLI comment command refuses a cited file outside the root: exit 1, the containment message, and no decision.</summary>
     [Fact]
-    public void TheCommentCommandRefusesAFileOutsideTheRoot()
+    public async Task TheCommentCommandRefusesAFileOutsideTheRoot()
     {
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun run = _host.Run(() => command.Execute(
+        ArbiterCommandRun run = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -102,7 +102,8 @@ public sealed class ArbiterServedContainmentTests : IDisposable
                 Path = WriteOutsideDocument(),
                 Line = 2,
                 Body = "Shorten this heading.",
-            }));
+            },
+            token));
 
         Assert.Equal(1, run.ExitCode);
         ConsoleOutputAssert.ContainsUnwrapped(OutsideMessageStem, run.Output);

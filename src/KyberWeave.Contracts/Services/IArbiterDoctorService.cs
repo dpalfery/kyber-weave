@@ -75,12 +75,18 @@ public interface IArbiterDoctorService
     public const string GlobalUnlisted = "KW-ARB-GLOBAL-001";
 
     /// <summary>
-    /// Runs every check and reports findings. A malformed override still leaves the product defaults to diagnose, so
-    /// one bad file never hides the remaining checks. Writes nothing.
+    /// Runs every check and reports findings without blocking a thread: the repository root, the key and the git
+    /// ignore check are awaited rather than waited on. A malformed override still leaves the product defaults to
+    /// diagnose, so one bad file never hides the remaining checks. Writes nothing.
     /// </summary>
     /// <param name="repositoryPath">The repository path the command was pointed at.</param>
     /// <param name="configFile">The <c>--config</c> path, or null.</param>
     /// <param name="report">Receives the findings.</param>
+    /// <param name="cancellationToken">Cancels the git run, the credential-store lookup and kills the process tree.</param>
     /// <returns>What the run found, for the host to print.</returns>
-    ArbiterDoctorReport Inspect(string repositoryPath, string? configFile, DiagnosticReport report);
+    Task<ArbiterDoctorReport> InspectAsync(
+        string repositoryPath,
+        string? configFile,
+        DiagnosticReport report,
+        CancellationToken cancellationToken = default);
 }

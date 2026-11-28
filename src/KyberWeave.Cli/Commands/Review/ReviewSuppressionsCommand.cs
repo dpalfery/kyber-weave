@@ -22,7 +22,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     value that is refused before anything runs.
 /// </para>
 /// </remarks>
-public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service, IConsole standard, IAnsiConsole ansi) : Command<ReviewSuppressionsSettings>
+public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service, IConsole standard, IAnsiConsole ansi) : AsyncCommand<ReviewSuppressionsSettings>
 {
     /// <summary>A suppression the change added without stating a reason.</summary>
     public const string UnreasonedSuppression = ReviewSuppressionOutcome.NoReason;
@@ -31,14 +31,14 @@ public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service
     public const string ChangeUnreadable = ReviewSuppressionOutcome.ChangeUnreadable;
 
     /// <inheritdoc />
-    public override int Execute(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, ReviewSuppressionsSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        ReviewCommandResult result = service.Run(
+        ReviewCommandResult result = await service.RunAsync(
             new ReviewSuppressionsRequest(settings.Path, settings.BaseRef),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (result.ClientError is not null)
         {

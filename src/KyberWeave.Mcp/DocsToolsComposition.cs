@@ -107,7 +107,7 @@ internal static class DocsToolsComposition
             repositoryRoot,
             provider.GetRequiredService<IDocsQueryService>(),
             provider.GetRequiredService<IRepositoryDoctor>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>(),
+            provider.GetRequiredService<IProcessRunner>(),
             provider.GetRequiredService<IProcessEnvironment>()));
     }
 
@@ -140,7 +140,7 @@ internal static class DocsToolsComposition
     /// <param name="provider">The container the ports are resolved from.</param>
     /// <param name="repositoryRoot">The bound repository root.</param>
     /// <param name="refreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
-    public static CodeGraphFreshness Freshness(IServiceProvider provider, string repositoryRoot, bool refreshEnabled)
+    public static ICodeGraphFreshnessGate Freshness(IServiceProvider provider, string repositoryRoot, bool refreshEnabled)
     {
         ArgumentNullException.ThrowIfNull(provider);
         return new CodeGraphFreshness(
@@ -152,8 +152,7 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IFileSystem>(),
             provider.GetRequiredService<IPathResolver>(),
             provider.GetRequiredService<IProcessEnvironment>(),
-            provider.GetRequiredService<IProcessRunner>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>());
+            provider.GetRequiredService<IProcessRunner>());
     }
 
     /// <summary>The task prompt service over <paramref name="host"/>'s checkout, built from the ports of <paramref name="provider"/>.</summary>
@@ -214,12 +213,12 @@ internal static class DocsToolsComposition
     public static DocsTools Create(
         DocumentIndexHost host,
         IDocsAnalysisReader? analysisReader = null,
-        CodeGraphFreshness? freshness = null,
+        ICodeGraphFreshnessGate? freshness = null,
         DocsRootRegistry? roots = null,
         IServiceProvider? services = null,
-        IProcessExecutor? deliveryExecutor = null,
+        IProcessRunner? deliveryExecutor = null,
         string? deliveryHome = null,
-        IProcessExecutor? toolingExecutor = null,
+        IProcessRunner? toolingExecutor = null,
         string? toolingMcpExecutable = null)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -256,7 +255,7 @@ internal static class DocsToolsComposition
                 host.RepositoryRoot,
                 query,
                 provider.GetRequiredService<IRepositoryDoctor>(),
-                provider.GetRequiredService<IBoundedProcessExecutor>(),
+                provider.GetRequiredService<IProcessRunner>(),
                 provider.GetRequiredService<IProcessEnvironment>())
             {
                 Executor = toolingExecutor,

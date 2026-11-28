@@ -10,7 +10,7 @@ internal sealed record DoctorRun(
     string Root,
     DoctorMode Mode,
     DoctorOptions Options,
-    IProcessExecutor Executor,
+    IProcessRunner Executor,
     Func<string, string?> Environment,
     string? LockDirectory);
 
@@ -26,26 +26,28 @@ internal sealed class FakeRepositoryDoctor : IRepositoryDoctor
     public DoctorReport Report { get; init; } = new(".", DoctorMode.Check, 0, []);
 
     /// <inheritdoc />
-    public DoctorReport Run(
+    public Task<DoctorReport> RunAsync(
         string root,
         DoctorMode mode,
         DoctorOptions options,
-        IProcessExecutor executor,
+        IProcessRunner executor,
         Func<string, string?> environment,
-        string? lockDirectory = null)
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         _runs.Add(new DoctorRun(root, mode, options, executor, environment, lockDirectory));
-        return Report with { Root = root, Mode = mode };
+        return Task.FromResult(Report with { Root = root, Mode = mode });
     }
 
     /// <inheritdoc />
-    public DoctorReport RunPostCheckout(
+    public Task<DoctorReport> RunPostCheckoutAsync(
         string root,
         DoctorOptions options,
-        IProcessExecutor executor,
-        string? lockDirectory = null)
+        IProcessRunner executor,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         _runs.Add(new DoctorRun(root, DoctorMode.Ensure, options, executor, _ => null, lockDirectory));
-        return Report with { Root = root, Mode = DoctorMode.Ensure };
+        return Task.FromResult(Report with { Root = root, Mode = DoctorMode.Ensure });
     }
 }

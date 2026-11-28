@@ -21,7 +21,8 @@ namespace KyberWeave.Tests;
 internal static class DocsPorts
 {
     internal static readonly IRepositoryFileStore Files = new PhysicalRepositoryFileStore();
-    internal static readonly IBoundedProcessExecutor Process = new KernelBoundedProcessExecutor();
+
+    internal static readonly IProcessRunner Process = new KernelProcessRunner();
 
     internal static readonly IExclusiveFileWriter Exclusive = new ExclusiveFileWriter();
 
@@ -48,12 +49,17 @@ internal static class DocsPorts
     internal static CodeGraphResolverAdapter CodeGraphAt(string databasePath) =>
         new(databasePath, Disk, Paths, Environment, Process, Staleness);
 
-    private static readonly CodeGraphIndexStaleness Staleness = new(Disk, new ProcessProgramRunner());
+    private static readonly CodeGraphIndexStaleness Staleness = new(Disk, Process);
+
+    /// <summary>Says whether a temporary checkout protects its cache from commits, over the real disk and git.</summary>
+    /// <param name="repositoryRoot">The checkout root.</param>
+    internal static bool IsCacheSafe(string repositoryRoot) =>
+        CacheSafety.IsSafeAsync(repositoryRoot).GetAwaiter().GetResult();
 
     /// <summary>Opens the analysis cache of a temporary checkout over the real disk and the real <c>sqlite3</c>.</summary>
     /// <param name="repositoryRoot">The checkout root.</param>
     internal static SqliteAnalysisPersistence Sqlite(string repositoryRoot) =>
-        new(repositoryRoot, Disk, Paths, Environment, Process, CacheSafety);
+        (SqliteAnalysisPersistence)AnalysisPersistence.OpenAsync(repositoryRoot).GetAwaiter().GetResult();
 
     /// <summary>Creates embedding clients over the real loopback transport; a test that sends nothing may use it.</summary>
     internal static readonly IEmbeddingGeneratorFactory Embeddings =

@@ -408,7 +408,7 @@ internal static class SquadTestCommands
     }
 
     public static SquadDoctorCommand Doctor(
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         ISquadUserPaths? userPaths = null,
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
@@ -450,7 +450,7 @@ internal static class SquadTestCommands
     /// </summary>
     public static SquadDoctorCommand InMemoryDoctor(
         InMemorySquadState state,
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadRenderer? renderer = null,
@@ -642,8 +642,8 @@ internal static class SquadTestCommands
     public static SquadConsole ProcessCapturedConsole() => CapturedSquadConsole();
 
     /// <summary>A capture-plugin step whose output goes to whichever test is capturing the process console.</summary>
-    public static KyberDashCapturePluginStep CapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash) =>
-        new(executor, locateKyberDash, CapturedSquadConsole());
+    public static KyberDashCapturePluginStep CapturePluginStep(IProcessRunner runner, Func<string?> locateKyberDash) =>
+        new(runner, locateKyberDash, CapturedSquadConsole());
 
     /// <summary>The roots over an in-memory file system and a fake environment, for a command test that touches no disk.</summary>
     public static SquadCommandRoots InMemoryRoots(

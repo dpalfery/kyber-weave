@@ -30,8 +30,8 @@ public sealed class McpServerLiveProbeSessionTests
     private McpServerLiveProbe Probe() =>
         new(_session, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: _files.Root));
 
-    private IReadOnlyList<DoctorCheck> Run(string? root = null, DoctorOptions? options = null) =>
-        Probe().Run(root ?? Root, options ?? Options());
+    private Task<IReadOnlyList<DoctorCheck>> RunAsync(string? root = null, DoctorOptions? options = null) =>
+        Probe().RunAsync(root ?? Root, options ?? Options());
 
     private static DoctorCheck Check(IReadOnlyList<DoctorCheck> checks, string id) =>
         Assert.Single(checks, check => check.Id == id);
@@ -48,23 +48,49 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>Control: a server that answers for this checkout passes every MCP check.</summary>
     [Fact]
-    public void AMatchingRootPassesAllMcpChecks()
+    public async Task AMatchingRootPassesAllMcpChecks()
     {
         _ = Healthy();
 
-        IReadOnlyList<DoctorCheck> checks = Run();
+        IReadOnlyList<DoctorCheck> checks = await RunAsync();
 
         Assert.All(checks, check => Assert.True(check.Passed, check.Reason));
         Assert.Equal(["mcp.start", "mcp.handshake", "mcp.docs_explore", "mcp.root"], checks.Select(check => check.Id));
     }
 
-    /// <summary>The probe asks for the renamed docs tool, never the retired name, and keeps the stable check id.</summary>
+    /// <summary>The asynchronous probe makes the same decisions over the same scripted exchange.</summary>
     [Fact]
-    public void TheProbeRequestsTheRenamedDocsToolAndKeepsItsCheckId()
+    public async Task TheAsyncProbePassesAllMcpChecksForAMatchingRoot()
     {
         _ = Healthy();
 
-        IReadOnlyList<DoctorCheck> checks = Run();
+        IReadOnlyList<DoctorCheck> checks = await Probe().RunAsync(Root, Options());
+
+        Assert.All(checks, check => Assert.True(check.Passed, check.Reason));
+        Assert.Equal(["mcp.start", "mcp.handshake", "mcp.docs_explore", "mcp.root"], checks.Select(check => check.Id));
+    }
+
+    /// <summary>The asynchronous probe fails a timed-out handshake and still disposes the session.</summary>
+    [Fact]
+    public async Task TheAsyncProbeFailsAHandshakeTimeoutAndKillsTheChild()
+    {
+        _ = _session.ReadFails(new TimeoutException());
+
+        IReadOnlyList<DoctorCheck> checks = await Probe().RunAsync(Root, Options(TimeSpan.FromSeconds(1)));
+
+        DoctorCheck handshake = Check(checks, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        Assert.Contains("--mcp-timeout", handshake.Fix, StringComparison.Ordinal);
+        Assert.True(_session.Disposed);
+    }
+
+    /// <summary>The probe asks for the renamed docs tool, never the retired name, and keeps the stable check id.</summary>
+    [Fact]
+    public async Task TheProbeRequestsTheRenamedDocsToolAndKeepsItsCheckId()
+    {
+        _ = Healthy();
+
+        IReadOnlyList<DoctorCheck> checks = await RunAsync();
 
         Assert.True(Check(checks, "mcp.docs_explore").Passed);
         string request = Assert.Single(_session.Sent, line => line.Contains("tools/call", StringComparison.Ordinal));
@@ -74,11 +100,11 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>The server starts for the repository the doctor resolved, with its CodeGraph refresh disabled.</summary>
     [Fact]
-    public void TheServerIsStartedWithTheResolvedRootAndWithCodeGraphRefreshDisabled()
+    public async Task TheServerIsStartedWithTheResolvedRootAndWithCodeGraphRefreshDisabled()
     {
         _ = Healthy();
 
-        _ = Run();
+        _ = await RunAsync();
 
         Assert.Equal("kyber-weave-mcp", _session.Executable);
         Assert.Contains("--repo-root", _session.Arguments);
@@ -88,11 +114,11 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>A server that never answers fails the handshake, names the budget in the remedy, and the session is disposed (the child killed).</summary>
     [Fact]
-    public void AHandshakeTimeoutFailsMcpHandshakeAndKillsTheChild()
+    public async Task AHandshakeTimeoutFailsMcpHandshakeAndKillsTheChild()
     {
         _ = _session.ReadFails(new TimeoutException());
 
-        IReadOnlyList<DoctorCheck> checks = Run(options: Options(TimeSpan.FromSeconds(1)));
+        IReadOnlyList<DoctorCheck> checks = await RunAsync(options: Options(TimeSpan.FromSeconds(1)));
 
         DoctorCheck handshake = Check(checks, "mcp.handshake");
         Assert.False(handshake.Passed);
@@ -103,12 +129,12 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>A folder with no host configuration is told to run init, not to raise the timeout.</summary>
     [Fact]
-    public void NoHostConfigurationNamesTheMissingFileAndTheCommandThatAddsIt()
+    public async Task NoHostConfigurationNamesTheMissingFileAndTheCommandThatAddsIt()
     {
         _session.ErrorLine = "KW-MCP-ROOT-001: No Kyber-Weave host configuration was found for MCP root";
         _ = _session.ReadFails(new EndOfStreamException());
 
-        DoctorCheck handshake = Check(Run(), "mcp.handshake");
+        DoctorCheck handshake = Check(await RunAsync(), "mcp.handshake");
 
         Assert.False(handshake.Passed);
         Assert.Contains(".kyber-weave/kyber-weave.yml", handshake.Reason, StringComparison.Ordinal);
@@ -119,12 +145,12 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>A server that exits before answering is told to read its own error, not to raise the timeout.</summary>
     [Fact]
-    public void AServerThatExitsBeforeAnsweringIsNotToldToRaiseTheTimeout()
+    public async Task AServerThatExitsBeforeAnsweringIsNotToldToRaiseTheTimeout()
     {
         _session.ErrorLine = "something else broke";
         _ = _session.ReadFails(new EndOfStreamException());
 
-        DoctorCheck handshake = Check(Run(), "mcp.handshake");
+        DoctorCheck handshake = Check(await RunAsync(), "mcp.handshake");
 
         Assert.False(handshake.Passed);
         Assert.Contains("something else broke", handshake.Reason, StringComparison.Ordinal);
@@ -134,12 +160,12 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>A docs tool that returns an error result fails mcp.docs_explore even though the process is alive.</summary>
     [Fact]
-    public void ADocsToolErrorFailsMcpDocsExplore()
+    public async Task ADocsToolErrorFailsMcpDocsExplore()
     {
         _ = _session.Reply(Initialize).Reply(
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"index not loaded\"}]}}");
 
-        IReadOnlyList<DoctorCheck> checks = Run();
+        IReadOnlyList<DoctorCheck> checks = await RunAsync();
 
         Assert.False(Check(checks, "mcp.docs_explore").Passed);
         Assert.DoesNotContain(checks, check => check.Id == "mcp.root");
@@ -147,11 +173,11 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>A server answering from another checkout fails mcp.root even though the tool call succeeded.</summary>
     [Fact]
-    public void AServerAnsweringFromAnotherCheckoutFailsMcpRoot()
+    public async Task AServerAnsweringFromAnotherCheckoutFailsMcpRoot()
     {
         _ = Healthy("provenance: root=/elsewhere/checkout");
 
-        IReadOnlyList<DoctorCheck> checks = Run();
+        IReadOnlyList<DoctorCheck> checks = await RunAsync();
 
         Assert.True(Check(checks, "mcp.docs_explore").Passed);
         Assert.False(Check(checks, "mcp.root").Passed);
@@ -161,34 +187,34 @@ public sealed class McpServerLiveProbeSessionTests
     [Theory]
     [InlineData("yes")]
     [InlineData("no")]
-    public void ProvenanceRootWithMetadataPassesWhenTheRootMatches(string dirty)
+    public async Task ProvenanceRootWithMetadataPassesWhenTheRootMatches(string dirty)
     {
         string root = Path.Combine(_files.Root, "repo with spaces");
         _ = Healthy(Provenance(root, dirty));
 
-        Assert.True(Check(Run(root), "mcp.root").Passed);
+        Assert.True(Check(await RunAsync(root), "mcp.root").Passed);
     }
 
     /// <summary>The same format naming a different repository still fails the root check.</summary>
     [Theory]
     [InlineData("yes")]
     [InlineData("no")]
-    public void ProvenanceRootWithMetadataFailsWhenTheRootDiffers(string dirty)
+    public async Task ProvenanceRootWithMetadataFailsWhenTheRootDiffers(string dirty)
     {
         string root = Path.Combine(_files.Root, "repo with spaces");
         _ = Healthy(Provenance(Path.Combine(_files.Root, "other repo with spaces"), dirty));
 
-        Assert.False(Check(Run(root), "mcp.root").Passed);
+        Assert.False(Check(await RunAsync(root), "mcp.root").Passed);
     }
 
     /// <summary>An older server that emits only the bare root is still accepted.</summary>
     [Fact]
-    public void ABareProvenanceRootIsStillAccepted()
+    public async Task ABareProvenanceRootIsStillAccepted()
     {
         string root = Path.Combine(_files.Root, "bare repo");
         _ = Healthy("provenance: root=" + root);
 
-        Assert.True(Check(Run(root), "mcp.root").Passed);
+        Assert.True(Check(await RunAsync(root), "mcp.root").Passed);
     }
 
     /// <summary>The branch and repo fields the header gained do not turn a correct server into a wrong-repository diagnosis.</summary>
@@ -196,26 +222,26 @@ public sealed class McpServerLiveProbeSessionTests
     [InlineData("repo")]
     [InlineData("repo with spaces")]
     [InlineData("my rev=evil")]
-    public void ProvenanceWithBranchAndRepoMetadataStillPassesMcpRoot(string folder)
+    public async Task ProvenanceWithBranchAndRepoMetadataStillPassesMcpRoot(string folder)
     {
         string root = Path.Combine(_files.Root, folder);
         _ = Healthy(
             "provenance: root=" + root + " branch=main repo=" + Path.Combine(root, ".git")
             + " rev=abc123 dirty=no documents=7");
 
-        DoctorCheck check = Check(Run(root), "mcp.root");
+        DoctorCheck check = Check(await RunAsync(root), "mcp.root");
 
         Assert.True(check.Passed, check.Reason);
     }
 
     /// <summary>A server that closes its input after initialize fails a check instead of throwing out of the probe.</summary>
     [Fact]
-    public void AServerThatClosesItsInputReportsAFailureInsteadOfThrowing()
+    public async Task AServerThatClosesItsInputReportsAFailureInsteadOfThrowing()
     {
         _session.SendFailure = (2, new IOException("Broken pipe"));
         _ = _session.Reply(Initialize);
 
-        IReadOnlyList<DoctorCheck> checks = Run();
+        IReadOnlyList<DoctorCheck> checks = await RunAsync();
 
         Assert.Contains(checks, check => !check.Passed);
         Assert.False(Check(checks, "mcp.docs_explore").Passed);
@@ -226,7 +252,7 @@ public sealed class McpServerLiveProbeSessionTests
     [InlineData("initialize-is-an-array")]
     [InlineData("result-is-an-array")]
     [InlineData("content-item-is-a-number")]
-    public void ANonObjectReplyFailsACheckInsteadOfThrowing(string shape)
+    public async Task ANonObjectReplyFailsACheckInsteadOfThrowing(string shape)
     {
         string initialize = shape == "initialize-is-an-array" ? "[1,2]" : Initialize;
         string call = shape switch
@@ -237,25 +263,25 @@ public sealed class McpServerLiveProbeSessionTests
         };
         _ = _session.Reply(initialize).Reply(call);
 
-        Assert.Contains(Run(), check => !check.Passed);
+        Assert.Contains(await RunAsync(), check => !check.Passed);
     }
 
     /// <summary>A provenance root the platform cannot canonicalise fails mcp.root instead of throwing.</summary>
     [Fact]
-    public void AProvenanceRootWithANulCharacterFailsMcpRootInsteadOfThrowing()
+    public async Task AProvenanceRootWithANulCharacterFailsMcpRootInsteadOfThrowing()
     {
         _ = Healthy("provenance: root=/tmp/ev\0il");
 
-        Assert.False(Check(Run(), "mcp.root").Passed);
+        Assert.False(Check(await RunAsync(), "mcp.root").Passed);
     }
 
     /// <summary>A server that cannot start fails mcp.start, and no reason or fix echoes anything the process holds.</summary>
     [Fact]
-    public void AStartFailureFailsMcpStartWithoutDisclosingTheEnvironment()
+    public async Task AStartFailureFailsMcpStartWithoutDisclosingTheEnvironment()
     {
         _session.StartFailure = new System.ComponentModel.Win32Exception(2, "No such file or directory " + Secret);
 
-        IReadOnlyList<DoctorCheck> checks = Run(options: Options(executable: "kyber-weave-mcp-absent-for-test"));
+        IReadOnlyList<DoctorCheck> checks = await RunAsync(options: Options(executable: "kyber-weave-mcp-absent-for-test"));
 
         DoctorCheck start = Assert.Single(checks);
         Assert.Equal("mcp.start", start.Id);
@@ -266,20 +292,20 @@ public sealed class McpServerLiveProbeSessionTests
 
     /// <summary>A reply over the session's line cap fails mcp.handshake instead of throwing.</summary>
     [Fact]
-    public void AReplyOverTheLineCapFailsMcpHandshakeInsteadOfThrowing()
+    public async Task AReplyOverTheLineCapFailsMcpHandshakeInsteadOfThrowing()
     {
         _ = _session.ReadFails(new InvalidDataException("line cap"));
 
-        Assert.False(Check(Run(), "mcp.handshake").Passed);
+        Assert.False(Check(await RunAsync(), "mcp.handshake").Passed);
     }
 
     /// <summary>A budget too large to double inside an int still prints a positive timeout in the remedy.</summary>
     [Fact]
-    public void AHugeBudgetPrintsAPositiveTimeoutInTheRemedy()
+    public async Task AHugeBudgetPrintsAPositiveTimeoutInTheRemedy()
     {
         _ = _session.Reply(Initialize).ReadFails(new TimeoutException());
 
-        DoctorCheck docsExplore = Check(Run(options: Options(TimeSpan.FromSeconds(2_000_000_000))), "mcp.docs_explore");
+        DoctorCheck docsExplore = Check(await RunAsync(options: Options(TimeSpan.FromSeconds(2_000_000_000))), "mcp.docs_explore");
 
         Assert.False(docsExplore.Passed);
         string fix = docsExplore.Fix ?? string.Empty;

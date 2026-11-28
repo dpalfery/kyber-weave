@@ -62,6 +62,23 @@ public sealed class CopilotHookAdapterTests
             SeenPostCaller = caller;
             return PostResult;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
     }
 
     private static KyberWeaveConfig EnabledConfig() =>
@@ -80,7 +97,7 @@ public sealed class CopilotHookAdapterTests
     private static string CliFixture(string name) =>
         EmbeddedFixtureText.Read(typeof(CopilotHookAdapterTests).Assembly, $"arbiter-hooks/copilot-cli/{name}");
 
-    private static (int Exit, string Stdout, string Log) Run(
+    private static async Task<(int Exit, string Stdout, string Log)> Run(
         string harness,
         string stdin,
         string? caller,
@@ -93,7 +110,7 @@ public sealed class CopilotHookAdapterTests
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run(harness, caller, stdin, stdout, log);
+        int exit = await command.RunAsync(harness, caller, stdin, stdout, log);
         return (exit, stdout.ToString(), log.ToString());
     }
 
@@ -103,7 +120,7 @@ public sealed class CopilotHookAdapterTests
     /// answer with an allow and no rule evaluation.
     /// </summary>
     [Fact]
-    public void Cli_PreDispatch_ToolCallsBatch_IsEvaluatedAndDenied()
+    public async Task Cli_PreDispatch_ToolCallsBatch_IsEvaluatedAndDenied()
     {
         const string stdin =
             """
@@ -126,7 +143,7 @@ public sealed class CopilotHookAdapterTests
         const string envelope = "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, string log) = Run(CopilotHookAdapter.CliToken, stdin, "conductor", engine);
+        (int exit, string stdout, string log) = await Run(CopilotHookAdapter.CliToken, stdin, "conductor", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PreCalls);
@@ -136,7 +153,7 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_PreDispatch_Deny_WritesLocalDenyShape()
+    public async Task Local_PreDispatch_Deny_WritesLocalDenyShape()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
@@ -144,7 +161,7 @@ public sealed class CopilotHookAdapterTests
         string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
             "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-deny-1", StringComparison.Ordinal);
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
 
         Assert.Equal(0, exit);
@@ -156,9 +173,9 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
+    public async Task Local_PreDispatch_Allow_SpecialistTarget_StripsCompleteInput()
     {
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.VsCodeToken, VsCodeFixture("pre-runsubagent-dispatch.json"), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
@@ -178,13 +195,13 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_PreDispatch_AbsentAgentName_TargetsCallingAgent()
+    public async Task Local_PreDispatch_AbsentAgentName_TargetsCallingAgent()
     {
         ScriptedEngine engine = new();
         string stdin = VsCodeFixture("pre-runsubagent-no-agentname.json").Replace(
             "toolu-copilot-vs-dispatch-2", "toolu-copilot-vs-noagent-1", StringComparison.Ordinal);
 
-        (int exit, _, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "dev-medium", engine);
+        (int exit, _, _) = await Run(CopilotHookAdapter.VsCodeToken, stdin, "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal("dev-medium", engine.SeenPreTarget);
@@ -225,11 +242,11 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_NonDispatchTool_ReadGuardDeniesOnContent_NotName()
+    public async Task Local_NonDispatchTool_ReadGuardDeniesOnContent_NotName()
     {
         // The tool name is undocumented and ignored: the guard keys on the input
         // content, so an unlisted tool naming a planning path still denies.
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.VsCodeToken,
             VsCodeFixture("pre-tool-content-denied.json"),
             "dev-medium",
@@ -245,10 +262,10 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_NonDispatchTool_AllowedContent_WritesNothing()
+    public async Task Local_NonDispatchTool_AllowedContent_WritesNothing()
     {
         ScriptedEngine engine = new();
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.VsCodeToken,
             VsCodeFixture("pre-tool-content-allowed.json"),
             "dev-medium",
@@ -261,7 +278,7 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_NonDispatchTool_UnidentifiedCaller_PassesThroughWithoutLoadingConfig()
+    public async Task Local_NonDispatchTool_UnidentifiedCaller_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -272,7 +289,7 @@ public sealed class CopilotHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             CopilotHookAdapter.VsCodeToken, null, VsCodeFixture("pre-tool-content-denied.json"), stdout, log);
 
         Assert.Equal(0, exit);
@@ -281,13 +298,13 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Local_PostDispatch_Block_WritesTopLevelBlock()
+    public async Task Local_PostDispatch_Block_WritesTopLevelBlock()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.VsCodeToken, VsCodeFixture("post-runsubagent-completed.json"), "conductor", engine);
 
         Assert.Equal(0, exit);
@@ -297,13 +314,13 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PreDispatch_Deny_WritesPermissionDecisionShape()
+    public async Task Cli_PreDispatch_Deny_WritesPermissionDecisionShape()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.CliToken, CliFixture("pre-task-object.json"), null, engine);
 
         Assert.Equal(0, exit);
@@ -314,13 +331,13 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PreDispatch_StringArgs_Deny_WritesPermissionDecisionShape()
+    public async Task Cli_PreDispatch_StringArgs_Deny_WritesPermissionDecisionShape()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.CliToken, CliFixture("pre-task-string.json"), null, engine);
 
         Assert.Equal(0, exit);
@@ -331,9 +348,9 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PreDispatch_Allow_SpecialistTarget_StripsCompleteModifiedArgs()
+    public async Task Cli_PreDispatch_Allow_SpecialistTarget_StripsCompleteModifiedArgs()
     {
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.CliToken, CliFixture("pre-task-object.json"), null, new ScriptedEngine());
 
         Assert.Equal(0, exit);
@@ -350,13 +367,13 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PreDispatch_MarkedDispatchWithoutTarget_CallsEngineWithAbsentTarget()
+    public async Task Cli_PreDispatch_MarkedDispatchWithoutTarget_CallsEngineWithAbsentTarget()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: undecidable (step 0)";
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.CliToken, CliFixture("pre-task-marked-no-target.json"), null, engine);
 
         // The target fact is absent, so the rules answer undecidable (escalated here).
@@ -368,7 +385,7 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PreDispatch_UnmarkedDispatchWithoutTarget_PassesThroughWithoutLoadingConfig()
+    public async Task Cli_PreDispatch_UnmarkedDispatchWithoutTarget_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         ScriptedEngine engine = new();
@@ -379,7 +396,7 @@ public sealed class CopilotHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(
+        int exit = await command.RunAsync(
             CopilotHookAdapter.CliToken, null, CliFixture("pre-task-unmarked-no-target.json"), stdout, log);
 
         Assert.Equal(0, exit);
@@ -389,7 +406,7 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PreDispatch_NonTaskTool_PassesThroughWithoutLoadingConfig()
+    public async Task Cli_PreDispatch_NonTaskTool_PassesThroughWithoutLoadingConfig()
     {
         int loads = 0;
         string stdin = CliFixture("pre-task-object.json").Replace(
@@ -402,7 +419,7 @@ public sealed class CopilotHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run(CopilotHookAdapter.CliToken, null, stdin, stdout, log);
+        int exit = await command.RunAsync(CopilotHookAdapter.CliToken, null, stdin, stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
@@ -411,14 +428,14 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_PostDispatch_WritesAdditionalContextWithoutCallId()
+    public async Task Cli_PostDispatch_WritesAdditionalContextWithoutCallId()
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, note) };
 
         // The CLI payload carries no call id: pairing uses pair-digest, so the
         // return still evaluates and answers with additionalContext.
-        (int exit, string stdout, _) = Run(
+        (int exit, string stdout, _) = await Run(
             CopilotHookAdapter.CliToken, CliFixture("post-task.json"), null, engine);
 
         Assert.Equal(0, exit);
@@ -475,15 +492,52 @@ public sealed class CopilotHookAdapterTests
             Pending.Clear();
             return notes;
         }
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePreDispatchAsync(
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePreDispatch(caller, target, prompt, config));
+
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecidePostDispatchAsync(
+            string caller,
+            string? target,
+            string toolOutput,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecidePostDispatch(caller, target, toolOutput, config));
+        /// <inheritdoc/>
+        public Task<HookOutcome> DecideBackgroundReturnAsync(
+            string harness,
+            string sessionId,
+            string agentId,
+            string response,
+            KyberWeaveConfig config,
+            HookContext context,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(DecideBackgroundReturn(harness, sessionId, agentId, response, config, context));
+        /// <inheritdoc/>
+        public Task<int> RecoverLostReturnAsync(
+            string harness,
+            string? sessionId,
+            IReadOnlyList<string> agentNames,
+            HookContext context,
+            string? agentId = null,
+            string? stopEvent = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RecoverLostReturn(harness, sessionId, agentNames, context, agentId, stopEvent));
     }
 
-    private static string RunCli(IHookDecisionEngine engine, string stdin)
+    private static async Task<string> RunCli(IHookDecisionEngine engine, string stdin)
     {
         HookCommand command = ArbiterTestServices.Command(
             ArbiterTestServices.Registry(engine), _ => EnabledConfig(), () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        Assert.Equal(0, command.Run(CopilotHookAdapter.CliToken, null, stdin, stdout, log));
+        Assert.Equal(0, await command.RunAsync(CopilotHookAdapter.CliToken, null, stdin, stdout, log));
         Assert.DoesNotContain(HookCommand.FailClosedCode, log.ToString(), StringComparison.Ordinal);
         return stdout.ToString();
     }
@@ -524,11 +578,11 @@ public sealed class CopilotHookAdapterTests
         """;
 
     [Fact]
-    public void Cli_BackgroundStart_IsHandedToTheEngineToFollow_AndIsNotDecidedAsAReturn()
+    public async Task Cli_BackgroundStart_IsHandedToTheEngineToFollow_AndIsNotDecidedAsAReturn()
     {
         BackgroundEngine engine = new();
 
-        string stdout = RunCli(engine, BackgroundStartPayload);
+        string stdout = await RunCli(engine, BackgroundStartPayload);
 
         Assert.Empty(stdout);
         Assert.Equal(0, engine.PostCalls);
@@ -540,11 +594,11 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_BackgroundStart_IsRecognisedFromTelemetryWhenTheResultTextIsElided()
+    public async Task Cli_BackgroundStart_IsRecognisedFromTelemetryWhenTheResultTextIsElided()
     {
         BackgroundEngine engine = new();
 
-        RunCli(engine, BackgroundStartPayload.Replace(
+        await RunCli(engine, BackgroundStartPayload.Replace(
             "Agent started in background with agent_id: 28ec0b43-93e2-47b0-b3ad-2530846d5dd3. You'll be notified when it completes.",
             "[copilot:elided textResultForLlm (468 bytes)]",
             StringComparison.Ordinal));
@@ -554,11 +608,11 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_SubagentStop_WithANote_AppendsItToTheResponseTheDispatcherReads()
+    public async Task Cli_SubagentStop_WithANote_AppendsItToTheResponseTheDispatcherReads()
     {
         BackgroundEngine engine = new() { ReturnResult = new HookOutcome(HookOutcomeKind.PostBlock, "ARBITER_ESCALATION: gate report disagrees") };
 
-        string stdout = RunCli(engine, SubagentStopPayload);
+        string stdout = await RunCli(engine, SubagentStopPayload);
 
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal(
@@ -567,29 +621,29 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_SubagentStop_PassesThePayloadAgentIdToRecovery()
+    public async Task Cli_SubagentStop_PassesThePayloadAgentIdToRecovery()
     {
         BackgroundEngine engine = new();
 
-        RunCli(engine, SubagentStopPayload);
+        await RunCli(engine, SubagentStopPayload);
 
         Assert.Equal("28ec0b43-93e2-47b0-b3ad-2530846d5dd3", engine.RecoveredAgentId);
     }
 
     [Fact]
-    public void Cli_SubagentStop_WithNothingToSay_WritesNothing()
+    public async Task Cli_SubagentStop_WithNothingToSay_WritesNothing()
     {
-        Assert.Empty(RunCli(new BackgroundEngine(), SubagentStopPayload));
+        Assert.Empty(await RunCli(new BackgroundEngine(), SubagentStopPayload));
     }
 
     [Fact]
-    public void Local_SubagentStop_PassesThroughWithoutLoadingConfig()
+    public async Task Local_SubagentStop_PassesThroughWithoutLoadingConfig()
     {
         // VS Code loads the CLI hook file too, and names the event in its own schema.
         const string Payload = """{"hook_event_name":"SubagentStop","session_id":"s1","cwd":"/repo","agent_id":"a1","agent_type":"dev-medium"}""";
         int loads = 0;
 
-        (int exit, string stdout, string log) = Run(
+        (int exit, string stdout, string log) = await Run(
             CopilotHookAdapter.CliToken, Payload, null, new ScriptedEngine(), _ => { loads++; return EnabledConfig(); });
 
         Assert.Equal(0, exit);
@@ -599,11 +653,11 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_SubagentStop_PassesThroughForAnEngineThatDoesNotFollowBackgroundDispatches()
+    public async Task Cli_SubagentStop_PassesThroughForAnEngineThatDoesNotFollowBackgroundDispatches()
     {
         ScriptedEngine engine = new();
 
-        (int exit, string stdout, string log) = Run(CopilotHookAdapter.CliToken, SubagentStopPayload, null, engine);
+        (int exit, string stdout, string log) = await Run(CopilotHookAdapter.CliToken, SubagentStopPayload, null, engine);
 
         Assert.Equal(0, exit);
         Assert.Empty(stdout);
@@ -611,20 +665,20 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void Cli_NextTaskResult_CarriesANoteStillPendingFromABackgroundReturn()
+    public async Task Cli_NextTaskResult_CarriesANoteStillPendingFromABackgroundReturn()
     {
         BackgroundEngine engine = new();
         engine.Pending.Add("Arbiter note on the return of background agent 'dev-medium':\nARBITER_ESCALATION: gate report disagrees");
 
-        string stdout = RunCli(engine, BackgroundStartPayload);
+        string stdout = await RunCli(engine, BackgroundStartPayload);
 
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Contains("ARBITER_ESCALATION: gate report disagrees", doc.RootElement.GetProperty("additionalContext").GetString(), StringComparison.Ordinal);
-        Assert.Empty(RunCli(engine, BackgroundStartPayload));
+        Assert.Empty(await RunCli(engine, BackgroundStartPayload));
     }
 
     [Fact]
-    public void SchemaDetection_LocalPayloadUnderCliHarness_AnswersLocalShapeAndLogsVsCode()
+    public async Task SchemaDetection_LocalPayloadUnderCliHarness_AnswersLocalShapeAndLogsVsCode()
     {
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)";
@@ -634,7 +688,7 @@ public sealed class CopilotHookAdapterTests
 
         // VS Code also loads the Copilot CLI hook file: a Local-schema payload
         // arriving under --harness copilot-cli answers in the received schema.
-        (int exit, string stdout, string log) = Run(CopilotHookAdapter.CliToken, stdin, "conductor", engine);
+        (int exit, string stdout, string log) = await Run(CopilotHookAdapter.CliToken, stdin, "conductor", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -644,13 +698,13 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void TrustedDecision_ReusedForSameToolUseId()
+    public async Task TrustedDecision_ReusedForSameToolUseId()
     {
         ScriptedEngine engine = new();
         string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
             "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-reuse-1", StringComparison.Ordinal);
 
-        (int firstExit, string firstStdout, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
+        (int firstExit, string firstStdout, _) = await Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
         Assert.Equal(0, firstExit);
         Assert.Equal(1, engine.PreCalls);
 
@@ -658,7 +712,7 @@ public sealed class CopilotHookAdapterTests
         // trusted caller: the logged trusted-caller decision is reused.
         engine.PreResult = new HookOutcome(
             HookOutcomeKind.Deny, "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate\nANSWER: adds-work (step 0)");
-        (int secondExit, string secondStdout, string secondLog) = Run(
+        (int secondExit, string secondStdout, string secondLog) = await Run(
             CopilotHookAdapter.CliToken, stdin, null, engine);
 
         Assert.Equal(0, secondExit);
@@ -668,49 +722,49 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void TrustedDecision_NotReusedWhenThePayloadChangesForTheSameToolUseId()
+    public async Task TrustedDecision_NotReusedWhenThePayloadChangesForTheSameToolUseId()
     {
         ScriptedEngine engine = new();
         string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
             "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-reuse-2", StringComparison.Ordinal);
 
-        (int firstExit, _, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
+        (int firstExit, _, _) = await Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
         Assert.Equal(0, firstExit);
         Assert.Equal(1, engine.PreCalls);
 
         string changed = stdin.Replace("Implement the parser.", "Implement a different thing.", StringComparison.Ordinal);
-        (int secondExit, _, _) = Run(CopilotHookAdapter.CliToken, changed, null, engine);
+        (int secondExit, _, _) = await Run(CopilotHookAdapter.CliToken, changed, null, engine);
 
         Assert.Equal(0, secondExit);
         Assert.Equal(2, engine.PreCalls);
     }
 
     [Fact]
-    public void TrustedDecision_NotReusedWhenTheWorkingDirectoryChanges()
+    public async Task TrustedDecision_NotReusedWhenTheWorkingDirectoryChanges()
     {
         ScriptedEngine engine = new();
         string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
             "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-reuse-3", StringComparison.Ordinal);
 
-        (int firstExit, _, _) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
+        (int firstExit, _, _) = await Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
         Assert.Equal(0, firstExit);
         Assert.Equal(1, engine.PreCalls);
 
         string changed = stdin.Replace("\"cwd\": \"/repo\"", "\"cwd\": \"/other\"", StringComparison.Ordinal);
-        (int secondExit, _, _) = Run(CopilotHookAdapter.CliToken, changed, null, engine);
+        (int secondExit, _, _) = await Run(CopilotHookAdapter.CliToken, changed, null, engine);
 
         Assert.Equal(0, secondExit);
         Assert.Equal(2, engine.PreCalls);
     }
 
     [Fact]
-    public void InternalError_LocalSchema_AllowsAndLogs()
+    public async Task InternalError_LocalSchema_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
         string stdin = VsCodeFixture("pre-runsubagent-dispatch.json").Replace(
             "toolu-copilot-vs-dispatch-1", "toolu-copilot-vs-error-1", StringComparison.Ordinal);
 
-        (int exit, string stdout, string log) = Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
+        (int exit, string stdout, string log) = await Run(CopilotHookAdapter.VsCodeToken, stdin, "conductor", engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.
         Assert.Equal(0, exit);
@@ -719,11 +773,11 @@ public sealed class CopilotHookAdapterTests
     }
 
     [Fact]
-    public void InternalError_CliSchema_AllowsAndLogs()
+    public async Task InternalError_CliSchema_AllowsAndLogs()
     {
         ScriptedEngine engine = new() { ThrowOnPre = true };
 
-        (int exit, string stdout, string log) = Run(
+        (int exit, string stdout, string log) = await Run(
             CopilotHookAdapter.CliToken, CliFixture("pre-task-object.json"), null, engine);
 
         // ADR 0072: a fault the host cannot decide on allows, with the code in the log.

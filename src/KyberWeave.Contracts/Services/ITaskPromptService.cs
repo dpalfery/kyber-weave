@@ -119,4 +119,17 @@ public interface ITaskPromptService
     /// <param name="request">The task or technology to build for, and the retry facts when there are some.</param>
     /// <param name="config">The effective host configuration, which holds the prompt budget.</param>
     TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config);
+
+    /// <summary>
+    /// Builds the prompt for <paramref name="request"/> without blocking a thread, checking the task file it comes
+    /// from asynchronously, or says why it could not be built.
+    /// </summary>
+    /// <param name="request">The task or technology to build for, and the retry facts when there are some.</param>
+    /// <param name="config">The effective host configuration, which holds the prompt budget.</param>
+    /// <param name="cancellationToken">Cancels the task-file check.</param>
+    /// <returns>The prompt, or the refusal that replaced it.</returns>
+    Task<TaskPromptResult> BuildAsync(
+        TaskPromptRequest request,
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken = default);
 }

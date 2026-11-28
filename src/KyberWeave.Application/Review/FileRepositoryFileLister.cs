@@ -7,57 +7,86 @@ using KyberWeave.Core.Review.Catalogue;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Lists a repository's files from git when it can answer, otherwise by walking the file system.</summary>
-/// <param name="programs">Starts git.</param>
-/// <param name="files">Answers every existence, listing and link question.</param>
-public sealed class FileRepositoryFileLister(IProgramRunner programs, IFileSystem files) : IRepositoryFileLister
+public sealed class FileRepositoryFileLister : IRepositoryFileLister
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
+    private readonly IProcessRunner _programs;
+    private readonly IFileSystem _files;
+
+    /// <summary>Creates a repository file lister over an async-capable process runner and file-system port.</summary>
+    /// <param name="programs">Starts git without blocking a thread.</param>
+    /// <param name="files">Answers every existence, listing and link question.</param>
+    public FileRepositoryFileLister(IProcessRunner programs, IFileSystem files)
+    {
+        ArgumentNullException.ThrowIfNull(programs);
+        ArgumentNullException.ThrowIfNull(files);
+        _programs = programs;
+        _files = files;
+    }
+
     /// <inheritdoc />
-    public IReadOnlyList<string> List(string repositoryRoot)
+    public async Task<IReadOnlyList<string>> ListAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        if (!files.DirectoryExists(repositoryRoot))
+        if (!_files.DirectoryExists(repositoryRoot))
             throw new DirectoryNotFoundException($"Repository root '{repositoryRoot}' does not exist.");
 
-        return ListFiles(repositoryRoot)
+        IReadOnlyList<string> listed = await ListFilesAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        return listed
             .Where(file => IsRegularFile(repositoryRoot, file))
             .ToArray();
     }
 
-    /// <summary>Repository-relative files, from git when the directory is a work tree, otherwise from a walk.</summary>
-    private IReadOnlyList<string> ListFiles(string repositoryRoot)
+    /// <summary>Repository-relative files, from git without blocking when possible, otherwise from a walk.</summary>
+    private async Task<IReadOnlyList<string>> ListFilesAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken)
     {
-        IReadOnlyList<string>? fromGit = ListGitFiles(repositoryRoot);
+        IReadOnlyList<string>? fromGit = await ListGitFilesAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
         if (fromGit is not null)
-            return fromGit.Where(file => !ProjectRootDetection.IsUnderExcludedDirectory(file)).ToArray();
+            return FilterGitFiles(fromGit);
 
         return WalkFiles(repositoryRoot);
     }
 
+    private static string[] FilterGitFiles(IReadOnlyList<string> fromGit) =>
+        fromGit.Where(file => !ProjectRootDetection.IsUnderExcludedDirectory(file)).ToArray();
+
     /// <summary>
-    /// Lists tracked and untracked-but-not-ignored files. Returns <see langword="null"/> when git is missing
-    /// or the directory is not a work tree, so the caller walks the file system instead.
+    /// Lists tracked and untracked-but-not-ignored files without blocking a thread. Returns <see langword="null"/>
+    /// when git is missing, no async runner was supplied, or the directory is not a work tree.
     /// </summary>
-    private IReadOnlyList<string>? ListGitFiles(string repositoryRoot)
+    private async Task<IReadOnlyList<string>?> ListGitFilesAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken)
     {
         ProcessResult result;
         try
         {
-            result = programs.Run(
-                "git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], repositoryRoot, GitTimeout);
+            result = await _programs.RunAsync(
+                "git",
+                ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                repositoryRoot,
+                GitTimeout,
+                maxOutputBytes: null,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Win32Exception)
         {
             return null;
         }
 
-        if (result.ExitCode != 0)
-            return null;
-
-        return result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        return ParseGitFiles(result);
     }
+
+    private static string[]? ParseGitFiles(ProcessResult result) =>
+        result.ExitCode != 0
+            ? null
+            : result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries);
 
     /// <summary>
     /// Walks one directory level at a time. Links are skipped rather than followed, so the walk cannot
@@ -101,7 +130,7 @@ public sealed class FileRepositoryFileLister(IProgramRunner programs, IFileSyste
     {
         try
         {
-            return files.EnumerateEntries(directory).ToArray();
+            return _files.EnumerateEntries(directory).ToArray();
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -113,6 +142,6 @@ public sealed class FileRepositoryFileLister(IProgramRunner programs, IFileSyste
     private bool IsRegularFile(string repositoryRoot, string file)
     {
         string path = Path.Combine(repositoryRoot, file);
-        return files.FileExists(path) && files.GetLinkTarget(path) is null;
+        return _files.FileExists(path) && _files.GetLinkTarget(path) is null;
     }
 }

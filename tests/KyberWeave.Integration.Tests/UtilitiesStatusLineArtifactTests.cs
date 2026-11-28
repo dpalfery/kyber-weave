@@ -139,13 +139,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void ClaudeVariantRendersEverySegmentTheInventoryDeclares()
+    public async Task ClaudeVariantRendersEverySegmentTheInventoryDeclares()
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
+        ProcessResult result = await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
 
         AssertSucceeded(result, "Claude");
         string output = result.StandardOutput;
@@ -167,7 +167,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void ClaudeVariantReflectsGitPorcelainStateInItsRenderedOutput()
+    public async Task ClaudeVariantReflectsGitPorcelainStateInItsRenderedOutput()
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
@@ -175,23 +175,23 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string fixture = FixtureText(ClaudeFixture);
 
         sandbox.SetPorcelain(SyntheticPorcelainClean);
-        string clean = RunVariant(sandbox, bash, artifact, fixture, false).StandardOutput;
+        string clean = (await RunVariant(sandbox, bash, artifact, fixture, false)).StandardOutput;
         sandbox.SetPorcelain(SyntheticPorcelainDirty);
-        string dirty = RunVariant(sandbox, bash, artifact, fixture, false).StandardOutput;
+        string dirty = (await RunVariant(sandbox, bash, artifact, fixture, false)).StandardOutput;
 
         Assert.NotEqual(clean, dirty);
     }
 
     [Fact]
-    public void ClaudeVariantRendersAMissingContextPercentageAsAbsentRatherThanZero()
+    public async Task ClaudeVariantRendersAMissingContextPercentageAsAbsentRatherThanZero()
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
         Sandbox sandbox = new(_temp);
 
-        string present = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false).StandardOutput;
-        string zero = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeZeroContextFixture), false).StandardOutput;
-        string missing = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeWithoutContextFixture), false)
+        string present = (await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false)).StandardOutput;
+        string zero = (await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeZeroContextFixture), false)).StandardOutput;
+        string missing = (await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeWithoutContextFixture), false))
             .StandardOutput;
 
         Assert.NotEqual(present, missing);
@@ -202,19 +202,19 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     [InlineData("{\"model\": ")]
     [InlineData("not json at all")]
     [InlineData("")]
-    public void ClaudeVariantExitsZeroAndRendersASafeFallbackOnMalformedJson(string standardInput)
+    public async Task ClaudeVariantExitsZeroAndRendersASafeFallbackOnMalformedJson(string standardInput)
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, bash, artifact, standardInput, false);
+        ProcessResult result = await RunVariant(sandbox, bash, artifact, standardInput, false);
 
         AssertSucceeded(result, "Claude");
     }
 
     [Fact]
-    public void ClaudeVariantWritesNoFileAnywhereInTheSandbox()
+    public async Task ClaudeVariantWritesNoFileAnywhereInTheSandbox()
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
@@ -222,7 +222,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string artifactDirectory = Path.GetDirectoryName(artifact) ?? string.Empty;
         Dictionary<string, string> before = Snapshot(sandbox.HomeDirectory, sandbox.WorkDirectory, artifactDirectory);
 
-        ProcessResult result = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
+        ProcessResult result = await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
 
         AssertSucceeded(result, "Claude");
         AssertNoFilesChanged(before, Snapshot(sandbox.HomeDirectory, sandbox.WorkDirectory, artifactDirectory),
@@ -230,13 +230,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void ClaudeVariantMakesNoNetworkCallThroughTheSandboxStubs()
+    public async Task ClaudeVariantMakesNoNetworkCallThroughTheSandboxStubs()
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
+        ProcessResult result = await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
 
         AssertSucceeded(result, "Claude");
         Assert.False(
@@ -245,13 +245,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void ClaudeVariantDoesNotEchoAnEnvironmentValueIntoItsOutput()
+    public async Task ClaudeVariantDoesNotEchoAnEnvironmentValueIntoItsOutput()
     {
         string artifact = RequireArtifact(ClaudeArtifactRelativePath);
         string bash = RequireRuntime("bash");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
+        ProcessResult result = await RunVariant(sandbox, bash, artifact, FixtureText(ClaudeFixture), false);
 
         AssertSucceeded(result, "Claude");
         Assert.DoesNotContain(CanaryValue, result.StandardOutput, StringComparison.Ordinal);
@@ -263,13 +263,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void AgyVariantRendersEverySegmentTheInventoryDeclares()
+    public async Task AgyVariantRendersEverySegmentTheInventoryDeclares()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
+        ProcessResult result = await RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
 
         AssertSucceeded(result, "agy");
         string output = result.StandardOutput;
@@ -296,14 +296,14 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void AgyVariantRendersAMissingTokenBreakdownAsAbsentRatherThanZero()
+    public async Task AgyVariantRendersAMissingTokenBreakdownAsAbsentRatherThanZero()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
 
-        string present = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false).StandardOutput;
-        string missing = RunVariant(sandbox, python, artifact, FixtureText(AgyWithoutUsageFixture), false)
+        string present = (await RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false)).StandardOutput;
+        string missing = (await RunVariant(sandbox, python, artifact, FixtureText(AgyWithoutUsageFixture), false))
             .StandardOutput;
 
         Assert.NotEqual(present, missing);
@@ -312,14 +312,14 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void AgyVariantRendersWithoutTheEmbeddedIdentityPromptFallback()
+    public async Task AgyVariantRendersWithoutTheEmbeddedIdentityPromptFallback()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
 
-        string withModel = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false).StandardOutput;
-        string withoutModel = RunVariant(sandbox, python, artifact, FixtureText(AgyWithoutModelFixture), false)
+        string withModel = (await RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false)).StandardOutput;
+        string withoutModel = (await RunVariant(sandbox, python, artifact, FixtureText(AgyWithoutModelFixture), false))
             .StandardOutput;
 
         AssertRendersValue(withModel, AgyModelDisplayName, "model");
@@ -332,19 +332,19 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     [InlineData("{\"conversation_id\": ")]
     [InlineData("not json at all")]
     [InlineData("")]
-    public void AgyVariantExitsZeroAndRendersASafeFallbackOnMalformedJson(string standardInput)
+    public async Task AgyVariantExitsZeroAndRendersASafeFallbackOnMalformedJson(string standardInput)
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, standardInput, false);
+        ProcessResult result = await RunVariant(sandbox, python, artifact, standardInput, false);
 
         AssertSucceeded(result, "agy");
     }
 
     [Fact]
-    public void AgyVariantWritesNoFileAnywhereInTheSandboxIncludingNoLastStdinDebugFile()
+    public async Task AgyVariantWritesNoFileAnywhereInTheSandboxIncludingNoLastStdinDebugFile()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
@@ -352,7 +352,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string artifactDirectory = Path.GetDirectoryName(artifact) ?? string.Empty;
         Dictionary<string, string> before = Snapshot(sandbox.HomeDirectory, sandbox.WorkDirectory, artifactDirectory);
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
+        ProcessResult result = await RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
 
         AssertSucceeded(result, "agy");
         AssertNoFilesChanged(before, Snapshot(sandbox.HomeDirectory, sandbox.WorkDirectory, artifactDirectory),
@@ -381,7 +381,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         int completed;
         try
         {
-            result = RunWithSocketAudit(sandbox, python, artifact, FixtureText(AgyFixture));
+            result = await RunWithSocketAudit(sandbox, python, artifact, FixtureText(AgyFixture));
         }
         finally
         {
@@ -401,18 +401,18 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     /// recorded, whether the port refuses or a real collector accepts. No payload is sent.
     /// </summary>
     [Fact]
-    public void SocketAuditProbeRecordsADeliberateCollectorConnectionAttempt()
+    public async Task SocketAuditProbeRecordsADeliberateCollectorConnectionAttempt()
     {
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
         string fixture = Path.Combine(sandbox.WorkDirectory, "deliberate-collector-connect.py");
-        File.WriteAllText(fixture, DeliberateCollectorConnectScript);
+        await File.WriteAllTextAsync(fixture, DeliberateCollectorConnectScript);
 
-        ProcessResult result = RunWithSocketAudit(sandbox, python, fixture, string.Empty);
+        ProcessResult result = await RunWithSocketAudit(sandbox, python, fixture, string.Empty);
 
         AssertSucceeded(result, "audit probe");
         string audit = File.Exists(sandbox.SocketAuditLogFile)
-            ? File.ReadAllText(sandbox.SocketAuditLogFile)
+            ? await File.ReadAllTextAsync(sandbox.SocketAuditLogFile)
             : string.Empty;
         Assert.Contains(
             "4318",
@@ -421,13 +421,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void AgyVariantDoesNotEchoAnEnvironmentValueIntoItsOutput()
+    public async Task AgyVariantDoesNotEchoAnEnvironmentValueIntoItsOutput()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
+        ProcessResult result = await RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
 
         AssertSucceeded(result, "agy");
         Assert.DoesNotContain(CanaryValue, result.StandardOutput, StringComparison.Ordinal);
@@ -435,7 +435,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void AgyVariantHandsItsStdinPayloadToKyberdashInTheBackground()
+    public async Task AgyVariantHandsItsStdinPayloadToKyberdashInTheBackground()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
@@ -445,7 +445,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         ProcessResult result;
         try
         {
-            result = RunVariant(sandbox, python, artifact, fixture, true, TimeSpan.FromSeconds(15));
+            result = await RunVariant(sandbox, python, artifact, fixture, true, TimeSpan.FromSeconds(15));
         }
         catch (TimeoutException)
         {
@@ -463,27 +463,27 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             File.Exists(sandbox.KyberdashFinishedFile),
             "The agy variant waited for the kyberdash hand-off to finish; it must return first (C8).");
 
-        Assert.Equal(ExpectedKyberdashArguments, File.ReadAllLines(sandbox.KyberdashArgvFile));
-        Assert.Equal(fixture, File.ReadAllText(sandbox.KyberdashStdinFile));
+        Assert.Equal(ExpectedKyberdashArguments, await File.ReadAllLinesAsync(sandbox.KyberdashArgvFile));
+        Assert.Equal(fixture, await File.ReadAllTextAsync(sandbox.KyberdashStdinFile));
 
-        ProcessResult withoutKyberdash = RunVariant(sandbox, python, artifact, fixture, false);
+        ProcessResult withoutKyberdash = await RunVariant(sandbox, python, artifact, fixture, false);
         AssertSucceeded(withoutKyberdash, "agy");
         Assert.Equal(withoutKyberdash.StandardOutput, result.StandardOutput);
 
-        File.WriteAllText(sandbox.KyberdashReleaseFile, string.Empty);
+        await File.WriteAllTextAsync(sandbox.KyberdashReleaseFile, string.Empty);
         Assert.True(
             WaitForFile(sandbox.KyberdashFinishedFile, TimeSpan.FromSeconds(30)),
             "The stub kyberdash did not finish after the release file appeared.");
     }
 
     [Fact]
-    public void AgyVariantStillRendersAndExitsZeroWhenKyberdashIsNotOnPath()
+    public async Task AgyVariantStillRendersAndExitsZeroWhenKyberdashIsNotOnPath()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
+        ProcessResult result = await RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
 
         AssertSucceeded(result, "agy");
         AssertRendersValue(result.StandardOutput, "AGY", "AGY badge");
@@ -495,17 +495,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void PiExtensionRendersEverySegmentTheInventoryDeclaresInTuiMode()
+    public async Task PiExtensionRendersEverySegmentTheInventoryDeclaresInTuiMode()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-tui.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "tui");
 
         AssertSucceeded(result, "Pi");
-        string report = File.ReadAllText(reportPath);
+        string report = await File.ReadAllTextAsync(reportPath);
         string[] footerCalls = ReportStrings(report, "uiCalls");
         string[] footer = ReportStrings(report, "footer");
         Assert.Contains("setFooter", footerCalls);
@@ -531,17 +531,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionRegistersNoFooterOutsideTuiMode()
+    public async Task PiExtensionRegistersNoFooterOutsideTuiMode()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-plain.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "plain");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "plain");
 
         AssertSucceeded(result, "Pi");
-        string report = File.ReadAllText(reportPath);
+        string report = await File.ReadAllTextAsync(reportPath);
         string[] footerCalls = ReportStrings(report, "uiCalls");
         string[] stderr = ReportStrings(report, "stderr");
         string[] stdout = ReportStrings(report, "stdout");
@@ -551,34 +551,34 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionRendersFiniteTotalsForUntrustedUsage()
+    public async Task PiExtensionRendersFiniteTotalsForUntrustedUsage()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-poison.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_POISON=1");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_POISON=1");
 
         AssertSucceeded(result, "Pi");
-        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
+        string rendered = string.Join("\n", ReportStrings(await File.ReadAllTextAsync(reportPath), "footer"));
         Assert.True(rendered.Length > 0, "The Pi extension rendered no footer for untrusted usage.");
         Assert.DoesNotContain("NaN", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("Infinity", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PiExtensionRendersABarWhenTheBranchProviderThrows()
+    public async Task PiExtensionRendersABarWhenTheBranchProviderThrows()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-throw-branch.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_THROW_BRANCH=1");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_THROW_BRANCH=1");
 
         AssertSucceeded(result, "Pi");
-        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
+        string rendered = string.Join("\n", ReportStrings(await File.ReadAllTextAsync(reportPath), "footer"));
         Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the branch provider threw.");
         Assert.Contains("turn #--", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("turn #0", rendered, StringComparison.Ordinal);
@@ -586,17 +586,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionRendersABarWhenTheSessionStoreThrows()
+    public async Task PiExtensionRendersABarWhenTheSessionStoreThrows()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-throw-entries.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_THROW_ENTRIES=1");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_THROW_ENTRIES=1");
 
         AssertSucceeded(result, "Pi");
-        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"));
+        string rendered = string.Join("\n", ReportStrings(await File.ReadAllTextAsync(reportPath), "footer"));
         Assert.True(rendered.Length > 0, "The Pi extension rendered no fallback bar when the session store threw.");
         Assert.Contains("turn #--", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("turn #0", rendered, StringComparison.Ordinal);
@@ -604,17 +604,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionScopesReRendersPerSession()
+    public async Task PiExtensionScopesReRendersPerSession()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-sessions.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_SESSIONS=2");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "tui", "PI_SESSIONS=2");
 
         AssertSucceeded(result, "Pi");
-        Assert.Equal(["A", "B", "B"], ReportStrings(File.ReadAllText(reportPath), "renders"));
+        Assert.Equal(["A", "B", "B"], ReportStrings(await File.ReadAllTextAsync(reportPath), "renders"));
     }
 
     [Fact]
@@ -654,7 +654,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionWritesNoFileAnywhereInTheSandbox()
+    public async Task PiExtensionWritesNoFileAnywhereInTheSandbox()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
@@ -662,7 +662,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string artifactDirectory = Path.GetDirectoryName(artifact) ?? string.Empty;
         Dictionary<string, string> before = Snapshot(sandbox.HomeDirectory, sandbox.WorkDirectory, artifactDirectory);
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact,
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact,
             Path.Combine(sandbox.RecordDirectory, "pi-report-write.json"), "tui");
 
         AssertSucceeded(result, "Pi");
@@ -671,19 +671,19 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void PiExtensionDoesNotEchoAnEnvironmentValueIntoItsOutput()
+    public async Task PiExtensionDoesNotEchoAnEnvironmentValueIntoItsOutput()
     {
         string artifact = RequireArtifact(PiArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "pi-report-canary.json");
 
-        ProcessResult result = RunPiHarness(sandbox, node, artifact, reportPath, "tui");
+        ProcessResult result = await RunPiHarness(sandbox, node, artifact, reportPath, "tui");
 
         AssertSucceeded(result, "Pi");
-        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "footer"))
+        string rendered = string.Join("\n", ReportStrings(await File.ReadAllTextAsync(reportPath), "footer"))
                           + "\n"
-                          + string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "stderr"));
+                          + string.Join("\n", ReportStrings(await File.ReadAllTextAsync(reportPath), "stderr"));
         Assert.DoesNotContain(CanaryValue, rendered, StringComparison.Ordinal);
         Assert.DoesNotContain(CanaryValue, result.StandardError, StringComparison.Ordinal);
     }
@@ -693,17 +693,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     // -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void CommandCodeModRendersEverySegmentTheInventoryDeclaresInTuiMode()
+    public async Task CommandCodeModRendersEverySegmentTheInventoryDeclaresInTuiMode()
     {
         string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-tui.json");
 
-        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
+        ProcessResult result = await RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
 
         AssertSucceeded(result, "CommandCode");
-        string report = File.ReadAllText(reportPath);
+        string report = await File.ReadAllTextAsync(reportPath);
         string[] status = ReportStrings(report, "setStatus");
         string rendered = string.Join("\n", status);
         Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
@@ -724,17 +724,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void CommandCodeModClearsItsSegmentOutsideTuiMode()
+    public async Task CommandCodeModClearsItsSegmentOutsideTuiMode()
     {
         string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-plain.json");
 
-        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "plain");
+        ProcessResult result = await RunCommandCodeHarness(sandbox, node, artifact, reportPath, "plain");
 
         AssertSucceeded(result, "CommandCode");
-        string report = File.ReadAllText(reportPath);
+        string report = await File.ReadAllTextAsync(reportPath);
         string[] status = ReportStrings(report, "setStatus");
         Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call outside TUI mode.");
         Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
@@ -774,33 +774,33 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void CommandCodeModDoesNotEchoAnEnvironmentValueIntoItsOutput()
+    public async Task CommandCodeModDoesNotEchoAnEnvironmentValueIntoItsOutput()
     {
         string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-canary.json");
 
-        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
+        ProcessResult result = await RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
 
         AssertSucceeded(result, "CommandCode");
-        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "setStatus"));
+        string rendered = string.Join("\n", ReportStrings(await File.ReadAllTextAsync(reportPath), "setStatus"));
         Assert.DoesNotContain(CanaryValue, rendered, StringComparison.Ordinal);
         Assert.DoesNotContain(CanaryValue, result.StandardError, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void CommandCodeModRendersNonFiniteNumbersAsAbsentAndKeepsTheLastGoodTurn()
+    public async Task CommandCodeModRendersNonFiniteNumbersAsAbsentAndKeepsTheLastGoodTurn()
     {
         string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-poison.json");
 
-        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_POISON_TURN=1");
+        ProcessResult result = await RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_POISON_TURN=1");
 
         AssertSucceeded(result, "CommandCode");
-        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        string[] status = ReportStrings(await File.ReadAllTextAsync(reportPath), "setStatus");
         Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
         string rendered = string.Join("\n", status);
         Assert.DoesNotContain("NaN", rendered, StringComparison.Ordinal);
@@ -810,17 +810,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void CommandCodeModClearsItsSegmentWhenTheHostOmitsCapabilities()
+    public async Task CommandCodeModClearsItsSegmentWhenTheHostOmitsCapabilities()
     {
         string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-nocaps.json");
 
-        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_NO_CAPS=1");
+        ProcessResult result = await RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_NO_CAPS=1");
 
         AssertSucceeded(result, "CommandCode");
-        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        string[] status = ReportStrings(await File.ReadAllTextAsync(reportPath), "setStatus");
         Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call without capabilities.");
         Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
             "The CommandCode mod must clear its segment when the host omits capabilities, so a stale bar " +
@@ -828,14 +828,14 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     [Fact]
-    public void CommandCodeModSurvivesHookRegistrationFailure()
+    public async Task CommandCodeModSurvivesHookRegistrationFailure()
     {
         string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
         string node = RequireRuntime("node");
         Sandbox sandbox = new(_temp);
         string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-hooks-throw.json");
 
-        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_HOOKS_THROW=1");
+        ProcessResult result = await RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_HOOKS_THROW=1");
 
         // A host that rejects hook registration must not take the session down: the node test
         // asserting registration would throw on a factory failure, so a zero exit is the evidence.
@@ -951,7 +951,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     // Helpers: running the variants inside the sandbox.
     // -----------------------------------------------------------------------------------------
 
-    private static ProcessResult RunVariant(
+    private static async Task<ProcessResult> RunVariant(
         Sandbox sandbox,
         string interpreter,
         string artifactPath,
@@ -960,7 +960,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         TimeSpan? timeout = null)
     {
         ProcessStartInfo startInfo = VariantStartInfo(sandbox, interpreter, artifactPath, withKyberdash);
-        return ProcessRunner.Run(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));
     }
 
     private static ProcessStartInfo VariantStartInfo(
@@ -990,7 +990,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     /// log. Fails the run when the probe itself did not initialize — an empty log must
     /// mean no connects, never a broken hook.
     /// </summary>
-    private static ProcessResult RunWithSocketAudit(
+    private static async Task<ProcessResult> RunWithSocketAudit(
         Sandbox sandbox,
         string python,
         string scriptPath,
@@ -998,7 +998,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     {
         string probeDirectory = Path.Combine(sandbox.RecordDirectory, "socket-audit");
         Directory.CreateDirectory(probeDirectory);
-        File.WriteAllText(Path.Combine(probeDirectory, "sitecustomize.py"), SocketAuditProbeScript);
+        await File.WriteAllTextAsync(Path.Combine(probeDirectory, "sitecustomize.py"), SocketAuditProbeScript);
         if (File.Exists(sandbox.SocketAuditLogFile))
             File.Delete(sandbox.SocketAuditLogFile);
 
@@ -1008,7 +1008,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         startInfo.Environment["PYTHONPATH"] = probeDirectory;
         startInfo.Environment["KYBER_SOCKET_AUDIT_LOG"] = sandbox.SocketAuditLogFile;
         startInfo.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
-        ProcessResult result = ProcessRunner.Run(startInfo, standardInput, TimeSpan.FromSeconds(30));
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, standardInput, TimeSpan.FromSeconds(30));
         AssertProbeInitialized(sandbox.SocketAuditLogFile, result);
         return result;
     }
@@ -1055,7 +1055,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         return accepted;
     }
 
-    private static ProcessResult RunPiHarness(
+    private static async Task<ProcessResult> RunPiHarness(
         Sandbox sandbox,
         string node,
         string artifactPath,
@@ -1086,10 +1086,10 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                 if (parts.Length == 2)
                     startInfo.Environment[parts[0]] = parts[1];
             }
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
-    private static ProcessResult RunCommandCodeHarness(
+    private static async Task<ProcessResult> RunCommandCodeHarness(
         Sandbox sandbox,
         string node,
         string artifactPath,
@@ -1120,7 +1120,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                 if (parts.Length == 2)
                     startInfo.Environment[parts[0]] = parts[1];
             }
-        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        return await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
     // -----------------------------------------------------------------------------------------

@@ -37,108 +37,108 @@ public sealed class FileHookSnapshotStoreTests : IDisposable
     }
 
     [Fact]
-    public void AnUpdateWritesTheDocumentTheMutationReturns()
+    public async Task AnUpdateWritesTheDocumentTheMutationReturns()
     {
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
 
         Assert.True(_store.Exists(Directory, DocumentName));
         Assert.Equal("[1]", _store.ReadText(Directory, DocumentName));
     }
 
     [Fact]
-    public void AnUpdateIsGivenTheCurrentTextAndReplacesIt()
+    public async Task AnUpdateIsGivenTheCurrentTextAndReplacesIt()
     {
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
         string? seen = null;
 
-        _store.Update(Directory, DocumentName, current =>
+        await _store.UpdateAsync(Directory, DocumentName, current =>
         {
             seen = current;
             return "[1,2]";
-        });
+        }, CancellationToken.None);
 
         Assert.Equal("[1]", seen);
         Assert.Equal("[1,2]", _store.ReadText(Directory, DocumentName));
     }
 
     [Fact]
-    public void AMutationThatReturnsNullLeavesTheDocumentAlone()
+    public async Task AMutationThatReturnsNullLeavesTheDocumentAlone()
     {
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
 
-        _store.Update(Directory, DocumentName, _ => null);
+        await _store.UpdateAsync(Directory, DocumentName, _ => null, CancellationToken.None);
 
         Assert.Equal("[1]", _store.ReadText(Directory, DocumentName));
     }
 
     [Fact]
-    public void AnUpdateThatReturnsNullOnAMissingDocumentCreatesNone()
+    public async Task AnUpdateThatReturnsNullOnAMissingDocumentCreatesNone()
     {
-        _store.Update(Directory, DocumentName, _ => null);
+        await _store.UpdateAsync(Directory, DocumentName, _ => null, CancellationToken.None);
 
         Assert.False(_store.Exists(Directory, DocumentName));
     }
 
     [Fact]
-    public void AnUpdateLeavesNoTemporaryFileBehind()
+    public async Task AnUpdateLeavesNoTemporaryFileBehind()
     {
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
 
         Assert.Empty(_files.EnumerateFiles(Directory, "*.tmp", recursive: false));
     }
 
     [Fact]
-    public void AnUpdateSweepsDebrisFromAnInterruptedWrite()
+    public async Task AnUpdateSweepsDebrisFromAnInterruptedWrite()
     {
         _files.CreateDirectory(Directory);
         string debris = Path.Combine(Directory, ".snapshots.abandoned.tmp");
         _files.WriteAllText(debris, "partial");
 
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
 
         Assert.False(_files.FileExists(debris));
     }
 
     [Fact]
-    public void AMoveThatFailsLeavesThePreviousWholeDocumentAndNoTemporary()
+    public async Task AMoveThatFailsLeavesThePreviousWholeDocumentAndNoTemporary()
     {
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
         _files.FailWhen(operation => operation.Name == nameof(InMemoryFileSystem.MoveFile));
 
-        _store.Update(Directory, DocumentName, _ => "[1,2]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1,2]", CancellationToken.None);
 
         Assert.Equal("[1]", _store.ReadText(Directory, DocumentName));
         Assert.Empty(_files.EnumerateFiles(Directory, "*.tmp", recursive: false));
     }
 
     [Fact]
-    public void AReadThatFailsReportsAnEmptyDocument()
+    public async Task AReadThatFailsReportsAnEmptyDocument()
     {
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
         _files.FailWhen(operation => operation.Name == nameof(InMemoryFileSystem.ReadAllText));
 
         Assert.Equal(string.Empty, _store.ReadText(Directory, DocumentName));
     }
 
     [Fact]
-    public void ALockHeldElsewhereIsWaitedForAndTheUpdateThenSucceeds()
+    public async Task ALockHeldElsewhereIsWaitedForAndTheUpdateThenSucceeds()
     {
         _files.CreateDirectory(Directory);
         Stream held = _files.OpenExclusive(LockPath);
 
-        RunUpdateAdvancingTime(afterParks: 3, release: held.Dispose, mutate: _ => "[1]");
+        await RunUpdateAdvancingTimeAsync(afterParks: 3, release: held.Dispose, mutate: _ => "[1]");
 
         Assert.Equal("[1]", _store.ReadText(Directory, DocumentName));
     }
 
     [Fact]
-    public void ALockThatStaysHeldPastTheWaitWindowGivesUpWithoutWriting()
+    public async Task ALockThatStaysHeldPastTheWaitWindowGivesUpWithoutWriting()
     {
         _files.CreateDirectory(Directory);
         using Stream held = _files.OpenExclusive(LockPath);
         bool mutated = false;
 
-        RunUpdateAdvancingTime(afterParks: int.MaxValue, release: () => { }, mutate: _ =>
+        await RunUpdateAdvancingTimeAsync(afterParks: int.MaxValue, release: () => { }, mutate: _ =>
         {
             mutated = true;
             return "[1]";
@@ -149,20 +149,20 @@ public sealed class FileHookSnapshotStoreTests : IDisposable
     }
 
     [Fact]
-    public void AFailureWhileWritingIsAbsorbed()
+    public async Task AFailureWhileWritingIsAbsorbed()
     {
         _files.FailWhen(operation => operation.Name == nameof(InMemoryFileSystem.CreateDirectory));
 
-        _store.Update(Directory, DocumentName, _ => "[1]");
+        await _store.UpdateAsync(Directory, DocumentName, _ => "[1]", CancellationToken.None);
 
         Assert.False(_store.Exists(Directory, DocumentName));
     }
 
-    private void RunUpdateAdvancingTime(int afterParks, Action release, Func<string, string?> mutate) =>
-        _ = _time.RunAdvancingOnParks(
-            () =>
+    private Task RunUpdateAdvancingTimeAsync(int afterParks, Action release, Func<string, string?> mutate) =>
+        _time.RunAdvancingOnParksAsync(
+            async () =>
             {
-                _store.Update(Directory, DocumentName, mutate);
+                await _store.UpdateAsync(Directory, DocumentName, mutate, CancellationToken.None);
                 return true;
             },
             TimeSpan.FromMilliseconds(50),

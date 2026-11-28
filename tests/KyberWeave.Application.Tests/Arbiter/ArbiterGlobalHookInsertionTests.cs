@@ -30,13 +30,13 @@ public sealed class ArbiterGlobalHookInsertionTests
         "Arbiter global scope: no project pi hook; inserting the task prompt without evaluation.";
 
     [Fact]
-    public void GlobalScope_AntigravityWithoutAProjectHook_InsertsTheTaskPrompt()
+    public async Task GlobalScope_AntigravityWithoutAProjectHook_InsertsTheTaskPrompt()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Uncover("antigravity");
         string payload = AntigravityDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(AntigravityNoHookLog, run.Stderr, StringComparison.Ordinal);
@@ -46,13 +46,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_WhenTheProjectHookFileCannotBeRead_InsertsAndLogsTheFailure()
+    public async Task GlobalScope_WhenTheProjectHookFileCannotBeRead_InsertsAndLogsTheFailure()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Answer = (_, _) => throw new UnauthorizedAccessException("denied");
         string payload = AntigravityDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains("could not be read (denied)", run.Stderr, StringComparison.Ordinal);
@@ -65,13 +65,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_AntigravityWithAProjectHook_DefersAndWritesThePlainAllow()
+    public async Task GlobalScope_AntigravityWithAProjectHook_DefersAndWritesThePlainAllow()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Cover("antigravity");
         string payload = AntigravityDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "antigravity", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
@@ -81,13 +81,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_OpenCodeWithoutAProjectHook_InsertsTheTaskPrompt()
+    public async Task GlobalScope_OpenCodeWithoutAProjectHook_InsertsTheTaskPrompt()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Uncover("opencode");
         string payload = OpenCodeDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "opencode", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "opencode", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(OpenCodeNoHookLog, run.Stderr, StringComparison.Ordinal);
@@ -101,13 +101,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_OpenCodeWithAProjectHook_DefersAndWritesNoDocument()
+    public async Task GlobalScope_OpenCodeWithAProjectHook_DefersAndWritesNoDocument()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Cover("opencode");
         string payload = OpenCodeDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "opencode", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "opencode", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
@@ -118,13 +118,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_FactoryWithoutAProjectHook_InsertsTheTaskPrompt()
+    public async Task GlobalScope_FactoryWithoutAProjectHook_InsertsTheTaskPrompt()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Uncover("factory");
         string payload = FactoryDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "factory", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "factory", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(FactoryNoHookLog, run.Stderr, StringComparison.Ordinal);
@@ -134,13 +134,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_FactoryWithAProjectHook_DefersAndWritesNoDocument()
+    public async Task GlobalScope_FactoryWithAProjectHook_DefersAndWritesNoDocument()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Cover("factory");
         string payload = FactoryDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "factory", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "factory", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
@@ -151,13 +151,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_CursorWithoutAProjectHook_InsertsTheTaskPrompt()
+    public async Task GlobalScope_CursorWithoutAProjectHook_InsertsTheTaskPrompt()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Uncover("cursor");
         string payload = ArbiterGlobalHookScenario.CursorTaskDispatch(scenario.ProjectRoot);
 
-        HookRun run = RunGlobal(scenario.Project, "cursor", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "cursor", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(CursorNoHookLog, run.Stderr, StringComparison.Ordinal);
@@ -167,13 +167,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_CursorWithAProjectHook_DefersAndWritesNoDocument()
+    public async Task GlobalScope_CursorWithAProjectHook_DefersAndWritesNoDocument()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Cover("cursor");
         string payload = ArbiterGlobalHookScenario.CursorTaskDispatch(scenario.ProjectRoot);
 
-        HookRun run = RunGlobal(scenario.Project, "cursor", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "cursor", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
@@ -184,13 +184,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_PiWithoutAProjectHook_InsertsTheTaskPrompt()
+    public async Task GlobalScope_PiWithoutAProjectHook_InsertsTheTaskPrompt()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Uncover("pi");
         string payload = PiDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "pi", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "pi", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(PiNoHookLog, run.Stderr, StringComparison.Ordinal);
@@ -204,13 +204,13 @@ public sealed class ArbiterGlobalHookInsertionTests
     }
 
     [Fact]
-    public void GlobalScope_PiWithAProjectHook_DefersAndWritesNoDocument()
+    public async Task GlobalScope_PiWithAProjectHook_DefersAndWritesNoDocument()
     {
         using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
         scenario.ProjectHooks.Cover("pi");
         string payload = PiDispatch(scenario.ProjectRoot, TaskDispatch);
 
-        HookRun run = RunGlobal(scenario.Project, "pi", payload, new ScriptedPrompts());
+        HookRun run = await RunGlobal(scenario.Project, "pi", payload, new ScriptedPrompts());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
@@ -220,7 +220,7 @@ public sealed class ArbiterGlobalHookInsertionTests
         Assert.DoesNotContain(PiNoHookLog, run.Stderr, StringComparison.Ordinal);
     }
 
-    private static HookRun RunGlobal(
+    private static async Task<HookRun> RunGlobal(
         InMemoryArbiterHost host,
         string harness,
         string payload,
@@ -229,7 +229,7 @@ public sealed class ArbiterGlobalHookInsertionTests
         HookCommand command = host.HookCommand(host.Registry(host.Engine()), prompts: prompts);
         using StringWriter stdout = new();
         using StringWriter stderr = new();
-        int exit = command.Run(harness, null, payload, stdout, stderr, HookScope.Global, host.HomeDirectory);
+        int exit = await command.RunAsync(harness, null, payload, stdout, stderr, HookScope.Global, host.HomeDirectory);
         return new HookRun(exit, stdout.ToString(), stderr.ToString());
     }
 
@@ -309,10 +309,22 @@ public sealed class ArbiterGlobalHookInsertionTests
 
         public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
 
+        public Task<ITaskPromptService> ForRepositoryAsync(
+            string repositoryRoot,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<ITaskPromptService>(this);
+
         public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
         {
             Requests.Add(request);
             return new TaskPromptResult(true, TaskPrompt, "csharp-dev", "medium", "plan", request.Technology, [], null);
         }
+
+        public Task<TaskPromptResult> BuildAsync(
+            TaskPromptRequest request,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Build(request, config));
     }
 }

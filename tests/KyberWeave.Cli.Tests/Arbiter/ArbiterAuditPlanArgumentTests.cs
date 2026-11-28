@@ -22,18 +22,19 @@ public sealed class ArbiterAuditPlanArgumentTests : IDisposable
     [InlineData("2026-11-13-job-status-cards.md", "handbook/plans")]
     [InlineData("handbook/plans/2026-11-13-job-status-cards.md", ".")]
     [InlineData("./handbook/plans/2026-11-13-job-status-cards.md", ".")]
-    public void AnySpellingOfThePlanSelectsTheEventsThatCarryItWhateverSpellingTheDispatchUsed(string typed, string workingDirectory)
+    public async Task AnySpellingOfThePlanSelectsTheEventsThatCarryItWhateverSpellingTheDispatchUsed(string typed, string workingDirectory)
     {
         string root = Host();
 
-        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
+        ArbiterCommandRun run = await _host.RunAsync(token => _host.Command<ArbiterAuditCommand>().ExecuteAsync(
             null!,
             new ArbiterSettings
             {
                 Path = root,
                 Plan = typed,
                 WorkingDirectory = Path.Combine(root, workingDirectory.Replace('/', Path.DirectorySeparatorChar))
-            }));
+            },
+            token));
 
         Assert.Contains(OnPlan, run.Output, StringComparison.Ordinal);
         Assert.Contains(OnPlanBySlug, run.Output, StringComparison.Ordinal);

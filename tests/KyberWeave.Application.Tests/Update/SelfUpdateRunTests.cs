@@ -158,7 +158,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>The stable path asks GitHub for its latest release and never lists releases.</summary>
     [Fact]
-    public void RunLatestStableUsesReleasesLatestAndReplacesBothBinaries()
+    public async Task RunLatestStableUsesReleasesLatestAndReplacesBothBinaries()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
@@ -166,7 +166,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("updated kyber-weave 0.2.0", outcome.Message, StringComparison.Ordinal);
@@ -183,7 +183,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A draft is never installed, however high its version.</summary>
     [Fact]
-    public void RunReleaseCandidateSkipsDraftsAndUsesReleasesList()
+    public async Task RunReleaseCandidateSkipsDraftsAndUsesReleasesList()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0-rc.1", "osx-arm64", false);
         handler.MapJson(
@@ -197,7 +197,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0-rc.1", outcome.Message, StringComparison.Ordinal);
@@ -208,12 +208,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A pinned version needs no release lookup at all.</summary>
     [Fact]
-    public void RunPinnedVersionSkipsApiAndStripsVPrefix()
+    public async Task RunPinnedVersionSkipsApiAndStripsVPrefix()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("v0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("v0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
@@ -227,7 +227,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// comparison would also pick <c>rc.9</c> over <c>rc.10</c>.
     /// </summary>
     [Fact]
-    public void RunReleaseCandidateTakesHighestVersionNotFirstListed()
+    public async Task RunReleaseCandidateTakesHighestVersionNotFirstListed()
     {
         using ReleaseMapHandler handler = MapRelease("0.1.7-rc.10", "osx-arm64", false);
         handler.MapJson(
@@ -241,7 +241,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """);
         SelfUpdateHost host = CreateHost("0.1.6", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.1.7-rc.10", outcome.Message, StringComparison.Ordinal);
@@ -252,7 +252,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// must still win, so a full page means the next one is read too.
     /// </summary>
     [Fact]
-    public void RunReleaseCandidateReadsEveryReleasesPage()
+    public async Task RunReleaseCandidateReadsEveryReleasesPage()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         string fullPage = "[" + string.Join(
@@ -265,7 +265,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """[{"tag_name":"v0.2.0","draft":false,"prerelease":false}]""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0", outcome.Message, StringComparison.Ordinal);
@@ -280,7 +280,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// One of those must not abort resolving the releases that are.
     /// </summary>
     [Fact]
-    public void RunReleaseCandidateSkipsTagsThatAreNotReleaseVersions()
+    public async Task RunReleaseCandidateSkipsTagsThatAreNotReleaseVersions()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
@@ -293,19 +293,19 @@ public sealed class SelfUpdateRunTests : IDisposable
             """);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, true, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions(null, true, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RunReleaseCandidateWithVersionFailsWithoutHttp()
+    public async Task RunReleaseCandidateWithVersionFailsWithoutHttp()
     {
         using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", true, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", true, false));
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("--release-candidate", outcome.Message, StringComparison.Ordinal);
@@ -313,7 +313,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunChecksumMismatchLeavesExistingBinary()
+    public async Task RunChecksumMismatchLeavesExistingBinary()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
@@ -325,7 +325,7 @@ public sealed class SelfUpdateRunTests : IDisposable
                 .ToArray());
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("SHA256 mismatch", outcome.Message, StringComparison.Ordinal);
@@ -333,7 +333,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunAlreadyCurrentIsNoOp()
+    public async Task RunAlreadyCurrentIsNoOp()
     {
         using ReleaseMapHandler handler = new();
         handler.MapJson(
@@ -341,7 +341,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """{"tag_name":"v0.1.1","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.1+abc", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.1.1", outcome.Message);
@@ -352,7 +352,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunNoMcpDoesNotInstallMcp()
+    public async Task RunNoMcpDoesNotInstallMcp()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         handler.MapJson(
@@ -360,7 +360,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, false, true));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions(null, false, true));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
@@ -371,7 +371,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunWindowsZipReplacesExeNames()
+    public async Task RunWindowsZipReplacesExeNames()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "win-x64", true);
         handler.MapJson(
@@ -379,7 +379,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "win-x64", true);
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
@@ -389,7 +389,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunDotnetHostIsRefused()
+    public async Task RunDotnetHostIsRefused()
     {
         SelfUpdateHost host = new(
             Path.Combine(_world.Install, "dotnet"),
@@ -400,7 +400,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         _world.Files.WriteAllText(host.ProcessPath, "shim");
 
         using ReleaseMapHandler handler = new();
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
@@ -411,7 +411,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// explicitly, so the same releases-channel refusal that protects the normal path applies here too.
     /// </summary>
     [Fact]
-    public void FinishUpdateWithDotnetHostIsRefused()
+    public async Task FinishUpdateWithDotnetHostIsRefused()
     {
         SelfUpdateHost host = new(
             Path.Combine(_world.Install, "dotnet"),
@@ -422,7 +422,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         _world.Files.WriteAllText(host.ProcessPath, "shim");
 
         using ReleaseMapHandler handler = new();
-        SelfUpdateOutcome outcome = Run(
+        SelfUpdateOutcome outcome = await RunAsync(
             handler,
             host,
             new SelfUpdateOptions("0.1.0", false, false, FinishUpdate: true));
@@ -439,7 +439,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// either way and pin nothing about the ordering.
     /// </summary>
     [Fact]
-    public void FinishUpdateWithDotnetToolInstallIsRefused()
+    public async Task FinishUpdateWithDotnetToolInstallIsRefused()
     {
         string tools = Path.Combine(_world.Install, ".dotnet", "tools");
         _world.Files.CreateDirectory(tools);
@@ -448,7 +448,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         SelfUpdateHost host = new(processPath, "0.1.0", "osx-arm64", false, false);
 
         using ReleaseMapHandler handler = new();
-        SelfUpdateOutcome outcome = Run(
+        SelfUpdateOutcome outcome = await RunAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true));
@@ -458,7 +458,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunDotnetToolInstallIsRefused()
+    public async Task RunDotnetToolInstallIsRefused()
     {
         string tools = Path.Combine(_world.Install, ".dotnet", "tools");
         _world.Files.CreateDirectory(tools);
@@ -467,14 +467,14 @@ public sealed class SelfUpdateRunTests : IDisposable
         SelfUpdateHost host = new(processPath, "0.1.0", "osx-arm64", false, false);
 
         using ReleaseMapHandler handler = new();
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("dotnet tool", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RunReadOnlyInstallDirectoryIsRefused()
+    public async Task RunReadOnlyInstallDirectoryIsRefused()
     {
         // Driven through the probe seam rather than POSIX mode bits: root and Windows both
         // write through a read-only mode, so a mode-based test could never run there.
@@ -482,7 +482,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> probed = [];
         using ReleaseMapHandler handler = new();
 
-        SelfUpdateOutcome outcome = Run(
+        SelfUpdateOutcome outcome = await RunAsync(
             handler,
             host,
             new SelfUpdateOptions(),
@@ -511,13 +511,13 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunGitHubTokenIsSentAsBearerAndNotMentionedOnFailure()
+    public async Task RunGitHubTokenIsSentAsBearerAndNotMentionedOnFailure()
     {
         using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         const string token = "not-a-real-token";
 
-        SelfUpdateOutcome outcome = Run(
+        SelfUpdateOutcome outcome = await RunAsync(
             handler,
             host,
             new SelfUpdateOptions("0.9.9", false, true),
@@ -537,7 +537,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunWhenMcpStagingFailsRestoresOriginalCliBinary()
+    public async Task RunWhenMcpStagingFailsRestoresOriginalCliBinary()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         string tag = "v0.2.0";
@@ -555,14 +555,14 @@ public sealed class SelfUpdateRunTests : IDisposable
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Equal("old-cli", _world.Files.ReadAllText(host.ProcessPath));
     }
 
     [Fact]
-    public void RunCommitsTheRunningImageLast()
+    public async Task RunCommitsTheRunningImageLast()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
@@ -581,7 +581,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         int mcpIndex = log.FindIndex(line => line.StartsWith("installed kyber-weave-mcp", StringComparison.Ordinal));
@@ -595,7 +595,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunWhenMcpCommitFailsLeavesTheRunningImageUntouched()
+    public async Task RunWhenMcpCommitFailsLeavesTheRunningImageUntouched()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
@@ -611,7 +611,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             _ => null,
             log.Add,
             captureProcess: (_, _) => QuietSuccess);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Equal("old-cli", _world.Files.ReadAllText(host.ProcessPath));
@@ -621,7 +621,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunOnMacOsInstallsAfterClearingQuarantine()
+    public async Task RunOnMacOsInstallsAfterClearingQuarantine()
     {
         // The ordering this pins — xattr runs against the staging copy, before the move —
         // is only observable in a published single-file binary, where reaching
@@ -631,7 +631,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64") with { IsMacOs = true };
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
@@ -641,34 +641,34 @@ public sealed class SelfUpdateRunTests : IDisposable
     // ---- KyberDash: installed beside the CLI, updated with it ----
 
     [Fact]
-    public void RunReplacesInstalledKyberDashFromTheNodeSeaAsset()
+    public async Task RunReplacesInstalledKyberDashFromTheNodeSeaAsset()
     {
         string installed = InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false, true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-kyberdash", _world.Files.ReadAllText(installed));
     }
 
     [Fact]
-    public void RunLeavesKyberDashAloneWhenItIsNotInstalled()
+    public async Task RunLeavesKyberDashAloneWhenItIsNotInstalled()
     {
         // No kyberdash on disk, and the release map carries no kyberdash asset:
         // an update that tried to fetch one would fail on the unmapped URI.
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.False(_world.Files.FileExists(Path.Combine(_world.Install, "kyberdash")));
     }
 
     [Fact]
-    public void RunLeavesKyberDashUntouchedWhenTheReleasePredatesIt()
+    public async Task RunLeavesKyberDashUntouchedWhenTheReleasePredatesIt()
     {
         // 0.1.7-rc.8 sorts below the floor, so no release at that tag carries the
         // asset. The unmapped URI is the assertion: asking for it would fail here.
@@ -676,20 +676,20 @@ public sealed class SelfUpdateRunTests : IDisposable
         using ReleaseMapHandler handler = MapRelease("0.1.7-rc.8", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.1.7-rc.8", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.1.7-rc.8", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("old-kyberdash", _world.Files.ReadAllText(installed));
     }
 
     [Fact]
-    public void RunLeavesKyberDashUntouchedUnderNoKyberDash()
+    public async Task RunLeavesKyberDashUntouchedUnderNoKyberDash()
     {
         string installed = InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(
+        SelfUpdateOutcome outcome = await RunAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, true));
@@ -699,13 +699,13 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunReplacesInstalledKyberDashOnWindows()
+    public async Task RunReplacesInstalledKyberDashOnWindows()
     {
         string installed = InstallKyberDash(true);
         using ReleaseMapHandler handler = MapRelease("0.2.0", "win-x64", true, true);
         SelfUpdateHost host = CreateHost("0.1.0", "win-x64", true);
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-kyberdash", _world.Files.ReadAllText(installed));
@@ -714,7 +714,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     [Theory]
     [InlineData("osx-arm64", false)]
     [InlineData("win-x64", true)]
-    public void RunReplacesInstalledKyberDashAndSiblingsWhenPresentInArchive(string rid, bool windows)
+    public async Task RunReplacesInstalledKyberDashAndSiblingsWhenPresentInArchive(string rid, bool windows)
     {
         string installed = InstallKyberDash(windows);
         using ReleaseMapHandler handler = MapRelease(
@@ -725,7 +725,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             withKyberDashSiblings: true);
         SelfUpdateHost host = CreateHost("0.1.0", rid, windows);
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-kyberdash", _world.Files.ReadAllText(installed));
@@ -740,34 +740,34 @@ public sealed class SelfUpdateRunTests : IDisposable
     // ---- Arbiter: installed beside the CLI, updated with it ----
 
     [Fact]
-    public void RunReplacesInstalledArbiter()
+    public async Task RunReplacesInstalledArbiter()
     {
         string installed = InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-arbiter", _world.Files.ReadAllText(installed));
     }
 
     [Fact]
-    public void RunLeavesArbiterAloneWhenItIsNotInstalled()
+    public async Task RunLeavesArbiterAloneWhenItIsNotInstalled()
     {
         // No kyber-weave-arbiter on disk, and the release map carries no arbiter asset:
         // an update that tried to fetch one would fail on the unmapped URI.
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.False(_world.Files.FileExists(Path.Combine(_world.Install, "kyber-weave-arbiter")));
     }
 
     [Fact]
-    public void RunLeavesArbiterUntouchedWhenTheReleasePredatesIt()
+    public async Task RunLeavesArbiterUntouchedWhenTheReleasePredatesIt()
     {
         // 0.1.7-rc.16 sorts below the arbiter floor, so no release at that tag carries the
         // asset. The unmapped URI is the assertion: asking for it would fail here.
@@ -775,20 +775,20 @@ public sealed class SelfUpdateRunTests : IDisposable
         using ReleaseMapHandler handler = MapRelease("0.1.7-rc.16", "osx-arm64", windows: false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.1.7-rc.16", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.1.7-rc.16", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("old-arbiter", _world.Files.ReadAllText(installed));
     }
 
     [Fact]
-    public void RunLeavesArbiterUntouchedUnderNoArbiter()
+    public async Task RunLeavesArbiterUntouchedUnderNoArbiter()
     {
         string installed = InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        SelfUpdateOutcome outcome = Run(
+        SelfUpdateOutcome outcome = await RunAsync(
             handler,
             host,
             new SelfUpdateOptions("0.2.0", false, false, NoArbiter: true));
@@ -798,20 +798,20 @@ public sealed class SelfUpdateRunTests : IDisposable
     }
 
     [Fact]
-    public void RunReplacesInstalledArbiterOnWindows()
+    public async Task RunReplacesInstalledArbiterOnWindows()
     {
         string installed = InstallArbiter(windows: true);
         using ReleaseMapHandler handler = MapRelease("0.2.0", "win-x64", windows: true, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "win-x64", windows: true);
 
-        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await RunAsync(handler, host, new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-arbiter", _world.Files.ReadAllText(installed));
     }
 
     [Fact]
-    public void RunWhenArbiterCommitFailsLeavesTheRunningImageUntouched()
+    public async Task RunWhenArbiterCommitFailsLeavesTheRunningImageUntouched()
     {
         string installed = InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
@@ -830,7 +830,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             host,
             null,
             log.Add);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Equal("old-cli", _world.Files.ReadAllText(host.ProcessPath));
@@ -849,7 +849,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// RED: <c>IArbiterHookRefresher</c> does not exist and <c>SelfUpdater</c> takes no such seam.
     /// </summary>
     [Fact]
-    public void RunInvokesArbiterRefreshSeamWhenArbiterInstalled()
+    public async Task RunInvokesArbiterRefreshSeamWhenArbiterInstalled()
     {
         InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
@@ -874,7 +874,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(1, refresher.Calls);
@@ -885,7 +885,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// RED: <c>IArbiterHookRefresher</c> does not exist and <c>SelfUpdater</c> takes no such seam.
     /// </summary>
     [Fact]
-    public void RunSkipsArbiterRefreshSeamWhenNoArbiterInstalled()
+    public async Task RunSkipsArbiterRefreshSeamWhenNoArbiterInstalled()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
@@ -909,7 +909,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(0, refresher.Calls);
@@ -919,11 +919,13 @@ public sealed class SelfUpdateRunTests : IDisposable
     {
         public int Calls { get; private set; }
 
-        public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
+        public Task<ArbiterHookRefreshResult> RefreshAsync(
+            IReadOnlyList<string> projectRoots,
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(projectRoots);
             Calls++;
-            return new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
+            return Task.FromResult(new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0));
         }
     }
 
@@ -958,7 +960,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         };
     }
 
-    private SelfUpdateOutcome RunWithTray(
+    private async Task<SelfUpdateOutcome> RunWithTrayAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
@@ -994,12 +996,12 @@ public sealed class SelfUpdateRunTests : IDisposable
             runProcess: runProcess,
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
-        return updater.Run(options);
+        return await updater.RunAsync(options);
     }
 
     /// <summary>Requirement 15.1: the tray is updated after the CLI it belongs to.</summary>
     [Fact]
-    public void RunDelegatesToKyberdashMenubarUpdate()
+    public async Task RunDelegatesToKyberdashMenubarUpdate()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1007,7 +1009,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<(string File, IReadOnlyList<string> Args)> spawned = [];
 
-        SelfUpdateOutcome outcome = RunWithTray(
+        SelfUpdateOutcome outcome = await RunWithTrayAsync(
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, spawned);
 
         Assert.Equal(0, outcome.ExitCode);
@@ -1022,7 +1024,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// for a CLI failure.
     /// </summary>
     [Fact]
-    public void RunReportsANonZeroTrayExitAsANamedFailure()
+    public async Task RunReportsANonZeroTrayExitAsANamedFailure()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1030,7 +1032,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<(string File, IReadOnlyList<string> Args)> spawned = [];
 
-        SelfUpdateOutcome outcome = RunWithTray(
+        SelfUpdateOutcome outcome = await RunWithTrayAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1061,7 +1063,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     [InlineData(false, false, "0.1.7-rc.12", true, "predates the KyberDash tray")]
     // Nothing recorded: update replaces, it does not add.
     [InlineData(false, false, "0.10.0", false, "no tray install recorded")]
-    public void RunSkipsTheTrayWithAReason(
+    public async Task RunSkipsTheTrayWithAReason(
         bool noMenubar,
         bool noKyberDash,
         string version,
@@ -1074,7 +1076,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<(string File, IReadOnlyList<string> Args)> spawned = [];
 
-        SelfUpdateOutcome outcome = RunWithTray(
+        SelfUpdateOutcome outcome = await RunWithTrayAsync(
             handler,
             host,
             new SelfUpdateOptions(version, false, false, noKyberDash, noMenubar),
@@ -1097,7 +1099,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// assert the order the reconciliation runs in. The tray is the existing runner; engine and plugin
     /// calls are dispatched on their first argument through the capture seam.
     /// </summary>
-    private SelfUpdateOutcome RunReconciling(
+    private async Task<SelfUpdateOutcome> RunReconcilingAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
@@ -1152,7 +1154,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             runProcess: runProcess,
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
-        return updater.Run(options);
+        return await updater.RunAsync(options);
     }
 
     /// <summary>A home with a recorded tray at the given version, or with no record when <paramref name="version"/> is null.</summary>
@@ -1207,7 +1209,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>After the binaries commit, the engine runs first, then the tray, then one capture plugin per harness.</summary>
     [Fact]
-    public void RunReconcilesAfterCommitInEngineTrayPluginOrder()
+    public async Task RunReconcilesAfterCommitInEngineTrayPluginOrder()
     {
         string kyberdash = InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1215,7 +1217,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
@@ -1230,7 +1232,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>The "already on" path still runs the engine, tray and plugin reconciliation, and still does not download.</summary>
     [Fact]
-    public void RunAlreadyCurrentStillReconcilesEngineTrayAndPlugin()
+    public async Task RunAlreadyCurrentStillReconcilesEngineTrayAndPlugin()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = new();
@@ -1241,7 +1243,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(handler, host, new SelfUpdateOptions(), log, steps);
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(handler, host, new SelfUpdateOptions(), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.10.0", outcome.Message);
@@ -1304,7 +1306,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     private static ProcessResult Exit(int code, string line = "") => new(code, string.Empty, line);
 
     /// <summary>Runs an update that finds 0.10.0 already installed, with a tray recorded at the given version.</summary>
-    private SelfUpdateOutcome RunUnchanged(
+    private async Task<SelfUpdateOutcome> RunUnchangedAsync(
         string? trayVersion,
         List<string> log,
         List<ReconcileStep> steps,
@@ -1317,12 +1319,12 @@ public sealed class SelfUpdateRunTests : IDisposable
             GitHubReleaseClient.LatestApi,
             """{"tag_name":"v0.10.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.10.0", "osx-arm64");
-        return RunReconciling(
+        return await RunReconcilingAsync(
             handler, host, options ?? new SelfUpdateOptions(), log, steps, trayVersion, script: script);
     }
 
     /// <summary>Runs an update from 0.1.0 to 0.10.0 with a tray recorded, and returns the finishing child's message too.</summary>
-    private (SelfUpdateOutcome Outcome, string ChildMessage) RunChanged(
+    private async Task<(SelfUpdateOutcome Outcome, string ChildMessage)> RunChangedAsync(
         List<string> log,
         List<ReconcileStep> steps,
         Func<IReadOnlyList<string>, ProcessResult?> script)
@@ -1330,7 +1332,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1343,12 +1345,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A current tray over a healthy engine is left alone: only the probe runs.</summary>
     [Fact]
-    public void RunLeavesACurrentTrayAndItsEngineAloneWhenTheProbeSucceeds()
+    public async Task RunLeavesACurrentTrayAndItsEngineAloneWhenTheProbeSucceeds()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps);
+        SelfUpdateOutcome outcome = await RunUnchangedAsync("0.10.0", log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal<string>([Probe, "plugin", "plugin"], steps.Select(Describe));
@@ -1356,12 +1358,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>Nothing the user stopped is started: no engine and no tray ends the step.</summary>
     [Fact]
-    public void RunStartsNothingWhenNeitherTheEngineNorTheTrayRuns()
+    public async Task RunStartsNothingWhenNeitherTheEngineNorTheTrayRuns()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged(
+        SelfUpdateOutcome outcome = await RunUnchangedAsync(
             "0.10.0", log, steps, Scripted((Probe, Exit(1)), ("menubar --running", Exit(1))));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -1370,12 +1372,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A tray that runs without an engine is restarted so it owns one.</summary>
     [Fact]
-    public void RunRestartsTheTrayWhenItRunsWithoutAnEngine()
+    public async Task RunRestartsTheTrayWhenItRunsWithoutAnEngine()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps, Scripted((Probe, Exit(1))));
+        SelfUpdateOutcome outcome = await RunUnchangedAsync("0.10.0", log, steps, Scripted((Probe, Exit(1))));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal<string>(RestartWithLaunch("0.10.0", "menubar --running"), steps.Select(Describe));
@@ -1383,12 +1385,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>An engine of another version is replaced by restarting the tray.</summary>
     [Fact]
-    public void RunRestartsACurrentTrayWhenTheEngineVersionDiffers()
+    public async Task RunRestartsACurrentTrayWhenTheEngineVersionDiffers()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps, Scripted((Probe, Exit(3))));
+        SelfUpdateOutcome outcome = await RunUnchangedAsync("0.10.0", log, steps, Scripted((Probe, Exit(3))));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal<string>(RestartWithLaunch("0.10.0"), steps.Select(Describe));
@@ -1396,12 +1398,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>An engine that does not answer is a failure that names the engine step.</summary>
     [Fact]
-    public void RunNamesTheEngineStepWhenTheProbeFindsAnUnresponsiveEngine()
+    public async Task RunNamesTheEngineStepWhenTheProbeFindsAnUnresponsiveEngine()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged("0.10.0", log, steps, Scripted((Probe, Exit(4, "engine did not answer"))));
+        SelfUpdateOutcome outcome = await RunUnchangedAsync("0.10.0", log, steps, Scripted((Probe, Exit(4, "engine did not answer"))));
 
         Assert.Equal(1, outcome.ExitCode);
         string message = outcome.Message;
@@ -1413,12 +1415,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>An older tray is restarted with an update even when the release did not change.</summary>
     [Fact]
-    public void RunRestartsAnOlderTrayWithAnUpdateWhenTheEngineIsHealthy()
+    public async Task RunRestartsAnOlderTrayWithAnUpdateWhenTheEngineIsHealthy()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged("0.9.23", log, steps);
+        SelfUpdateOutcome outcome = await RunUnchangedAsync("0.9.23", log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal<string>(RestartWithUpdate("0.10.0"), steps.Select(Describe));
@@ -1426,12 +1428,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>With no tray recorded the engine alone is checked, the tray verbs never run and the skip is logged.</summary>
     [Fact]
-    public void RunWithoutATrayKeepsTheDetachedEngineRestart()
+    public async Task RunWithoutATrayKeepsTheDetachedEngineRestart()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged(null, log, steps);
+        SelfUpdateOutcome outcome = await RunUnchangedAsync(null, log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal<string>(["engine ensure --if-running", "plugin", "plugin"], steps.Select(Describe));
@@ -1440,12 +1442,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>--no-menubar keeps today's engine check and touches no tray verb.</summary>
     [Fact]
-    public void RunWithNoMenubarEnsuresTheEngineAndRunsNoTrayVerb()
+    public async Task RunWithNoMenubarEnsuresTheEngineAndRunsNoTrayVerb()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunUnchanged(
+        SelfUpdateOutcome outcome = await RunUnchangedAsync(
             "0.9.23", log, steps, options: new SelfUpdateOptions(null, false, false, NoMenubar: true));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -1457,12 +1459,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A kyberdash that predates the verbs falls back to engine ensure and the tray update.</summary>
     [Fact]
-    public void RunFallsBackToEngineEnsureWhenKyberDashPredatesTheTrayRestart()
+    public async Task RunFallsBackToEngineEnsureWhenKyberDashPredatesTheTrayRestart()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        (SelfUpdateOutcome outcome, _) = RunChanged(
+        (SelfUpdateOutcome outcome, _) = await RunChangedAsync(
             log,
             steps,
             Scripted((
@@ -1482,12 +1484,12 @@ public sealed class SelfUpdateRunTests : IDisposable
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(64)]
-    public void RunFallsBackWhenTheProbeAnswersUnknownCommandAtAnyExitCode(int exitCode)
+    public async Task RunFallsBackWhenTheProbeAnswersUnknownCommandAtAnyExitCode(int exitCode)
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        (SelfUpdateOutcome outcome, _) = RunChanged(
+        (SelfUpdateOutcome outcome, _) = await RunChangedAsync(
             log,
             steps,
             Scripted(("engine verify --version 0.10.0 --wait 0", Exit(exitCode, "kyberdash: unknown command: engine verify"))));
@@ -1505,12 +1507,12 @@ public sealed class SelfUpdateRunTests : IDisposable
     [InlineData("engine stop", "the KyberDash engine step failed:", true)]
     [InlineData("engine verify --version 0.10.0 --wait 60", "the KyberDash engine step failed:", true)]
     [InlineData("menubar --running", "the KyberDash tray step failed:", true)]
-    public void RunNamesTheFailingRestartStep(string failing, string prefix, bool stopped)
+    public async Task RunNamesTheFailingRestartStep(string failing, string prefix, bool stopped)
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        (SelfUpdateOutcome outcome, string message) = RunChanged(
+        (SelfUpdateOutcome outcome, string message) = await RunChangedAsync(
             log, steps, Scripted((failing, Exit(1, "kyberdash menubar: platform: not supported"))));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -1525,12 +1527,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A restarted engine that reports another version fails the verify step by name, with the tray and engine stopped.</summary>
     [Fact]
-    public void RunFailsNamingTheVerifyStepWhenTheEngineReportsAnotherVersion()
+    public async Task RunFailsNamingTheVerifyStepWhenTheEngineReportsAnotherVersion()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        (SelfUpdateOutcome outcome, string message) = RunChanged(
+        (SelfUpdateOutcome outcome, string message) = await RunChangedAsync(
             log,
             steps,
             Scripted(("engine verify --version 0.10.0 --wait 60", Exit(3, "engine runs 0.9.23"))));
@@ -1544,12 +1546,12 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A failed tray update names the verb's first output line, stderr first, with the text the update loop greps for.</summary>
     [Fact]
-    public void RunNamesTheTrayUpdateOutputLineWhenItFailsAfterTheQuit()
+    public async Task RunNamesTheTrayUpdateOutputLineWhenItFailsAfterTheQuit()
     {
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        (SelfUpdateOutcome outcome, string message) = RunChanged(
+        (SelfUpdateOutcome outcome, string message) = await RunChangedAsync(
             log,
             steps,
             Scripted(("menubar --update --version 0.10.0", Exit(4, "kyberdash menubar: platform: not supported"))));
@@ -1563,7 +1565,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A failed tray update after the quit names the update command as the way back.</summary>
     [Fact]
-    public void RunNamesTheUpdateCommandWhenTheTrayUpdateFailsAfterTheQuit()
+    public async Task RunNamesTheUpdateCommandWhenTheTrayUpdateFailsAfterTheQuit()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1584,7 +1586,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
 
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.10.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.10.0", false, false));
 
         Assert.Equal(1, outcome.ExitCode);
         string message = _world.LastChild?.LastChildOutcome?.Message ?? string.Empty;
@@ -1595,7 +1597,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>With no release change, a tray recorded older than the installed KyberDash is relaunched.</summary>
     [Fact]
-    public void RunRelaunchesAStaleTrayEvenWhenTheReleaseDidNotChange()
+    public async Task RunRelaunchesAStaleTrayEvenWhenTheReleaseDidNotChange()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = new();
@@ -1606,7 +1608,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler, host, new SelfUpdateOptions(), log, steps, "0.9.23");
 
         Assert.Equal(0, outcome.ExitCode);
@@ -1617,7 +1619,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A tray already at the installed version is left running on the no-change path.</summary>
     [Fact]
-    public void RunLeavesACurrentTrayAloneWhenTheReleaseDidNotChange()
+    public async Task RunLeavesACurrentTrayAloneWhenTheReleaseDidNotChange()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = new();
@@ -1628,7 +1630,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler, host, new SelfUpdateOptions(), log, steps, "0.10.0");
 
         Assert.Equal(0, outcome.ExitCode);
@@ -1638,7 +1640,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>--no-restart skips the engine and the tray, but the plugins still upgrade when they are installed.</summary>
     [Fact]
-    public void RunWithNoRestartSkipsEngineAndTrayButStillUpdatesThePlugin()
+    public async Task RunWithNoRestartSkipsEngineAndTrayButStillUpdatesThePlugin()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1646,7 +1648,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false, NoRestart: true),
@@ -1662,7 +1664,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>--no-kyberdash skips the engine, the tray and the plugin together.</summary>
     [Fact]
-    public void RunWithNoKyberDashSkipsEngineTrayAndPlugin()
+    public async Task RunWithNoKyberDashSkipsEngineTrayAndPlugin()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1670,7 +1672,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false, true),
@@ -1686,7 +1688,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// change here must change scripts/update-loop.sh in the same commit.
     /// </summary>
     [Fact]
-    public void RunWithNoKyberDashLogsTheSkipWithItsExactWording()
+    public async Task RunWithNoKyberDashLogsTheSkipWithItsExactWording()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1694,7 +1696,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        RunReconciling(
+        await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false, true),
@@ -1710,7 +1712,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A failed engine step is named, and the binaries committed before it are kept.</summary>
     [Fact]
-    public void RunWhenTheEngineStepFailsNamesItAndKeepsTheCommittedBinaries()
+    public async Task RunWhenTheEngineStepFailsNamesItAndKeepsTheCommittedBinaries()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1718,7 +1720,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1746,7 +1748,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     [InlineData("upgraded")]
     [InlineData("installed")]
     [InlineData("kept-edited")]
-    public void RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string token)
+    public async Task RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string token)
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1754,7 +1756,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1771,7 +1773,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// line of stdout and then its own restart line, so a second guidance line was lost.
     /// </summary>
     [Fact]
-    public void RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
+    public async Task RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1779,7 +1781,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1800,7 +1802,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     [InlineData("upgraded")]
     [InlineData("installed")]
     [InlineData("kept-edited")]
-    public void RunNeverPrintsAHardCodedRestartOpenCodeLine(string token)
+    public async Task RunNeverPrintsAHardCodedRestartOpenCodeLine(string token)
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1808,7 +1810,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1825,7 +1827,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     /// prefix, are not relayed. An updater that dumped all of stdout would fail this.
     /// </summary>
     [Fact]
-    public void RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
+    public async Task RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1833,7 +1835,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1853,7 +1855,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A KyberDash that predates the engine verb is a named skip, not a failed update.</summary>
     [Fact]
-    public void RunNamesAPreVerbKyberDashAsASkipForTheEngineAndThePlugin()
+    public async Task RunNamesAPreVerbKyberDashAsASkipForTheEngineAndThePlugin()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1862,7 +1864,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<ReconcileStep> steps = [];
         ProcessResult unknown = new(1, string.Empty, "error: unknown command 'engine'");
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1878,7 +1880,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A plugin step that fails is a warning: the update still exits 0.</summary>
     [Fact]
-    public void RunPluginFailureIsAWarningAndTheUpdateStillSucceeds()
+    public async Task RunPluginFailureIsAWarningAndTheUpdateStillSucceeds()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1886,7 +1888,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1900,7 +1902,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>An engine step whose kyberdash cannot be started (not executable) is a named failure; the committed binaries stay.</summary>
     [Fact]
-    public void RunWhenTheEngineStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
+    public async Task RunWhenTheEngineStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1908,7 +1910,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1929,7 +1931,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A tray step whose kyberdash cannot be started is a named failure; the committed binaries stay.</summary>
     [Fact]
-    public void RunWhenTheTrayStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
+    public async Task RunWhenTheTrayStepCannotBeExecutedNamesItAndKeepsTheCommittedBinaries()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1937,7 +1939,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1958,7 +1960,7 @@ public sealed class SelfUpdateRunTests : IDisposable
 
     /// <summary>A plugin step whose kyberdash cannot be started is a warning: the update still exits 0.</summary>
     [Fact]
-    public void RunWhenThePluginStepCannotBeExecutedIsAWarningAndTheUpdateStillSucceeds()
+    public async Task RunWhenThePluginStepCannotBeExecutedIsAWarningAndTheUpdateStillSucceeds()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -1966,7 +1968,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunReconciling(
+        SelfUpdateOutcome outcome = await RunReconcilingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -1986,7 +1988,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     ///     capture-plugin verbs ran and with which arguments. The capture seam dispatches on the harness
     ///     the verb names, so a test can fail the Factory verb and leave the OpenCode one alone.
     /// </summary>
-    private SelfUpdateOutcome RunRecording(
+    private async Task<SelfUpdateOutcome> RunRecordingAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
@@ -2020,7 +2022,7 @@ public sealed class SelfUpdateRunTests : IDisposable
             runProcess: runProcess,
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
-        return updater.Run(options);
+        return await updater.RunAsync(options);
     }
 
     /// <summary>The harness a verb names, or an empty string when it names none.</summary>
@@ -2039,7 +2041,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     ///     choose. It names no root: the plugin is installed where the harness already has it.
     /// </summary>
     [Fact]
-    public void RunInstallsTheFactoryCapturePluginWithTheIfInstalledFlag()
+    public async Task RunInstallsTheFactoryCapturePluginWithTheIfInstalledFlag()
     {
         string kyberdash = InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -2047,7 +2049,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunRecording(
+        SelfUpdateOutcome outcome = await RunRecordingAsync(
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
@@ -2063,7 +2065,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     ///     update keeps its exit code and the owner can rerun the printed command.
     /// </summary>
     [Fact]
-    public void RunLeavesTheExitCodeUnchangedWhenTheFactoryCapturePluginStepFails()
+    public async Task RunLeavesTheExitCodeUnchangedWhenTheFactoryCapturePluginStepFails()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -2071,7 +2073,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunRecording(
+        SelfUpdateOutcome outcome = await RunRecordingAsync(
             handler,
             host,
             new SelfUpdateOptions("0.10.0", false, false),
@@ -2090,7 +2092,7 @@ public sealed class SelfUpdateRunTests : IDisposable
     ///     plugin is installed beside it, not in place of it.
     /// </summary>
     [Fact]
-    public void RunKeepsTheOpenCodeCapturePluginInstallUnchanged()
+    public async Task RunKeepsTheOpenCodeCapturePluginInstallUnchanged()
     {
         InstallKyberDash();
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false, true);
@@ -2098,7 +2100,7 @@ public sealed class SelfUpdateRunTests : IDisposable
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunRecording(
+        SelfUpdateOutcome outcome = await RunRecordingAsync(
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
@@ -2111,14 +2113,14 @@ public sealed class SelfUpdateRunTests : IDisposable
     ///     plugin step is skipped, not failed.
     /// </summary>
     [Fact]
-    public void RunLeavesTheExitCodeUnchangedWhenKyberDashIsMissing()
+    public async Task RunLeavesTheExitCodeUnchangedWhenKyberDashIsMissing()
     {
         using ReleaseMapHandler handler = MapRelease("0.10.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
         List<ReconcileStep> steps = [];
 
-        SelfUpdateOutcome outcome = RunRecording(
+        SelfUpdateOutcome outcome = await RunRecordingAsync(
             handler, host, new SelfUpdateOptions("0.10.0", false, false), log, steps);
 
         Assert.Equal(0, outcome.ExitCode);
@@ -2126,13 +2128,13 @@ public sealed class SelfUpdateRunTests : IDisposable
         Assert.Contains(log, line => line.Contains("capture plugin", StringComparison.OrdinalIgnoreCase));
     }
 
-    private SelfUpdateOutcome Run(
+    private async Task<SelfUpdateOutcome> RunAsync(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
         Func<string, string?>? env = null,
         Func<string, bool>? canWriteDirectory = null) =>
-        _world.Run(handler, host, options, env, canWriteDirectory);
+        await _world.RunAsync(handler, host, options, env, canWriteDirectory).ConfigureAwait(false);
 
     private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false) =>
         _world.CreateHost(currentVersion, rid, windows);

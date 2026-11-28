@@ -86,7 +86,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// truncated away.
     /// </summary>
     [Fact]
-    public void EveryResponseLeadsWithAWholeProvenanceLineForTheCorpusThatAnswered()
+    public async Task EveryResponseLeadsWithAWholeProvenanceLineForTheCorpusThatAnswered()
     {
         (DocsTools tools, _) = Corpus(
             (CsharpStandardPath, StandardWithTheRuleIdInItsLastSection()),
@@ -95,11 +95,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
 
         string[] responses =
         [
-            Ask(tools, "csharp", charBudget: 1000),
-            Ask(tools, "csharp"),
-            Ask(tools, "zzz-no-such-technology-zzz"),
-            Ask(tools, "   "),
-            Ask(tools, "rust")
+            await Ask(tools, "csharp", charBudget: 1000),
+            await Ask(tools, "csharp"),
+            await Ask(tools, "zzz-no-such-technology-zzz"),
+            await Ask(tools, "   "),
+            await Ask(tools, "rust")
         ];
 
         foreach (string response in responses)
@@ -120,11 +120,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// which is the value a later lookup is defined against.
     /// </summary>
     [Fact]
-    public void AHitNamesTheTechnologyItsStatusAndTheStandardsIdentity()
+    public async Task AHitNamesTheTechnologyItsStatusAndTheStandardsIdentity()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, CsharpStandard()));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         Assert.Contains("bundle: csharp", response, StringComparison.Ordinal);
         Assert.Contains("C# house rules", response, StringComparison.Ordinal);
@@ -154,7 +154,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// it names, and is told the technology under the name the repository declares.
     /// </summary>
     [Fact]
-    public void TheTechnologyLineEchoesTheValueTheCorpusDeclaresRatherThanTheKeyTheCallerTyped()
+    public async Task TheTechnologyLineEchoesTheValueTheCorpusDeclaresRatherThanTheKeyTheCallerTyped()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, Standard(
             "CSharp",
@@ -163,7 +163,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             "current",
             Sections(("Overview", Prose("csharp", 40))))));
 
-        string response = Ask(tools, "csharp-coding-standard");
+        string response = await Ask(tools, "csharp-coding-standard");
 
         Assert.Contains("technology: CSharp", response, StringComparison.Ordinal);
         Assert.DoesNotContain("technology: csharp", response, StringComparison.Ordinal);
@@ -175,11 +175,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// depends on how much prose fitted is an id list nobody can rely on.
     /// </summary>
     [Fact]
-    public void TheRuleIdIndexPrecedesTheSectionsSoABudgetCanNeverDropIt()
+    public async Task TheRuleIdIndexPrecedesTheSectionsSoABudgetCanNeverDropIt()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, StandardWithTheRuleIdInItsLastSection()));
 
-        string response = Ask(tools, "csharp", charBudget: 1000);
+        string response = await Ask(tools, "csharp", charBudget: 1000);
 
         Assert.Contains("rule ids: KW-DOC-SPEC-007", response, StringComparison.Ordinal);
         Assert.Contains(
@@ -201,7 +201,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// cannot predict.
     /// </summary>
     [Fact]
-    public void TheRuleIdIndexDedupesAndKeepsTheOrderTheDocumentCitesThem()
+    public async Task TheRuleIdIndexDedupesAndKeepsTheOrderTheDocumentCitesThem()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, Standard(
             "csharp",
@@ -210,7 +210,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             "current",
             Sections(("Rules", "Cite KW-ZETA-001 first, KW-ALPHA-002 second, then KW-ZETA-001 again.")))));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         Assert.Equal("rule ids: KW-ZETA-001 · KW-ALPHA-002", RuleIdLine(response));
     }
@@ -240,11 +240,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// </para>
     /// </remarks>
     [Fact]
-    public void TheRuleIdIndexAlsoAccountsForAnIdTheStandardsTitleStates()
+    public async Task TheRuleIdIndexAlsoAccountsForAnIdTheStandardsTitleStates()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, StandardWithTheRuleIdInItsTitle()));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         // The identity block echoes the title whole, so this id is printed to the caller and the
         // index below has to account for it.
@@ -261,7 +261,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// and no note would read as "this standard states fifty ids".
     /// </summary>
     [Fact]
-    public void AnIndexOfMoreThanFiftyRuleIdsStopsAtFiftyAndSaysHowManyItDropped()
+    public async Task AnIndexOfMoreThanFiftyRuleIdsStopsAtFiftyAndSaysHowManyItDropped()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, Standard(
             "csharp",
@@ -270,7 +270,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             "current",
             Sections(("Rules", SixtyRuleIds())))));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         List<string> capped = new();
         for (int index = 1; index <= 50; index++)
@@ -301,12 +301,12 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// title line alone, because the identity block is not the only place the title is echoed.
     /// </remarks>
     [Fact]
-    public void ATitleOnlyRuleIdPastTheCapIsCountedInTheRemainderAndWithheldFromTheTitleLine()
+    public async Task ATitleOnlyRuleIdPastTheCapIsCountedInTheRemainderAndWithheldFromTheTitleLine()
     {
         (DocsTools tools, _) = Corpus(
             (CsharpStandardPath, StandardWhoseTitleStatesAnIdItsBodyNeverCites()));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         List<string> cited = new();
         for (int index = 1; index <= 60; index++) cited.Add(RuleId(index));
@@ -359,12 +359,12 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// </para>
     /// </remarks>
     [Fact]
-    public void AWithheldRuleIdIsNeverPrintedWhereverTheResponseEchoesTheDocument()
+    public async Task AWithheldRuleIdIsNeverPrintedWhereverTheResponseEchoesTheDocument()
     {
         (DocsTools tools, _) = Corpus(
             (CsharpStandardPath, StandardWithTheOverflowWhereTheResponseEchoesTheDocument()));
 
-        string response = Ask(tools, "csharp", "quantumzebra", charBudget: 1000);
+        string response = await Ask(tools, "csharp", "quantumzebra", charBudget: 1000);
 
         List<string> cited = new();
         for (int index = 1; index <= 60; index++) cited.Add(RuleId(index));
@@ -425,13 +425,13 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// </para>
     /// </remarks>
     [Fact]
-    public void AWithheldRuleIdIsNotPrintedAnywhereWhenTheTopicMatchesNoSection()
+    public async Task AWithheldRuleIdIsNotPrintedAnywhereWhenTheTopicMatchesNoSection()
     {
         const string unmatched = "zzz-no-such-topic-zzz";
         (DocsTools tools, _) = Corpus(
             (CsharpStandardPath, StandardWithTheOverflowWhereTheResponseEchoesTheDocument()));
 
-        string response = Ask(tools, "csharp", unmatched);
+        string response = await Ask(tools, "csharp", unmatched);
 
         List<string> cited = new();
         for (int index = 1; index <= 60; index++) cited.Add(RuleId(index));
@@ -462,11 +462,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// inferred from somewhere else, would both claim something the document never said.
     /// </summary>
     [Fact]
-    public void AStandardThatStatesNoRuleIdsSaysSoRatherThanShippingAnEmptyIndex()
+    public async Task AStandardThatStatesNoRuleIdsSaysSoRatherThanShippingAnEmptyIndex()
     {
         (DocsTools tools, _) = Corpus((TestStandardPath, TestStandard()));
 
-        string response = Ask(tools, "test");
+        string response = await Ask(tools, "test");
 
         Assert.Equal("rule ids: (this standard states no rule ids)", RuleIdLine(response));
     }
@@ -477,7 +477,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// to know it is not the settled one.
     /// </summary>
     [Fact]
-    public void AStandardWhoseStatusIsNotCurrentStillAnswersAndCarriesAWarningNamingTheStatus()
+    public async Task AStandardWhoseStatusIsNotCurrentStillAnswersAndCarriesAWarningNamingTheStatus()
     {
         (DocsTools tools, _) = Corpus((PythonStandardPath, Standard(
             "python",
@@ -486,7 +486,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             "draft",
             Sections(("Overview", Prose("python", 40))))));
 
-        string response = Ask(tools, "python");
+        string response = await Ask(tools, "python");
 
         Assert.Contains("path: " + PythonStandardPath, response, StringComparison.Ordinal);
 
@@ -510,7 +510,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// configuration key uses, so a caller told that has nothing to look it up against.
     /// </summary>
     [Fact]
-    public void AStandardAwaitingReviewStillAnswersAndNamesItsStatusInTheOntologysSpelling()
+    public async Task AStandardAwaitingReviewStillAnswersAndNamesItsStatusInTheOntologysSpelling()
     {
         (DocsTools tools, _) = Corpus((PythonStandardPath, Standard(
             "python",
@@ -520,7 +520,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             Sections(("Rules", "Every finding this standard raises cites KW-DOC-SPEC-007 in the report. "
                                + Prose("python", 40))))));
 
-        string response = Ask(tools, "python");
+        string response = await Ask(tools, "python");
 
         // Still an answer rather than a suppression: the path and the rule-id index are what a
         // caller acts on, so withholding the standard would leave the stack with no local
@@ -546,7 +546,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// out of the response.
     /// </summary>
     [Fact]
-    public void ASectionOverTheCapIsCutAtSixThousandCharacters()
+    public async Task ASectionOverTheCapIsCutAtSixThousandCharacters()
     {
         string oversized = string.Join(
             " ",
@@ -558,7 +558,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             "current",
             Sections(("Rules", oversized)))));
 
-        string response = Ask(tools, "csharp", charBudget: 120_000);
+        string response = await Ask(tools, "csharp", charBudget: 120_000);
 
         Assert.Contains(oversized[..6000], response, StringComparison.Ordinal);
         Assert.Contains("truncated at 6000 characters", response, StringComparison.Ordinal);
@@ -572,11 +572,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// spend a call learning nothing.
     /// </summary>
     [Fact]
-    public void ASectionDroppedForSpaceNamesWhatDidNotFitAndSuggestsABiggerBudget()
+    public async Task ASectionDroppedForSpaceNamesWhatDidNotFitAndSuggestsABiggerBudget()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, StandardWithTheRuleIdInItsLastSection()));
 
-        string response = Ask(tools, "csharp", charBudget: 1000);
+        string response = await Ask(tools, "csharp", charBudget: 1000);
 
         Assert.Contains(
             "[omitted for space, ask again with a larger charBudget: Third]",
@@ -591,7 +591,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// than as priced out.
     /// </summary>
     [Fact]
-    public void ASectionDroppedForIrrelevanceIsNamedWithoutSuggestingABiggerBudget()
+    public async Task ASectionDroppedForIrrelevanceIsNamedWithoutSuggestingABiggerBudget()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, Standard(
             "csharp",
@@ -602,7 +602,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
                 ("Naming", Prose("naming", 60)),
                 ("Appendix", "Filler prose that covers the addendum. Filler prose.")))));
 
-        string response = Ask(tools, "csharp", "naming", 120_000);
+        string response = await Ask(tools, "csharp", "naming", 120_000);
 
         Assert.Contains(
             "[also in this document, not matching this topic: Appendix]",
@@ -632,7 +632,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// </para>
     /// </remarks>
     [Fact]
-    public void ATopicThatMatchesNoSectionIsNamedAsATopicMissAndTheStandardStillComesBack()
+    public async Task ATopicThatMatchesNoSectionIsNamedAsATopicMissAndTheStandardStillComesBack()
     {
         const string unmatched = "zebra-quantum-flux";
         (DocsTools tools, _) = Corpus((CsharpStandardPath, Standard(
@@ -645,8 +645,8 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
                 ("Error handling", Prose("diagnostic", 60)),
                 ("Third", Prose("appendix", 200))))));
 
-        string whole = Ask(tools, "csharp", unmatched, 120_000);
-        string cut = Ask(tools, "csharp", unmatched, 1000);
+        string whole = await Ask(tools, "csharp", unmatched, 120_000);
+        string cut = await Ask(tools, "csharp", unmatched, 1000);
 
         foreach (string response in new[] { whole, cut })
         {
@@ -686,14 +686,14 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// the tool gives up instead of returning the standard's first sections.
     /// </summary>
     [Fact]
-    public void ABudgetOutsideTheClampBehavesAsTheBoundItIsClampedTo()
+    public async Task ABudgetOutsideTheClampBehavesAsTheBoundItIsClampedTo()
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, StandardWithTheRuleIdInItsLastSection()));
 
-        string atFloor = Ask(tools, "csharp", charBudget: 1000);
-        string belowFloor = Ask(tools, "csharp", charBudget: 1);
-        string atCeiling = Ask(tools, "csharp", charBudget: 120_000);
-        string aboveCeiling = Ask(tools, "csharp", charBudget: 10_000_000);
+        string atFloor = await Ask(tools, "csharp", charBudget: 1000);
+        string belowFloor = await Ask(tools, "csharp", charBudget: 1);
+        string atCeiling = await Ask(tools, "csharp", charBudget: 120_000);
+        string aboveCeiling = await Ask(tools, "csharp", charBudget: 10_000_000);
 
         Assert.Equal(atFloor, belowFloor);
         Assert.Equal(atCeiling, aboveCeiling);
@@ -712,14 +712,14 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// standard would be the same miss with no way to detect it.
     /// </summary>
     [Fact]
-    public void AnUnknownTechnologyIsAnExplicitMissThatNamesWhatTheCorpusDeclares()
+    public async Task AnUnknownTechnologyIsAnExplicitMissThatNamesWhatTheCorpusDeclares()
     {
         (DocsTools tools, DocumentIndexHost host) = Corpus(
             (CsharpStandardPath, CsharpStandard()),
             (TestStandardPath, TestStandard()));
         int considered = host.Current().DocumentCount;
 
-        string response = Ask(tools, "rust");
+        string response = await Ask(tools, "rust");
 
         Assert.Contains("rust", response, StringComparison.Ordinal);
         Assert.Contains("no coding standard", response, StringComparison.OrdinalIgnoreCase);
@@ -744,11 +744,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("\t")]
-    public void AnEmptyOrWhitespaceTechnologyIsAUsageResponseNamingBothAcceptedKeyForms(string technology)
+    public async Task AnEmptyOrWhitespaceTechnologyIsAUsageResponseNamingBothAcceptedKeyForms(string technology)
     {
         (DocsTools tools, _) = Corpus((CsharpStandardPath, CsharpStandard()));
 
-        string response = Ask(tools, technology);
+        string response = await Ask(tools, technology);
 
         Assert.Contains("technology", response, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("csharp-coding-standard", response, StringComparison.OrdinalIgnoreCase);
@@ -762,11 +762,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// empty document rather than as a standard this tool cannot excerpt.
     /// </summary>
     [Fact]
-    public void AStandardWithNoSectionsSaysSoInsteadOfReturningSomethingThatLooksEmpty()
+    public async Task AStandardWithNoSectionsSaysSoInsteadOfReturningSomethingThatLooksEmpty()
     {
         (DocsTools tools, _) = Corpus((RustStandardPath, StandardWithNoSections()));
 
-        string response = Ask(tools, "rust");
+        string response = await Ask(tools, "rust");
 
         Assert.Contains("path: " + RustStandardPath, response, StringComparison.Ordinal);
         Assert.Contains("no sections", response, StringComparison.OrdinalIgnoreCase);
@@ -780,11 +780,11 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// branches share an empty excerpt, and telling them apart is the whole contract change here.
     /// </summary>
     [Fact]
-    public void AStandardWithNoHeadingsStillSaysItCarriesNoHeadingsRatherThanBlamingATopic()
+    public async Task AStandardWithNoHeadingsStillSaysItCarriesNoHeadingsRatherThanBlamingATopic()
     {
         (DocsTools tools, _) = Corpus((RustStandardPath, StandardWithNoSections()));
 
-        string response = Ask(tools, "rust", "error handling");
+        string response = await Ask(tools, "rust", "error handling");
 
         Assert.Contains("path: " + RustStandardPath, response, StringComparison.Ordinal);
         Assert.Contains("carries no ## headings", response, StringComparison.Ordinal);
@@ -800,14 +800,14 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// place of the old skills prose (D25). The list names each skill and says how to load it.
     /// </summary>
     [Fact]
-    public void TheBundleListsKwSkillsInsteadOfSkillsProse()
+    public async Task TheBundleListsKwSkillsInsteadOfSkillsProse()
     {
         (DocsTools tools, _) = Corpus(
             (CsharpStandardPath, CsharpStandard()),
             ("6-Docs/standards/csharp/csharp.skills.yml", "- plan-craft\n"),
             ("6-Docs/standards/skills/plan-craft/SKILL.md", "---\nname: plan-craft\ndescription: Plan craft for the change.\n---\n\nPLAN BODY\n"));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         Assert.Contains("- plan-craft: Plan craft for the change.", response, StringComparison.Ordinal);
         Assert.Contains("load_skill", response, StringComparison.Ordinal);
@@ -819,13 +819,13 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// still appears, so a malformed list cannot silently answer with neither skills nor reason.
     /// </summary>
     [Fact]
-    public void ABadSkillsListIsNamedInTheAnswerRatherThanDropped()
+    public async Task ABadSkillsListIsNamedInTheAnswerRatherThanDropped()
     {
         (DocsTools tools, _) = Corpus(
             (CsharpStandardPath, CsharpStandard()),
             ("6-Docs/standards/csharp/csharp.skills.yml", "prose, not a sequence of names\n"));
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         Assert.Contains("## KW skills", response, StringComparison.Ordinal);
         Assert.Contains("Problems in the skills lists:", response, StringComparison.Ordinal);
@@ -837,7 +837,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// worth and the remainder counted, so one oversized pool cannot blow the answer.
     /// </summary>
     [Fact]
-    public void AnOversizedKwSkillListIsCappedAndCountsTheRest()
+    public async Task AnOversizedKwSkillListIsCappedAndCountsTheRest()
     {
         List<(string RelativePath, string Text)> documents = [(CsharpStandardPath, CsharpStandard())];
         StringBuilder list = new();
@@ -853,21 +853,22 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         documents.Add(("6-Docs/standards/csharp/csharp.skills.yml", list.ToString()));
         (DocsTools tools, _) = Corpus([.. documents]);
 
-        string response = Ask(tools, "csharp");
+        string response = await Ask(tools, "csharp");
 
         Assert.Contains("- filler-01: Filler skill 1.", response, StringComparison.Ordinal);
         Assert.DoesNotContain("filler-25", response, StringComparison.Ordinal);
         Assert.Contains("5 more skills omitted by the hard cap.", response, StringComparison.Ordinal);
     }
 
-    private static string Ask(
+    private static async Task<string> Ask(
         DocsTools tools,
         string technology,
         string? topic = null,
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
         MethodInfo tool = FindMcpTool();
-        return (string)tool.Invoke(tools, [technology, topic, charBudget, null])!;
+        Task<string> call = (Task<string>)tool.Invoke(tools, [technology, topic, charBudget, null, CancellationToken.None])!;
+        return await call;
     }
 
     private static MethodInfo FindMcpTool()

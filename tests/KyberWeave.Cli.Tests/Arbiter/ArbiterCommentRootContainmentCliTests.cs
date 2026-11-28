@@ -15,7 +15,7 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void ACitedFileOutsideTheRootIsRefusedEvenInsideTheGitRepository()
+    public async Task ACitedFileOutsideTheRootIsRefusedEvenInsideTheGitRepository()
     {
         // A git repository whose --root is a subdirectory. The cited file is an absolute path inside the repository,
         // outside that root, so the check against the git root passes it while the read under --root cannot.
@@ -25,7 +25,7 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
         string cited = _host.Write(_host.InWork("secret.md"), "# Secret\nText.\n");
 
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -33,7 +33,8 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
                 Path = cited,
                 Line = 1,
                 Body = "Shorten this heading.",
-            }));
+            },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         ConsoleOutputAssert.ContainsUnwrapped("was not found under the repository root.", execution.Output);

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -28,11 +27,11 @@ public sealed class RunStartService(
     IWritableFileSystem files,
     IProcessEnvironment environment,
     IGitRepositoryFacts gitFacts,
-    IBoundedProcessExecutor processes,
+    IProcessRunner processes,
     TimeProvider clock) : IRunStartService
 {
     /// <inheritdoc />
-    public RunStartOutcome Start(RunStartRequest request)
+    public async Task<RunStartOutcome> StartAsync(RunStartRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -61,16 +60,17 @@ public sealed class RunStartService(
             return prerequisiteStopped;
         }
 
-        RunStartOutcome? fetchStopped = HandleFetch(runner.Fetch(), config, messages);
+        GitOutcome fetch = await runner.FetchAsync(cancellationToken).ConfigureAwait(false);
+        RunStartOutcome? fetchStopped = HandleFetch(fetch, config, messages);
         if (fetchStopped is not null)
         {
             return fetchStopped;
         }
 
         string baseRef = RunStartPlanner.BaseRefFor(config.ConfigReg.RunBaseBranch);
-        string? originHead = runner.OriginHeadSymbolicRef();
+        string? originHead = await runner.OriginHeadSymbolicRefAsync(cancellationToken).ConfigureAwait(false);
         string baseBranch = RunStartPlanner.BaseBranchName(baseRef, originHead);
-        string? startRef = ResolveStartRef(runner, baseRef, originHead);
+        string? startRef = await ResolveStartRefAsync(runner, baseRef, originHead, cancellationToken).ConfigureAwait(false);
         if (startRef is null)
         {
             messages.Add(new RunStartMessage(
@@ -89,7 +89,7 @@ public sealed class RunStartService(
         if (resume is not null)
         {
             (string resumeRefCandidate, string? resumeTargetCandidate, string? refusal) =
-                ResolveResume(runner, resume);
+                await ResolveResumeAsync(runner, resume, cancellationToken).ConfigureAwait(false);
             if (refusal is not null)
             {
                 return Refuse(messages, refusal);
@@ -101,7 +101,9 @@ public sealed class RunStartService(
 
         // Checked after the fetch, so a branch pushed from elsewhere counts. Git's own error would not say that
         // resuming is the way to continue the branch.
-        if (resume is null && (runner.HasLocalBranch(branch) || runner.HasRemoteBranch(branch)))
+        if (resume is null &&
+            (await runner.HasLocalBranchAsync(branch, cancellationToken).ConfigureAwait(false) ||
+             await runner.HasRemoteBranchAsync(branch, cancellationToken).ConfigureAwait(false)))
         {
             return Refuse(messages, BranchExists(branch));
         }
@@ -114,26 +116,27 @@ public sealed class RunStartService(
         string? completedWarning = null;
         if (resumeRef.Length > 0)
         {
-            TryReadResumeLog(
-                () => runner.CommitMessages(startRef, resumeRef),
+            ResumeLogRead resumeLog = await TryReadResumeAsync(
+                token => runner.CommitMessagesAsync(startRef, resumeRef, token),
                 resumeRef,
-                out completed,
-                out completedWarning);
+                cancellationToken).ConfigureAwait(false);
+            completed = resumeLog.Completed;
+            completedWarning = resumeLog.Warning;
         }
 
         // Read before anything is switched: the versions and the divergence describe the checkout as the
         // operator left it, which is the state a defect was observed in. A resumed branch is described by
         // its own tip, because that is what continuing on it means.
-        string? headRevision = runner.ResolveRevision("HEAD");
-        string? baseRevision = runner.ResolveRevision(startRef);
-        string headVersion = runner.Describe("HEAD") ?? "unknown";
-        string baseVersion = runner.Describe(startRef) ?? "unknown";
+        string? headRevision = await runner.ResolveRevisionAsync("HEAD", cancellationToken).ConfigureAwait(false);
+        string? baseRevision = await runner.ResolveRevisionAsync(startRef, cancellationToken).ConfigureAwait(false);
+        string headVersion = await runner.DescribeAsync("HEAD", cancellationToken).ConfigureAwait(false) ?? "unknown";
+        string baseVersion = await runner.DescribeAsync(startRef, cancellationToken).ConfigureAwait(false) ?? "unknown";
         string alignmentRef = resume is null ? "HEAD" : resumeRef;
-        string? alignmentRevision = runner.ResolveRevision(alignmentRef);
-        (int? ahead, int? behind) = runner.Divergence(alignmentRef, startRef);
-        string? originUrl = runner.OriginAddress();
+        string? alignmentRevision = await runner.ResolveRevisionAsync(alignmentRef, cancellationToken).ConfigureAwait(false);
+        (int? ahead, int? behind) = await runner.DivergenceAsync(alignmentRef, startRef, cancellationToken).ConfigureAwait(false);
+        string? originUrl = await runner.OriginAddressAsync(cancellationToken).ConfigureAwait(false);
 
-        BranchLocation branchLocation = DetermineLocation(runner, messages);
+        BranchLocation branchLocation = await DetermineLocationAsync(runner, messages, cancellationToken).ConfigureAwait(false);
         if (branchLocation.Stopped is not null)
         {
             return branchLocation.Stopped;
@@ -142,7 +145,7 @@ public sealed class RunStartService(
         RunStartLocation location = branchLocation.Location;
         GitOutcome worktrees = branchLocation.Worktrees;
         string target = resumeTarget ?? branch;
-        BranchPlacement placement = PlaceBranch(
+        BranchPlacement placement = await PlaceBranchAsync(
             runner,
             location,
             target,
@@ -150,7 +153,8 @@ public sealed class RunStartService(
             startRef,
             resumeRef,
             worktrees.StandardOutput,
-            messages);
+            messages,
+            cancellationToken).ConfigureAwait(false);
         if (placement.Stopped is not null)
         {
             return placement.Stopped;
@@ -159,13 +163,14 @@ public sealed class RunStartService(
         GitOutcome created = placement.Created;
         string? worktreePath = placement.WorktreePath;
 
-        RunStartOutcome? placementFailure = CheckPlacement(
+        RunStartOutcome? placementFailure = await CheckPlacementAsync(
             created,
             resume,
             runner,
             branch,
             target,
-            messages);
+            messages,
+            cancellationToken).ConfigureAwait(false);
         if (placementFailure is not null)
         {
             return placementFailure;
@@ -176,7 +181,7 @@ public sealed class RunStartService(
         // the base — so a missing home degrades to the hook's default base rather than
         // failing a run that is otherwise ready.
         // Where the run works is recorded with it, so the dispatch guard can tell a started run from none.
-        string? repository = gitFacts.GetCommonDirectory(repositoryRoot);
+        string? repository = await gitFacts.GetCommonDirectoryAsync(repositoryRoot, cancellationToken: cancellationToken).ConfigureAwait(false);
         RecordBase(
             state,
             environment.HomeDirectory,
@@ -184,11 +189,12 @@ public sealed class RunStartService(
             startRef,
             repository is null ? null : new RunStartPlace(repository, worktreePath ?? repositoryRoot, clock.GetUtcNow(), autonomy));
 
-        IndexPreparation indexPreparation = PrepareIndex(
+        IndexPreparation indexPreparation = await PrepareIndexAsync(
             request.IndexExecutor,
             worktreePath ?? repositoryRoot,
             target,
-            messages);
+            messages,
+            cancellationToken).ConfigureAwait(false);
         if (indexPreparation.Stopped is not null)
         {
             return indexPreparation.Stopped;
@@ -244,51 +250,42 @@ public sealed class RunStartService(
 
     /// <summary>
     /// Reads the resumed branch's finished tasks from its commit log. A log that cannot be read
-    /// is a warning on a resume that can still continue the work; anything else is reported
-    /// through <paramref name="completedWarning" /> with no finished tasks.
+    /// is a warning on a resume that can still continue the work; anything else comes back as
+    /// the returned record's warning with no finished tasks.
     /// </summary>
     /// <remarks>
     /// The catch stays narrow on purpose: a cancelled wait escapes, and an
-    /// <c>ArgumentException</c> — the guards on <c>RunStartRunner.CommitMessages</c> throw it for
+    /// <c>ArgumentException</c> — the guards on <c>RunStartRunner.CommitMessagesAsync</c> throw it for
     /// an empty ref — is a programming error, not a log that cannot be read, so it escapes too
     /// instead of passing as a soft warning.
     /// </remarks>
     /// <param name="readLog">Reads the commit log between the base and the resumed ref.</param>
     /// <param name="resumeRef">The resumed ref, named in the warning when the log cannot be read.</param>
-    /// <param name="completed">The finished tasks the log names, or empty when it cannot be read.</param>
-    /// <param name="completedWarning">Null when the log read cleanly.</param>
-    internal static void TryReadResumeLog(
-        Func<GitOutcome> readLog,
+    /// <param name="cancellationToken">Cancels the git log child.</param>
+    /// <returns>The finished tasks the log names, or empty when it cannot be read, with the warning when it could not.</returns>
+    internal static async Task<ResumeLogRead> TryReadResumeAsync(
+        Func<CancellationToken, Task<GitOutcome>> readLog,
         string resumeRef,
-        out IReadOnlyList<RunStartCompletedTask> completed,
-        out string? completedWarning)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(readLog);
 
         GitOutcome log;
         try
         {
-            log = readLog();
+            log = await readLog(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not ArgumentException)
         {
-            completed = [];
-            completedWarning =
-                $"git log could not read the commits on '{resumeRef}': {ex.Message}";
-            return;
+            return new ResumeLogRead([], $"git log could not read the commits on '{resumeRef}': {ex.Message}");
         }
 
         if (log.Succeeded)
         {
-            completed = RunStartResumeReader.Read(log.StandardOutput);
-            completedWarning = null;
+            return new ResumeLogRead(RunStartResumeReader.Read(log.StandardOutput), null);
         }
-        else
-        {
-            completed = [];
-            completedWarning =
-                $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}";
-        }
+
+        return new ResumeLogRead([], $"git log could not read the commits on '{resumeRef}': {log.FirstErrorLine}");
     }
 
     /// <summary>
@@ -360,17 +357,18 @@ public sealed class RunStartService(
     }
 
     /// <summary>Reads the checkout and worktree state and decides where the branch belongs.</summary>
-    private static BranchLocation DetermineLocation(
+    private static async Task<BranchLocation> DetermineLocationAsync(
         IRunStartRunner runner,
-        List<RunStartMessage> messages)
+        List<RunStartMessage> messages,
+        CancellationToken cancellationToken)
     {
-        GitOutcome status = runner.CheckoutStatus();
+        GitOutcome status = await runner.CheckoutStatusAsync(cancellationToken).ConfigureAwait(false);
         if (!status.Succeeded)
         {
             return new BranchLocation(default, default, Fail(messages, $"git status failed: {status.FirstErrorLine}"));
         }
 
-        GitOutcome worktrees = runner.WorktreeList();
+        GitOutcome worktrees = await runner.WorktreeListAsync(cancellationToken).ConfigureAwait(false);
         if (!worktrees.Succeeded)
         {
             return new BranchLocation(
@@ -390,20 +388,23 @@ public sealed class RunStartService(
     /// <summary>
     ///     Ensures the CodeGraph index where the run works, reporting an unusable index or a warning.
     /// </summary>
-    private IndexPreparation PrepareIndex(
-        IProcessExecutor? requestedExecutor,
+    private async Task<IndexPreparation> PrepareIndexAsync(
+        IProcessRunner? requestedExecutor,
         string indexTree,
         string target,
-        List<RunStartMessage> messages)
+        List<RunStartMessage> messages,
+        CancellationToken cancellationToken)
     {
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.
-        IProcessExecutor indexExecutor = requestedExecutor ?? new BoundedIndexExecutor(processes, DoctorOptions.Defaults.IndexTimeout);
-        WorktreeIndexOutcome index = worktreeIndex.Ensure(
+        // Every index child is bounded, whichever runner was handed in: a stalled codegraph must not hang run start.
+        IProcessRunner indexExecutor = new DefaultTimeoutProcessRunner(requestedExecutor ?? processes, DoctorOptions.Defaults.IndexTimeout);
+        WorktreeIndexOutcome index = await worktreeIndex.EnsureAsync(
             indexTree,
             DoctorOptions.Defaults,
             indexExecutor,
-            environment.TempDirectory);
+            environment.TempDirectory,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
         string indexLabel = IndexLabel(index);
 
         if (index.StopsRun)
@@ -441,12 +442,19 @@ public sealed class RunStartService(
         string IndexLabel,
         RunStartOutcome? Stopped);
 
+    /// <summary>What the resumed branch's commit log held, and why when it held nothing.</summary>
+    /// <param name="Completed">The finished tasks the log names, or empty when it could not be read.</param>
+    /// <param name="Warning">Null when the log read cleanly.</param>
+    internal sealed record ResumeLogRead(
+        IReadOnlyList<RunStartCompletedTask> Completed,
+        string? Warning);
     /// <summary>
     ///     Resolves the ref and target a resume names, or the refusal to report when no branch matches.
     /// </summary>
-    private static (string ResumeRef, string? ResumeTarget, string? Refusal) ResolveResume(
+    private static async Task<(string ResumeRef, string? ResumeTarget, string? Refusal)> ResolveResumeAsync(
         IRunStartRunner runner,
-        string resume)
+        string resume,
+        CancellationToken cancellationToken)
     {
         string remotePrefix = RunStartPlanner.Remote + "/";
         bool isExplicitRemote = resume.StartsWith(remotePrefix, StringComparison.Ordinal);
@@ -465,17 +473,18 @@ public sealed class RunStartService(
 
         if (isExplicitRemote)
         {
-            return runner.HasRemoteBranch(stripped)
+            bool remoteHasIt = await runner.HasRemoteBranchAsync(stripped, cancellationToken).ConfigureAwait(false);
+            return remoteHasIt
                 ? (remotePrefix + stripped, stripped, null)
                 : (string.Empty, null, MissingResumeBranch(resume));
         }
 
-        if (runner.HasLocalBranch(resume))
+        if (await runner.HasLocalBranchAsync(resume, cancellationToken).ConfigureAwait(false))
         {
             return (resume, resume, null);
         }
 
-        if (runner.HasRemoteBranch(resume))
+        if (await runner.HasRemoteBranchAsync(resume, cancellationToken).ConfigureAwait(false))
         {
             return (remotePrefix + resume, resume, null);
         }
@@ -491,7 +500,7 @@ public sealed class RunStartService(
     ///     Places the target branch in place or in a worktree, returning either the git outcome and
     ///     worktree path, or the outcome that stops the run.
     /// </summary>
-    private BranchPlacement PlaceBranch(
+    private async Task<BranchPlacement> PlaceBranchAsync(
         IRunStartRunner runner,
         RunStartLocation location,
         string target,
@@ -499,13 +508,14 @@ public sealed class RunStartService(
         string startRef,
         string? resumeRef,
         string worktreeOutput,
-        List<RunStartMessage> messages)
+        List<RunStartMessage> messages,
+        CancellationToken cancellationToken)
     {
         if (location == RunStartLocation.InPlace)
         {
             GitOutcome created = resumeTarget is null
-                ? runner.CreateBranchInPlace(target, startRef)
-                : runner.SwitchToBranch(target);
+                ? await runner.CreateBranchInPlaceAsync(target, startRef, cancellationToken).ConfigureAwait(false)
+                : await runner.SwitchToBranchAsync(target, cancellationToken).ConfigureAwait(false);
             return new BranchPlacement(created, null, null);
         }
 
@@ -522,7 +532,7 @@ public sealed class RunStartService(
         // only entries whose folder is gone.
         if (held is not null)
         {
-            GitOutcome pruned = runner.Git("worktree", "prune");
+            GitOutcome pruned = await runner.GitAsync(["worktree", "prune"], cancellationToken).ConfigureAwait(false);
             if (!pruned.Succeeded)
             {
                 return new BranchPlacement(
@@ -537,7 +547,7 @@ public sealed class RunStartService(
 
         // Before the folder exists: once git makes the worktree its untracked folder would show in the checkout.
         // A failure stops the run here, so no folder or claim is left behind.
-        GitOutcome excluded = runner.EnsureWorktreeFolderExcluded();
+        GitOutcome excluded = await runner.EnsureWorktreeFolderExcludedAsync(cancellationToken).ConfigureAwait(false);
         if (!excluded.Succeeded)
         {
             messages.Add(new RunStartMessage(
@@ -554,8 +564,8 @@ public sealed class RunStartService(
         try
         {
             result = resumeTarget is null
-                ? runner.CreateBranchInWorktree(target, startRef, worktreePath)
-                : runner.AddWorktreeForBranch(target, worktreePath, resumeRef);
+                ? await runner.CreateBranchInWorktreeAsync(target, startRef, worktreePath, cancellationToken).ConfigureAwait(false)
+                : await runner.AddWorktreeForBranchAsync(target, worktreePath, resumeRef, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -578,15 +588,17 @@ public sealed class RunStartService(
     ///     The check before creation can lose to another run of the same slug. That loser gets the same
     ///     refusal and exit code as a branch that existed from the start, not a generic git failure.
     /// </remarks>
-    private static RunStartOutcome? CheckPlacement(
+    private static async Task<RunStartOutcome?> CheckPlacementAsync(
         GitOutcome created,
         string? resume,
         IRunStartRunner runner,
         string branch,
         string target,
-        List<RunStartMessage> messages)
+        List<RunStartMessage> messages,
+        CancellationToken cancellationToken)
     {
-        if (!created.Succeeded && resume is null && runner.HasLocalBranch(branch))
+        if (!created.Succeeded && resume is null &&
+            await runner.HasLocalBranchAsync(branch, cancellationToken).ConfigureAwait(false))
         {
             return Refuse(messages, BranchExists(branch));
         }
@@ -604,11 +616,15 @@ public sealed class RunStartService(
     ///     local branch of that name as a last resort so a repository without remote-tracking refs still has
     ///     somewhere to start.
     /// </summary>
-    private static string? ResolveStartRef(IRunStartRunner runner, string baseRef, string? originHead)
+    private static async Task<string?> ResolveStartRefAsync(
+        IRunStartRunner runner,
+        string baseRef,
+        string? originHead,
+        CancellationToken cancellationToken)
     {
         foreach (string candidate in StartRefCandidates(baseRef, originHead))
         {
-            if (runner.ResolveRevision(candidate) is not null)
+            if (await runner.ResolveRevisionAsync(candidate, cancellationToken).ConfigureAwait(false) is not null)
                 return candidate;
         }
 
@@ -704,12 +720,5 @@ public sealed class RunStartService(
         }
 
         return Stopped(RunStartStatus.ToolFailure, messages);
-    }
-
-    /// <summary>Runs the CodeGraph child under the bound the index run is held to.</summary>
-    private sealed class BoundedIndexExecutor(IBoundedProcessExecutor inner, TimeSpan timeout) : IProcessExecutor
-    {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            inner.Run(startInfo, standardInput, timeout);
     }
 }

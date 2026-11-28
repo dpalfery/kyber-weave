@@ -16,34 +16,36 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// A Copilot CLI <c>task</c> payload with no routing headers, replayed against a real git checkout: the planner
 /// writes its plan after dispatch, and only real git reports that change since the dispatch snapshot.
 /// </summary>
-public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
+public sealed class ArbiterHeaderlessPlannerRealGitTests : IAsyncLifetime
 {
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
     private readonly TempDirectory _home = new();
 
-    public ArbiterHeaderlessPlannerRealGitTests()
+    public async ValueTask InitializeAsync()
     {
+        _probe = await RunStartProbe.CreateAsync();
         Directory.CreateDirectory(Path.Combine(_probe.Root, ".kyber-weave"));
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             Path.Combine(_probe.Root, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n  provider:\n    kind: none\n");
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
         _home.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     [Fact]
-    public void AHeaderlessPlannerThatWroteItsPlan_IsNotEscalatedOnReturn()
+    public async Task AHeaderlessPlannerThatWroteItsPlan_IsNotEscalatedOnReturn()
     {
         const string Prompt = "Plan the status cards.";
-        Run(Payload("architect", Prompt));
+        await Run(Payload("architect", Prompt));
         Directory.CreateDirectory(Path.Combine(_probe.Root, "docs", "plans"));
-        File.WriteAllText(Path.Combine(_probe.Root, "docs", "plans", "cards.md"), "# Plan\n");
+        await File.WriteAllTextAsync(Path.Combine(_probe.Root, "docs", "plans", "cards.md"), "# Plan\n");
 
-        string stdout = Run(Payload(
+        string stdout = await Run(Payload(
             "architect",
             Prompt,
             objects: new Dictionary<string, object> { ["toolResult"] = new { resultType = "success", textResultForLlm = "Plan written." } }));
@@ -76,7 +78,7 @@ public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
         return JsonSerializer.Serialize(payload);
     }
 
-    private string Run(string stdin, IArbiterProvider? provider = null)
+    private async Task<string> Run(string stdin, IArbiterProvider? provider = null)
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider ?? new NoneProvider(), homeDirectory: () => _home.Path);
         HookCommand command = ArbiterTestServices.Command(
@@ -87,7 +89,7 @@ public sealed class ArbiterHeaderlessPlannerRealGitTests : IDisposable
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
+        Assert.Equal(0, await command.RunAsync("copilot-cli", null, stdin, stdout, log, homeDirectory: _home.Path));
         return stdout.ToString();
     }
 

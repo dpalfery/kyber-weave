@@ -11,18 +11,18 @@ namespace KyberWeave.Cli.Commands.Review;
 /// in a newer release can be copied into a host configuration by hand.
 /// </summary>
 /// <remarks>The use case is <see cref="IReviewCatalogueService"/>; this command parses its options and prints what it returns.</remarks>
-public sealed class ReviewCatalogueCommand(IReviewCatalogueService service, IConsole standard, IAnsiConsole ansi) : Command<ReviewCatalogueSettings>
+public sealed class ReviewCatalogueCommand(IReviewCatalogueService service, IConsole standard, IAnsiConsole ansi) : AsyncCommand<ReviewCatalogueSettings>
 {
     /// <inheritdoc />
-    public override int Execute(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, ReviewCatalogueSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        ReviewCommandResult result = service.Run(
+        ReviewCommandResult result = await service.RunAsync(
             new ReviewCatalogueRequest(settings.Path, settings.Config, settings.Technology),
             standard.Out,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (result.ClientError is not null)
         {

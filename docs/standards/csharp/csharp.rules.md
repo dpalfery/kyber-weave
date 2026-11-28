@@ -82,6 +82,9 @@ An id in brackets names the analyzer that enforces the rule. Until the codebase 
   it created. [CA1001, CA1063]
 - **KW-STD-CS-013 Async all the way.** No `.Result`, `.Wait()` or `GetAwaiter().GetResult()` outside
   `Main`, and no `async void`. Every async I/O method takes a `CancellationToken` and passes it on.
+  Where the work underneath is async, its callers become async up to the entry point. The reverse is
+  banned: never wrap synchronous work in `Task.Run` or `Task.FromResult` to give it an async
+  signature (a test fake for an async interface may return `Task.FromResult`).
 - **KW-STD-CS-014 Collections.** Return `[]`, never `null`. Enumerate an `IEnumerable<T>` once,
   materializing it when it is read twice. Break a dense LINQ chain into named variables.
 - **KW-STD-CS-015 Closed vocabularies.** A fixed set of words (status, tier, role) is an `enum` or one

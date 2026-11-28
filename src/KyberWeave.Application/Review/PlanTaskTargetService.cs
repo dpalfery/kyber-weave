@@ -31,17 +31,23 @@ public sealed partial class PlanTaskTargetService(
     IProcessEnvironment environment) : IPlanTaskTargetService
 {
     /// <inheritdoc />
-    public PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason)
+    public async Task<PlanTaskTargetLookup> FindAsync(
+        string root,
+        KyberWeaveConfig config,
+        string typedTask,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(typedTask);
+        cancellationToken.ThrowIfCancellationRequested();
 
         IReadOnlyList<string> active = tasks.ActivePlans(root, config);
         if (active.Count > 1)
         {
-            reason = $"{active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)})";
-            return null;
+            return new PlanTaskTargetLookup(
+                null,
+                $"{active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)})");
         }
 
         // The plan in flight first, then the plans still in review in this checkout: a review rework re-runs its task
@@ -53,7 +59,8 @@ public sealed partial class PlanTaskTargetService(
         string? unusable = null;
         foreach (string plan in plans)
         {
-            PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
+            PlanTaskFileOutcome outcome = await tasks.RunAsync(
+                root, config, plan, PlanTaskFileMode.Check, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (outcome.File is null || outcome.Report.HasErrors)
             {
                 unusable ??= $"the task file for {plan} is missing or does not match the plan";
@@ -61,38 +68,43 @@ public sealed partial class PlanTaskTargetService(
             }
 
             if (PlanTaskPacket.FindTask(outcome.File, typedTask) is { } entry)
-            {
-                reason = null;
-                return new PlanTaskTargetMatch(plan, entry, ContractRow(root, plan, entry.Id));
-            }
+                return new PlanTaskTargetLookup(
+                    new PlanTaskTargetMatch(plan, entry, ContractRow(root, plan, entry.Id)), null);
         }
 
-        if (active.Count == 0 && FindInOtherWorktree(root, config, typedTask) is { } elsewhere)
+        if (active.Count == 0 && await FindInOtherWorktreeAsync(root, config, typedTask, cancellationToken)
+                .ConfigureAwait(false) is { } elsewhere)
         {
-            reason = null;
-            return elsewhere;
+            return new PlanTaskTargetLookup(elsewhere, null);
         }
 
-        reason = unusable ?? (plans.Count switch
+        return new PlanTaskTargetLookup(null, unusable ?? (plans.Count switch
         {
             0 => $"no plan is {PlanStatus.ActiveWords} in this checkout or any other worktree of this repository",
             1 => $"'{typedTask}' names no one task in {plans[0]}",
             _ => $"'{typedTask}' names no one task in {string.Join(", ", plans)}"
-        });
-        return null;
+        }));
     }
 
     /// <summary>
     /// The task in a plan that is active in one other worktree of this repository, or null when none has it or more
-    /// than one does. The conductor's plan and task file live in the run's worktree, while a worker runs its task gate
-    /// in a worktree of its own; <c>docs packet</c> reads the plan from there, so the gate reads it the same way.
+    /// than one does, without blocking a thread. The conductor's plan and task file live in the run's worktree, while a
+    /// worker runs its task gate in a worktree of its own; <c>docs packet</c> reads the plan from there, so the gate
+    /// reads it the same way.
     /// </summary>
-    private PlanTaskTargetMatch? FindInOtherWorktree(string root, KyberWeaveConfig config, string typedTask)
+    private async Task<PlanTaskTargetMatch?> FindInOtherWorktreeAsync(
+        string root,
+        KyberWeaveConfig config,
+        string typedTask,
+        CancellationToken cancellationToken)
     {
         string here = Path.TrimEndingDirectorySeparator(paths.GetFullPath(root, environment.CurrentDirectory));
+        IReadOnlyList<string> worktrees = await git.ListWorktreesAsync(
+            root, cancellationToken: cancellationToken).ConfigureAwait(false);
         List<PlanTaskTargetMatch> matches = [];
-        foreach (string worktree in git.ListWorktrees(root))
+        foreach (string worktree in worktrees)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string other = Path.TrimEndingDirectorySeparator(paths.GetFullPath(worktree, environment.CurrentDirectory));
             if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
                 continue;
@@ -101,7 +113,8 @@ public sealed partial class PlanTaskTargetService(
             if (active.Count != 1)
                 continue;
 
-            PlanTaskFileOutcome outcome = tasks.Run(other, config, active[0], PlanTaskFileMode.Check);
+            PlanTaskFileOutcome outcome = await tasks.RunAsync(
+                other, config, active[0], PlanTaskFileMode.Check, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (outcome.File is null || outcome.Report.HasErrors)
                 continue;
 

@@ -16,9 +16,9 @@ public readonly record struct ProcessResult(int ExitCode, string StandardOutput,
 public static class ProcessRunner
 {
     /// <summary>
-    /// Starts a child process, transfers its standard input, and captures its output.
+    /// Starts a child process, transfers its standard input, and captures its output without blocking the caller.
     /// </summary>
-    public static ProcessResult Run(
+    public static async Task<ProcessResult> RunAsync(
         ProcessStartInfo startInfo,
         string standardInput,
         TimeSpan? timeout = null,
@@ -54,22 +54,40 @@ public static class ProcessRunner
             Task io = Task.WhenAll(inputWrite, standardOutput, standardError);
             if (timeout is { } limit)
             {
-                if (!io.Wait(limit, cancellationToken))
+                using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(limit);
+                Task timer = Task.Delay(Timeout.Infinite, timeoutCts.Token);
+                Task completed = await Task.WhenAny(io, timer).ConfigureAwait(false);
+                // A child that finished as the timer fired has finished: only an unfinished run times out.
+                if (completed != io && !io.IsCompleted)
                 {
-                    timedOut = true;
-                    TryKillTree(process);
-                    io.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
-                    throw new TimeoutException(
-                        $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        timedOut = true;
+                        TryKillTree(process);
+                        await Task.WhenAny(io, Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None)).ConfigureAwait(false);
+                        throw new TimeoutException(
+                            $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
+                    }
+
+                    // The caller's token fired before the timeout; surface cancellation like the blocking wait does.
+                    throw new OperationCanceledException(cancellationToken);
                 }
+
+                await io.ConfigureAwait(false);
             }
             else if (cancellationToken.CanBeCanceled)
             {
-                io.Wait(cancellationToken);
+                Task timer = Task.Delay(Timeout.Infinite, cancellationToken);
+                Task completed = await Task.WhenAny(io, timer).ConfigureAwait(false);
+                if (completed != io && !io.IsCompleted)
+                    throw new OperationCanceledException(cancellationToken);
+
+                await io.ConfigureAwait(false);
             }
             else
             {
-                io.GetAwaiter().GetResult();
+                await io.ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is not TimeoutException)
@@ -82,15 +100,26 @@ public static class ProcessRunner
         finally
         {
             if (timedOut || !process.HasExited)
-                process.WaitForExit(TimeSpan.FromSeconds(5));
+            {
+                using CancellationTokenSource graceCts = new(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await process.WaitForExitAsync(graceCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
             else
-                process.WaitForExit();
+            {
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
         }
 
         return new ProcessResult(
             process.ExitCode,
-            standardOutput.GetAwaiter().GetResult(),
-            standardError.GetAwaiter().GetResult());
+            await standardOutput.ConfigureAwait(false),
+            await standardError.ConfigureAwait(false));
     }
 
     /// <summary>

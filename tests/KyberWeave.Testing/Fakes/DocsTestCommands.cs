@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -26,13 +27,15 @@ internal static class DocsTestCommands
     /// <summary>A picker factory that configures no decision model.</summary>
     internal sealed class NoPickerFactory : IPlanTaskAgentPickerFactory
     {
-        public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config) => null;
+        public Task<IPlanTaskAgentPicker?> ForConfigAsync(KyberWeaveConfig config, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IPlanTaskAgentPicker?>(null);
     }
 
     /// <summary>A picker factory that always returns <paramref name="picker"/>.</summary>
     internal sealed class FixedPickerFactory(Func<IPlanTaskAgentPicker> picker) : IPlanTaskAgentPickerFactory
     {
-        public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config) => picker();
+        public Task<IPlanTaskAgentPicker?> ForConfigAsync(KyberWeaveConfig config, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IPlanTaskAgentPicker?>(picker());
     }
 
     /// <summary>The container, with <paramref name="configure"/> applied before the application's own registrations.</summary>
@@ -52,7 +55,7 @@ internal static class DocsTestCommands
         IRepositoryDoctor doctor,
         IAnsiConsole? console = null,
         IServiceProvider? services = null,
-        IProcessExecutor? executor = null,
+        IProcessRunner? executor = null,
         string? mcpExecutable = null)
     {
         IServiceProvider provider = services ?? Services();
@@ -65,7 +68,7 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IFileSystem>(),
             provider.GetRequiredService<IPathResolver>(),
             provider.GetRequiredService<IProcessEnvironment>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>())
+            provider.GetRequiredService<IProcessRunner>())
         {
             Executor = executor,
             McpExecutable = mcpExecutable,
@@ -203,8 +206,11 @@ internal static class DocsTestCommands
     /// <param name="executor">Runs the CodeGraph child; null for the bounded production runner.</param>
     /// <param name="refreshEnabled">False to model <c>--no-codegraph-refresh</c>.</param>
     /// <param name="pause">Waits between sync attempts on a held CodeGraph lock; null to really wait.</param>
-    public static CodeGraphFreshness Freshness(
-        string root, IProcessExecutor? executor = null, bool refreshEnabled = true, Action<TimeSpan>? pause = null)
+    public static ICodeGraphFreshnessGate Freshness(
+        string root,
+        IProcessRunner? executor = null,
+        bool refreshEnabled = true,
+        Func<TimeSpan, CancellationToken, Task>? pause = null)
     {
         IServiceProvider provider = Services();
         return new CodeGraphFreshness(
@@ -217,7 +223,6 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IPathResolver>(),
             provider.GetRequiredService<IProcessEnvironment>(),
             provider.GetRequiredService<IProcessRunner>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>(),
             executor,
             pause);
     }

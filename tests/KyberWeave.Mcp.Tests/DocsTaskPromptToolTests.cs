@@ -11,11 +11,11 @@ namespace KyberWeave.Tests;
 public sealed class DocsTaskPromptToolTests
 {
     [Fact]
-    public void TheToolNamesTheAgentDifficultyTechnologyAndCutListAndHoldsNoPromptText()
+    public async Task TheToolNamesTheAgentDifficultyTechnologyAndCutListAndHoldsNoPromptText()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
-        string reply = DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClient("claude-code", taskId: "T1");
+        string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync("claude-code", taskId: "T1");
 
         Assert.Contains("provenance:", reply, StringComparison.Ordinal);
         Assert.Contains("prompt: built", reply, StringComparison.Ordinal);
@@ -34,11 +34,11 @@ public sealed class DocsTaskPromptToolTests
     /// written to the file, and the reply names the client so a new row can be added from evidence.
     /// </summary>
     [Fact]
-    public void AnUnverifiedMcpClientGetsThePromptFileAndIsNamedInTheReply()
+    public async Task AnUnverifiedMcpClientGetsThePromptFileAndIsNamedInTheReply()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
-        string reply = DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClient("warp", taskId: "T1");
+        string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync("warp", taskId: "T1");
 
         Assert.Contains("harness: unknown MCP client 'warp'; the prompt file was written", reply, StringComparison.Ordinal);
         Assert.Contains("prompt file: .agent_scratchpad/t1/prompt.md", reply, StringComparison.Ordinal);
@@ -47,23 +47,23 @@ public sealed class DocsTaskPromptToolTests
     }
 
     [Fact]
-    public void AMissingMcpClientNameAlsoGetsThePromptFile()
+    public async Task AMissingMcpClientNameAlsoGetsThePromptFile()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
-        string reply = DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClient(clientName: null, taskId: "T1");
+        string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync(clientName: null, taskId: "T1");
 
         Assert.Contains("harness: unknown MCP client '(none)'; the prompt file was written", reply, StringComparison.Ordinal);
         Assert.Contains("prompt file: .agent_scratchpad/t1/prompt.md", reply, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheToolTakesATechnologyForADispatchThatBelongsToNoTask()
+    public async Task TheToolTakesATechnologyForADispatchThatBelongsToNoTask()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
 
-        string reply = DocsTaskPromptFixture.Tools(fixture)
-            .BuildTaskPromptForClient("claude-code", taskId: null, technology: "csharp");
+        string reply = await DocsTaskPromptFixture.Tools(fixture)
+            .BuildTaskPromptForClientAsync("claude-code", taskId: null, technology: "csharp");
 
         Assert.Contains("prompt: built", reply, StringComparison.Ordinal);
         Assert.Contains("technology: csharp", reply, StringComparison.Ordinal);
@@ -71,9 +71,9 @@ public sealed class DocsTaskPromptToolTests
     }
 
     [Fact]
-    public void AStaleTaskFileYieldsNoPromptAndTheRepairCommand()
+    public async Task AStaleTaskFileYieldsNoPromptAndTheRepairCommand()
     {
-        using DocFixture fixture = DocsTaskPromptFixture.Ready();
+        using DocFixture fixture = await DocsTaskPromptFixture.ReadyAsync();
         fixture.Write(
             PlanTaskFileProbe.PlanPath,
             PlanTaskFileProbe.PlanMarkdown()
@@ -83,7 +83,7 @@ public sealed class DocsTaskPromptToolTests
                     "- **Depends on:** none\n- **Technology:** csharp",
                     StringComparison.Ordinal));
 
-        string reply = DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClient("claude-code", taskId: "T1");
+        string reply = await DocsTaskPromptFixture.Tools(fixture).BuildTaskPromptForClientAsync("claude-code", taskId: "T1");
 
         Assert.Contains("prompt: none", reply, StringComparison.Ordinal);
         Assert.Contains("docs tasks " + PlanTaskFileProbe.PlanPath + " --write", reply, StringComparison.Ordinal);

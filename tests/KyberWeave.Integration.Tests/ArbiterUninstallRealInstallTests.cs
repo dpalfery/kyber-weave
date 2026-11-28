@@ -77,15 +77,15 @@ public sealed class ArbiterUninstallRealInstallTests : IDisposable
     /// only proved the wrong thing and never exercised the real install path.
     /// </summary>
     [Fact]
-    public void Uninstall_DefaultScope_GlobalRealInstall_RemovesOwnedClaudeBlock_CleansState_AndPreservesForeignBytes()
+    public async Task Uninstall_DefaultScope_GlobalRealInstall_RemovesOwnedClaudeBlock_CleansState_AndPreservesForeignBytes()
     {
         string home = _home.Path;
         string settingsPath = Path.Combine(home, ".claude", "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
-        File.WriteAllText(settingsPath, ClaudeForeign);
+        await File.WriteAllTextAsync(settingsPath, ClaudeForeign);
 
         ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
-        CommandExecution installExecution = Capture(() => install.Execute(
+        CommandExecution installExecution = await CaptureAsync(() => install.ExecuteAsync(
             null!,
             new ArbiterInstallSettings
             {
@@ -93,10 +93,11 @@ public sealed class ArbiterUninstallRealInstallTests : IDisposable
                 Target = "claude",
                 Provider = "none",
                 Global = true,
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, installExecution.ExitCode);
-        string installed = File.ReadAllText(settingsPath);
+        string installed = await File.ReadAllTextAsync(settingsPath);
         Assert.Contains("kyber-weave-arbiter hook --harness claude", installed, StringComparison.Ordinal);
         Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
 
@@ -106,12 +107,13 @@ public sealed class ArbiterUninstallRealInstallTests : IDisposable
         Assert.True(File.Exists(receiptPath), "the real global install must write a global receipt");
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
-        CommandExecution execution = Capture(() => uninstall.Execute(
+        CommandExecution execution = await CaptureAsync(() => uninstall.ExecuteAsync(
             null!,
-            new ArbiterUninstallSettings { Path = home, Target = "claude" }));
+            new ArbiterUninstallSettings { Path = home, Target = "claude" },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
-        string after = File.ReadAllText(settingsPath);
+        string after = await File.ReadAllTextAsync(settingsPath);
         Assert.DoesNotContain("kyber-weave-arbiter hook --harness claude", after, StringComparison.Ordinal);
         Assert.Contains("user-owned read hook", after, StringComparison.Ordinal);
         Assert.Contains("custom", after, StringComparison.Ordinal);
@@ -125,9 +127,9 @@ public sealed class ArbiterUninstallRealInstallTests : IDisposable
         Assert.Contains("keep me", after, StringComparison.Ordinal);
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private static async Task<CommandExecution> CaptureAsync(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

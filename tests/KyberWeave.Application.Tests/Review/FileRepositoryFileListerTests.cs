@@ -37,25 +37,25 @@ public sealed class FileRepositoryFileListerTests
             "--exclude-standard");
 
     [Fact]
-    public void ListThrowsWhenTheRootDoesNotExist()
+    public async Task ListThrowsWhenTheRootDoesNotExist()
     {
-        _ = Assert.Throws<DirectoryNotFoundException>(() => Lister().List(Root));
+        _ = await Assert.ThrowsAsync<DirectoryNotFoundException>(() => Lister().ListAsync(Root, CancellationToken.None));
     }
 
     [Fact]
-    public void ListRejectsABlankRoot()
+    public async Task ListRejectsABlankRoot()
     {
-        _ = Assert.Throws<ArgumentException>(() => Lister().List(" "));
+        _ = await Assert.ThrowsAsync<ArgumentException>(() => Lister().ListAsync(" ", CancellationToken.None));
     }
 
     [Fact]
-    public void ListAsksGitForTrackedAndUntrackedFilesInTheRootWithinASixtySecondLimit()
+    public async Task ListAsksGitForTrackedAndUntrackedFilesInTheRootWithinASixtySecondLimit()
     {
         _files.CreateDirectory(Root);
         WriteFile("src/a.cs");
         ScriptGitListing("src/a.cs\0");
 
-        _ = Lister().List(Root);
+        _ = await Lister().ListAsync(Root, CancellationToken.None);
 
         ProcessRunRequest call = Assert.Single(_git.Calls);
         Assert.Equal(Root, call.WorkingDirectory);
@@ -63,55 +63,55 @@ public sealed class FileRepositoryFileListerTests
     }
 
     [Fact]
-    public void ListReturnsGitsFilesThatStillExistAndLeavesOutExcludedDirectories()
+    public async Task ListReturnsGitsFilesThatStillExistAndLeavesOutExcludedDirectories()
     {
         WriteFile("src/a.cs");
         WriteFile("README.md");
         WriteFile("node_modules/pkg/index.js");
         ScriptGitListing("src/a.cs\0README.md\0node_modules/pkg/index.js\0gone.cs\0");
 
-        IReadOnlyList<string> files = Lister().List(Root);
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
 
         Assert.Equal(["src/a.cs", "README.md"], files);
     }
 
     [Fact]
-    public void ListLeavesOutAGitFileThatIsALink()
+    public async Task ListLeavesOutAGitFileThatIsALink()
     {
         WriteFile("real.cs");
         _files.CreateFileLink(Path.Combine(Root, "alias.cs"), Path.Combine(Root, "real.cs"));
         ScriptGitListing("real.cs\0alias.cs\0");
 
-        IReadOnlyList<string> files = Lister().List(Root);
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
 
         Assert.Equal(["real.cs"], files);
     }
 
     [Fact]
-    public void ListWalksTheFileSystemWhenGitIsNotInstalled()
+    public async Task ListWalksTheFileSystemWhenGitIsNotInstalled()
     {
         WriteFile("src/a.cs");
         WriteFile("top.sln");
         _ = _git.WithMissingProgram("git");
 
-        IReadOnlyList<string> files = Lister().List(Root);
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
 
         Assert.Equal(["src/a.cs", "top.sln"], files.Order(StringComparer.Ordinal));
     }
 
     [Fact]
-    public void ListWalksTheFileSystemWhenTheDirectoryIsNotAWorkTree()
+    public async Task ListWalksTheFileSystemWhenTheDirectoryIsNotAWorkTree()
     {
         WriteFile("a.cs");
         _ = _git.Script("git", new ProcessRunResult(128, string.Empty, false), "ls-files", "-z", "--cached", "--others", "--exclude-standard");
 
-        IReadOnlyList<string> files = Lister().List(Root);
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
 
         Assert.Equal(["a.cs"], files);
     }
 
     [Fact]
-    public void TheWalkNeverEntersAnExcludedDirectoryOrFollowsALink()
+    public async Task TheWalkNeverEntersAnExcludedDirectoryOrFollowsALink()
     {
         WriteFile("src/a.cs");
         WriteFile("node_modules/pkg/index.js");
@@ -121,13 +121,13 @@ public sealed class FileRepositoryFileListerTests
         _files.CreateFileLink(Path.Combine(Root, "alias.cs"), Path.Combine(Root, "src", "a.cs"));
         _ = _git.WithMissingProgram("git");
 
-        IReadOnlyList<string> files = Lister().List(Root);
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
 
         Assert.Equal(["src/a.cs"], files);
     }
 
     [Fact]
-    public void TheWalkSkipsADirectoryTheFileSystemCannotList()
+    public async Task TheWalkSkipsADirectoryTheFileSystemCannotList()
     {
         WriteFile("src/a.cs");
         WriteFile("locked/b.cs");
@@ -138,8 +138,39 @@ public sealed class FileRepositoryFileListerTests
             new UnauthorizedAccessException("denied"));
         _ = _git.WithMissingProgram("git");
 
-        IReadOnlyList<string> files = Lister().List(Root);
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
 
         Assert.Equal(["src/a.cs"], files);
+    }
+
+    [Fact]
+    public async Task ListAsyncThrowsWhenTheRootDoesNotExist()
+    {
+        _ = await Assert.ThrowsAsync<DirectoryNotFoundException>(() => Lister().ListAsync(Root, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ListAsyncReturnsGitsFilesThatStillExistAndLeavesOutExcludedDirectories()
+    {
+        WriteFile("src/a.cs");
+        WriteFile("README.md");
+        WriteFile("node_modules/pkg/index.js");
+        ScriptGitListing("src/a.cs\0README.md\0node_modules/pkg/index.js\0gone.cs\0");
+
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
+
+        Assert.Equal(["src/a.cs", "README.md"], files);
+    }
+
+    [Fact]
+    public async Task ListAsyncWalksTheFileSystemWhenGitIsNotInstalled()
+    {
+        WriteFile("src/a.cs");
+        WriteFile("top.sln");
+        _ = _git.WithMissingProgram("git");
+
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
+
+        Assert.Equal(["src/a.cs", "top.sln"], files.Order(StringComparer.Ordinal));
     }
 }

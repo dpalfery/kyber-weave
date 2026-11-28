@@ -53,6 +53,39 @@ public sealed class ParkObservingTimeProvider : FakeTimeProvider, IDisposable
         return task.GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// Runs the asynchronous <paramref name="work"/> and moves the clock by <paramref name="step"/> only while the work is
+    /// parked in a delay, so the order of the work's steps and the clock's never depends on how fast either runs.
+    /// <paramref name="atPark"/> runs at the park numbered <paramref name="parkNumber"/>, before the clock moves past it;
+    /// pass <see cref="int.MaxValue"/> to never run it. The real-time bound only guards against a hang.
+    /// </summary>
+    public async Task<T> RunAdvancingOnParksAsync<T>(
+        Func<Task<T>> work,
+        TimeSpan step,
+        int parkNumber,
+        Action? atPark)
+    {
+        Task<T> task = work();
+        int parks = 0;
+        while (true)
+        {
+            Task finished = await Task.WhenAny(NextPark(), task).WaitAsync(HangGuard).ConfigureAwait(false);
+            if (ReferenceEquals(finished, task))
+            {
+                break;
+            }
+
+            if (++parks == parkNumber)
+            {
+                atPark?.Invoke();
+            }
+
+            Advance(step);
+        }
+
+        return await task.ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

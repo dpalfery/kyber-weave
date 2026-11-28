@@ -69,11 +69,11 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void AConfidentPick_IsWrittenForAnUnassignedTaskOnly_AndTheReadyQueueNamesIt()
+    public async Task AConfidentPick_IsWrittenForAnUnassignedTaskOnly_AndTheReadyQueueNamesIt()
     {
         StubProvider provider = new("dev-medium", 0.97);
 
-        PlanTaskFile file = Write(Picker(provider));
+        PlanTaskFile file = await WriteAsync(Picker(provider));
 
         PlanTaskFileEntry picked = file.Tasks![0];
         Assert.Equal("dev-medium", picked.Agent);
@@ -87,9 +87,9 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void APickBelowTheFloor_LeavesTheConductorToChoose()
+    public async Task APickBelowTheFloor_LeavesTheConductorToChoose()
     {
-        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", 0.6)));
+        PlanTaskFile file = await WriteAsync(Picker(new StubProvider("dev-medium", 0.6)));
 
         Assert.Null(file.Tasks![0].Agent);
         Assert.DoesNotContain("agent=", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
@@ -98,39 +98,53 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(double.PositiveInfinity)]
-    public void ANonFiniteConfidence_IsNoPickRatherThanAStoredOne(double confidence)
+    public async Task ANonFiniteConfidence_IsNoPickRatherThanAStoredOne(double confidence)
     {
-        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", confidence)));
+        PlanTaskFile file = await WriteAsync(Picker(new StubProvider("dev-medium", confidence)));
 
         Assert.Null(file.Tasks![0].Agent);
         Assert.Null(file.Tasks[0].AgentConfidence);
     }
 
     [Fact]
-    public void AModelFault_WritesTheFileWithNoPick()
+    public async Task AModelFault_WritesTheFileWithNoPick()
     {
-        PlanTaskFile file = Write(Picker(new StubProvider(null, null, fail: true)));
+        PlanTaskFile file = await WriteAsync(Picker(new StubProvider(null, null, fail: true)));
 
         Assert.Null(file.Tasks![0].Agent);
     }
 
     [Fact]
-    public void NoPicker_WritesTheFileAsBefore()
+    public async Task NoPicker_WritesTheFileAsBefore()
     {
-        PlanTaskFile file = Write(null);
+        PlanTaskFile file = await WriteAsync(null);
 
         Assert.All(file.Tasks!, task => Assert.Null(task.Agent));
     }
 
     [Fact]
-    public void ACheckKeepsThePickOnDisk_WithoutAskingAgain_AndARewriteDoesNotMoveIt()
+    public async Task ACancelledAsyncPick_StopsTheWrite()
     {
-        Write(Picker(new StubProvider("dev-medium", 0.97)));
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        StubProvider provider = new("dev-medium", 0.97, cancelOnToken: true);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store, Picker(provider))
+                .RunAsync(Plan, PlanTaskFileMode.Write, cancelled.Token));
+        Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
+    public async Task ACheckKeepsThePickOnDisk_WithoutAskingAgain_AndARewriteDoesNotMoveIt()
+    {
+        _ = await WriteAsync(Picker(new StubProvider("dev-medium", 0.97)));
         StubProvider second = new("dev-easy", 0.99);
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store,
-            Picker(second)).Run(Plan, PlanTaskFileMode.Check);
-        PlanTaskFile rewritten = Write(Picker(second));
+        PlanTaskFileOutcome check = await new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store,
+            Picker(second)).RunAsync(Plan, PlanTaskFileMode.Check);
+        PlanTaskFile rewritten = await WriteAsync(Picker(second));
 
         Assert.False(check.Report.HasErrors, string.Join("; ", check.Report.Items.Select(item => item.Message)));
         Assert.Equal("dev-medium", rewritten.Tasks![0].Agent);
@@ -138,18 +152,18 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void ProviderNone_BuildsNoPicker_AndMakesNoCall()
+    public async Task ProviderNone_BuildsNoPicker_AndMakesNoCall()
     {
         string home = _repo.FullPath("home");
         FakeArbiterUserSettings settings = new();
         ConfiguredArbiterProviderFactory providers = Configured(settings);
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Null(await providers.TryCreateAsync(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
         Assert.Equal([home], settings.Asked);
     }
 
     [Fact]
-    public void AMalformedUserOverride_FallsBackToTheRepositoryProvider()
+    public async Task AMalformedUserOverride_FallsBackToTheRepositoryProvider()
     {
         // A broken override file must not break task-file generation: the repository's own provider stands, and
         // provider none then builds no picker rather than letting the parse failure escape.
@@ -159,17 +173,17 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             Override = (_, _) => throw new YamlException("The user override could not be read."),
         });
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Null(await providers.TryCreateAsync(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void AnEmptyHomeDirectory_IsTreatedAsNoOverride(string home)
+    public async Task AnEmptyHomeDirectory_IsTreatedAsNoOverride(string home)
     {
         ConfiguredArbiterProviderFactory providers = Configured(new FakeArbiterUserSettings());
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Null(await providers.TryCreateAsync(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
     }
 
     private static ConfiguredArbiterProviderFactory Configured(FakeArbiterUserSettings settings) =>
@@ -180,15 +194,23 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             TimeProvider.System,
             () => throw new InvalidOperationException("No test here reads a credential."));
 
-    private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
+    private async Task<PlanTaskFile> WriteAsync(IPlanTaskAgentPicker? picker)
     {
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store, picker)
-            .Run(Plan, PlanTaskFileMode.Write);
+        PlanTaskFileOutcome outcome = await new PlanTaskFileGenerator(
+                _repo.Root,
+                KyberWeaveConfigDefaults.Product,
+                _repo.Store,
+                picker)
+            .RunAsync(Plan, PlanTaskFileMode.Write);
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
-        return outcome.File!;
+        return Assert.IsType<PlanTaskFile>(outcome.File);
     }
 
-    private sealed class StubProvider(string? answer, double? confidence, bool fail = false) : IArbiterProvider
+    private sealed class StubProvider(
+        string? answer,
+        double? confidence,
+        bool fail = false,
+        bool cancelOnToken = false) : IArbiterProvider
     {
         public List<string> Asked { get; } = [];
 
@@ -200,6 +222,11 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default)
         {
+            if (cancelOnToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             Calls++;
             Asked.AddRange(rules.Select(rule => rule.Id));
             if (fail)

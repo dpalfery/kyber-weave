@@ -36,7 +36,11 @@ public sealed class DocsCloseoutCommandTests
     private static DocFixture Repository(string? planText = null, string? planIndex = null) =>
         DocsCloseoutRepository.Create(inMemory: true, planText, planIndex);
 
-    private static (int Exit, string Output) Run(DocFixture fixture, bool archive, string path = Plan, string? date = Date)
+    private static async Task<(int Exit, string Output)> RunAsync(
+        DocFixture fixture,
+        bool archive,
+        string path = Plan,
+        string? date = Date)
     {
         DocsCloseoutSettings settings = new()
         {
@@ -47,12 +51,12 @@ public sealed class DocsCloseoutCommandTests
         };
 
         TestConsole console = new() { EmitAnsiSequences = false };
-        int exit = DocsTestCommands.Closeout(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        int exit = await DocsTestCommands.Closeout(Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
         return (exit, console.Output);
     }
 
     /// <summary>Runs the check with the plan spelled as <paramref name="typed"/> from <paramref name="workingDirectory"/>.</summary>
-    private static (int Exit, string Output) RunTyped(DocFixture fixture, string typed, string workingDirectory)
+    private static async Task<(int Exit, string Output)> RunTypedAsync(DocFixture fixture, string typed, string workingDirectory)
     {
         DocsCloseoutSettings settings = new()
         {
@@ -63,7 +67,7 @@ public sealed class DocsCloseoutCommandTests
         };
 
         TestConsole console = new() { EmitAnsiSequences = false };
-        int exit = DocsTestCommands.Closeout(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        int exit = await DocsTestCommands.Closeout(Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
         return (exit, console.Output);
     }
 
@@ -71,7 +75,7 @@ public sealed class DocsCloseoutCommandTests
     private static IServiceProvider Services(DocFixture fixture) =>
         DocsMemoryServicesD.Services(fixture, services =>
         {
-            services.AddSingleton<IBoundedProcessExecutor>(NotAGitRepository());
+            services.AddSingleton<IProcessRunner>(NotAGitRepository());
             services.AddSingleton<IExclusiveFileWriter>(new InMemoryExclusiveFileWriter(fixture.Memory!));
         });
 
@@ -83,11 +87,11 @@ public sealed class DocsCloseoutCommandTests
     private static bool Exists(DocFixture fixture, string relative) => fixture.Exists(relative);
 
     [Fact]
-    public void ArchivingMovesThePlanSetsItsStatusRemovesTheTaskFileAndUpdatesBothIndexes()
+    public async Task ArchivingMovesThePlanSetsItsStatusRemovesTheTaskFileAndUpdatesBothIndexes()
     {
         using DocFixture fixture = Repository();
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         Assert.False(Exists(fixture, Plan));
@@ -113,11 +117,11 @@ public sealed class DocsCloseoutCommandTests
     [InlineData("6-Docs/plans/2026-10-20-widget.md", "6-Docs/plans")]
     [InlineData("6-Docs/plans/2026-10-20-widget.md", ".")]
     [InlineData("6-Docs/plans/2026-10-20-widget", "6-Docs")]
-    public void EveryNaturalSpellingOfThePlanIsResolvedAndTheResolvedPathIsReported(string typed, string workingDirectory)
+    public async Task EveryNaturalSpellingOfThePlanIsResolvedAndTheResolvedPathIsReported(string typed, string workingDirectory)
     {
         using DocFixture fixture = Repository();
 
-        (int exit, string output) = RunTyped(fixture, typed, workingDirectory);
+        (int exit, string output) = await RunTypedAsync(fixture, typed, workingDirectory);
 
         Assert.True(exit == 0, output);
         using JsonDocument report = JsonDocument.Parse(output);
@@ -126,12 +130,12 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void ASlugMatchingTwoActivePlansIsAmbiguousAndNothingMoves()
+    public async Task ASlugMatchingTwoActivePlansIsAmbiguousAndNothingMoves()
     {
         using DocFixture fixture = Repository();
         fixture.Write("6-Docs/plans/2026-10-25-widget.md", CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: ".."));
 
-        (int exit, string output) = RunTyped(fixture, "widget", ".");
+        (int exit, string output) = await RunTypedAsync(fixture, "widget", ".");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-PLANREF-001", output, StringComparison.Ordinal);
@@ -142,16 +146,16 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AfterArchivingTheDocsValidatorReportsNoLifecycleFinding()
+    public async Task AfterArchivingTheDocsValidatorReportsNoLifecycleFinding()
     {
         using DocFixture fixture = Repository();
-        Run(fixture, archive: true);
+        _ = await RunAsync(fixture, archive: true);
 
         Assert.DoesNotContain("KW-DOC-LIFECYCLE", new ReportedFindings(fixture).Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnUncheckedTaskListRefusesTheArchiveAndMovesNothing()
+    public async Task AnUncheckedTaskListRefusesTheArchiveAndMovesNothing()
     {
         string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
@@ -164,7 +168,7 @@ public sealed class DocsCloseoutCommandTests
             """;
         using DocFixture fixture = Repository(plan);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-CLOSEOUT-006", output, StringComparison.Ordinal);
@@ -174,7 +178,7 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void ATickedTaskListArchivesNormally()
+    public async Task ATickedTaskListArchivesNormally()
     {
         string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
@@ -185,14 +189,14 @@ public sealed class DocsCloseoutCommandTests
             """;
         using DocFixture fixture = Repository(plan);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         Assert.True(Exists(fixture, Archived));
     }
 
     [Fact]
-    public void AProseChecklistOutsideTheTasksSectionDoesNotRefuseTheArchive()
+    public async Task AProseChecklistOutsideTheTasksSectionDoesNotRefuseTheArchive()
     {
         string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
@@ -207,14 +211,14 @@ public sealed class DocsCloseoutCommandTests
             """;
         using DocFixture fixture = Repository(plan);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         Assert.True(Exists(fixture, Archived));
     }
 
     [Fact]
-    public void AFencedCheckboxExampleInsideTheTasksSectionDoesNotRefuseTheArchive()
+    public async Task AFencedCheckboxExampleInsideTheTasksSectionDoesNotRefuseTheArchive()
     {
         string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..") + """
 
@@ -231,14 +235,14 @@ public sealed class DocsCloseoutCommandTests
             """;
         using DocFixture fixture = Repository(plan);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         Assert.True(Exists(fixture, Archived));
     }
 
     [Fact]
-    public void AnUncheckedTaskStillReportsTheOtherCloseoutGapsInTheSameRun()
+    public async Task AnUncheckedTaskStillReportsTheOtherCloseoutGapsInTheSameRun()
     {
         string plan = CloseoutCorpus.PlanDocument(
             status: "ready",
@@ -253,7 +257,7 @@ public sealed class DocsCloseoutCommandTests
             """;
         using DocFixture fixture = Repository(plan);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-CLOSEOUT-006", output, StringComparison.Ordinal);
@@ -263,11 +267,11 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void WithoutArchiveNothingChangesAndTheCommandSaysWhatItWouldDo()
+    public async Task WithoutArchiveNothingChangesAndTheCommandSaysWhatItWouldDo()
     {
         using DocFixture fixture = Repository();
 
-        (int exit, string output) = Run(fixture, archive: false);
+        (int exit, string output) = await RunAsync(fixture, archive: false);
 
         Assert.True(exit == 0, output);
         Assert.True(Exists(fixture, Plan));
@@ -279,7 +283,7 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AnUnmappedDecisionRefusesTheArchiveNamingWhatIsMissingAndMovesNothing()
+    public async Task AnUnmappedDecisionRefusesTheArchiveNamingWhatIsMissingAndMovesNothing()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1", "D2")
                           + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../reference/widget.md)"))
@@ -287,7 +291,7 @@ public sealed class DocsCloseoutCommandTests
         using DocFixture fixture = Repository(
             CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", sections: sections));
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         using JsonDocument report = JsonDocument.Parse(output);
@@ -301,7 +305,7 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void OneRunNamesEveryGapAsItsOwnFindingWithAnExampleAndMovesNothing()
+    public async Task OneRunNamesEveryGapAsItsOwnFindingWithAnExampleAndMovesNothing()
     {
         // No mapping table, no impact components, the plan index gone: three problems that took three runs to see.
         string sections = CloseoutCorpus.DecisionsSection("D1", "D2", "ADMIN-DASH") + CloseoutCorpus.DesignHarvestSection("H1");
@@ -309,7 +313,7 @@ public sealed class DocsCloseoutCommandTests
             CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", componentsLine: string.Empty, sections: sections));
         fixture.Memory!.DeleteFile(fixture.FullPath(PlanIndex));
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         using JsonDocument report = JsonDocument.Parse(output);
@@ -329,7 +333,7 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AMappingRowWhoseLinkResolvesNowhereIsNamedAlongsideEveryUnmappedId()
+    public async Task AMappingRowWhoseLinkResolvesNowhereIsNamedAlongsideEveryUnmappedId()
     {
         string sections = CloseoutCorpus.DecisionsSection("D1", "D2")
                           + CloseoutCorpus.CloseoutMappingSection(("D1, D2, H1", "[Widget](../reference/missing.md)"))
@@ -337,7 +341,7 @@ public sealed class DocsCloseoutCommandTests
         using DocFixture fixture = Repository(
             CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", sections: sections));
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         Assert.Contains("D1, D2, H1", output, StringComparison.Ordinal);
@@ -347,14 +351,14 @@ public sealed class DocsCloseoutCommandTests
     [Theory]
     [InlineData(false, "|  | 2026-11-13 |")]
     [InlineData(true, "| 2026-10-20 | 2026-11-13 |")]
-    public void TheInventoryRowShowsTheCreatedDateOnlyWhenThePlanRecordedOne(bool recorded, string cells)
+    public async Task TheInventoryRowShowsTheCreatedDateOnlyWhenThePlanRecordedOne(bool recorded, string cells)
     {
         string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", linkPrefix: "..");
         if (recorded)
             plan = plan.Replace("status: ready", "status: ready\ncreated: 2026-10-20", StringComparison.Ordinal);
         using DocFixture fixture = Repository(plan);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         string row = Read(fixture, Inventory).Split('\n').First(line => line.StartsWith("| [2026-10-20-widget.md]", StringComparison.Ordinal));
@@ -362,12 +366,12 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AMissingArchiveInventoryIsCreatedWithTheTableHeaderAndTheRow()
+    public async Task AMissingArchiveInventoryIsCreatedWithTheTableHeaderAndTheRow()
     {
         using DocFixture fixture = Repository();
         fixture.Memory!.DeleteFile(fixture.FullPath(Inventory));
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         string text = Read(fixture, Inventory);
@@ -377,12 +381,12 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AnInventoryWithoutTheTableGetsTheTableAppended()
+    public async Task AnInventoryWithoutTheTableGetsTheTableAppended()
     {
         using DocFixture fixture = Repository();
         fixture.Write(Inventory, "---\nid: archive/plans/index\ntitle: Archived Plan Inventory\ndoc-type: index\nstatus: current\nowner: Maintainers\nlast-reviewed: 2026-11-01\n---\n\n# Archived Plan Inventory\n\nNothing yet.\n");
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.True(exit == 0, output);
         string text = Read(fixture, Inventory);
@@ -392,7 +396,7 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void DryRunWithArchiveReportsEveryChangeIncludingTheInventoryItWouldCreateAndChangesNothing()
+    public async Task DryRunWithArchiveReportsEveryChangeIncludingTheInventoryItWouldCreateAndChangesNothing()
     {
         using DocFixture fixture = Repository();
         fixture.Memory!.DeleteFile(fixture.FullPath(Inventory));
@@ -406,7 +410,7 @@ public sealed class DocsCloseoutCommandTests
         };
 
         TestConsole console = new() { EmitAnsiSequences = false };
-        int exit = DocsTestCommands.Closeout(Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        int exit = await DocsTestCommands.Closeout(Services(fixture), console).ExecuteAsync(null!, settings, CancellationToken.None);
 
         Assert.True(exit == 0, console.Output);
         Assert.Contains("Would create", console.Output, StringComparison.Ordinal);
@@ -418,7 +422,7 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void ARunningPlanWithOtherRowsKeepsThemInThePlanIndex()
+    public async Task ARunningPlanWithOtherRowsKeepsThemInThePlanIndex()
     {
         string index = PlanIndexWithRow.Replace(
             "| [2026-10-20-widget.md](2026-10-20-widget.md) | Ready |",
@@ -426,7 +430,7 @@ public sealed class DocsCloseoutCommandTests
             StringComparison.Ordinal);
         using DocFixture fixture = Repository(planIndex: index);
 
-        (int exit, _) = Run(fixture, archive: true);
+        (int exit, _) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(0, exit);
         string text = Read(fixture, PlanIndex);
@@ -435,13 +439,13 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AnArchivedPlanOrAnIndexIsNotAnActivePlan()
+    public async Task AnArchivedPlanOrAnIndexIsNotAnActivePlan()
     {
         using DocFixture fixture = Repository();
         fixture.Write(Archived, "# archived\n");
 
-        (int indexExit, string indexOutput) = Run(fixture, archive: true, path: PlanIndex);
-        (int taken, string takenOutput) = Run(fixture, archive: true);
+        (int indexExit, string indexOutput) = await RunAsync(fixture, archive: true, path: PlanIndex);
+        (int taken, string takenOutput) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, indexExit);
         Assert.Contains("KW-DOC-CLOSEOUT-001", indexOutput, StringComparison.Ordinal);
@@ -453,12 +457,12 @@ public sealed class DocsCloseoutCommandTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void AnArchiveEntryThatIsAlreadyThereIsRefusedAndKeptByteForByte(bool archive)
+    public async Task AnArchiveEntryThatIsAlreadyThereIsRefusedAndKeptByteForByte(bool archive)
     {
         using DocFixture fixture = Repository();
         fixture.Write(Archived, EarlierArchive);
 
-        (int exit, string output) = Run(fixture, archive);
+        (int exit, string output) = await RunAsync(fixture, archive);
 
         Assert.Equal(1, exit);
         Assert.Contains(PlanCloseout.ArchiveTargetExists, output, StringComparison.Ordinal);
@@ -470,14 +474,14 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AnUnreadablePlanIndexIsNamedInTheReportNotThrown()
+    public async Task AnUnreadablePlanIndexIsNamedInTheReportNotThrown()
     {
         using DocFixture fixture = Repository();
         string index = fixture.FullPath(PlanIndex);
         fixture.Memory!.DeleteFile(index);
         fixture.Memory.CreateDirectory(index);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(PlanCloseout.IndexNotEditable, output, StringComparison.Ordinal);
@@ -487,14 +491,14 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void AnUnreadableArchiveInventoryIsNamedInTheReportAndTheCheckCopyIsRemoved()
+    public async Task AnUnreadableArchiveInventoryIsNamedInTheReportAndTheCheckCopyIsRemoved()
     {
         using DocFixture fixture = Repository();
         string inventory = fixture.FullPath(Inventory);
         fixture.Memory!.DeleteFile(inventory);
         fixture.Memory.CreateDirectory(inventory);
 
-        (int exit, string output) = Run(fixture, archive: true);
+        (int exit, string output) = await RunAsync(fixture, archive: true);
 
         Assert.Equal(1, exit);
         Assert.Contains(PlanCloseout.IndexNotEditable, output, StringComparison.Ordinal);
@@ -504,11 +508,11 @@ public sealed class DocsCloseoutCommandTests
     }
 
     [Fact]
-    public void ADateThatIsNotADateIsRefused()
+    public async Task ADateThatIsNotADateIsRefused()
     {
         using DocFixture fixture = Repository();
 
-        (int exit, string output) = Run(fixture, archive: true, date: "yesterday");
+        (int exit, string output) = await RunAsync(fixture, archive: true, date: "yesterday");
 
         Assert.Equal(1, exit);
         Assert.Contains("KW-DOC-CLOSEOUT-005", output, StringComparison.Ordinal);

@@ -42,8 +42,12 @@ public sealed class ReviewDecisionModelFactory(
             cachePath);
 
     /// <inheritdoc />
-    public IReviewDecisionModel CreateForRepository(
-        string repositoryRoot, KyberWeaveConfig config, bool switchedOff, string? cachePath)
+    public async Task<IReviewDecisionModel> CreateForRepositoryAsync(
+        string repositoryRoot,
+        KyberWeaveConfig config,
+        bool switchedOff,
+        string? cachePath,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
 
@@ -62,16 +66,20 @@ public sealed class ReviewDecisionModelFactory(
 
         // A loopback endpoint needs no key, and asking for one first is what keeps a missing key from costing a
         // request that the provider would have refused anyway.
-        if (!endpoint.IsLoopback && string.IsNullOrWhiteSpace(keys.TryResolveKey(config, provider.Endpoint)))
+        if (!endpoint.IsLoopback
+            && string.IsNullOrWhiteSpace(
+                await keys.TryResolveKeyAsync(config, provider.Endpoint, cancellationToken).ConfigureAwait(false)))
         {
             return Create(
                 null, [], null, clock, $"no key for {endpoint.GetLeftPart(UriPartial.Authority)}", cachePath);
         }
 
         DiagnosticReport ignored = new();
-        IArbiterProvider? client = arbiter.CreateProvider(config, null, ignored, out _);
-        return client is null
+        ArbiterProviderCreation? creation = await arbiter
+            .CreateProviderAsync(config, null, ignored, cancellationToken)
+            .ConfigureAwait(false);
+        return creation is null
             ? Create(null, [], null, clock, "the provider could not be built", cachePath)
-            : Create(client, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
+            : Create(creation.Provider, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
     }
 }

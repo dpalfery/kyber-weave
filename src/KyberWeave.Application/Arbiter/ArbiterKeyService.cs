@@ -17,35 +17,37 @@ public sealed class ArbiterKeyService(
     IArbiterUserSettings userSettings) : IArbiterKeyService
 {
     /// <inheritdoc />
-    public string? ResolveKey(KyberWeaveConfig config, string endpoint)
+    public async Task<string?> ResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
-        return ArbiterKeyResolver.Resolve(
-            ArbiterUserSettings.NormalizeEndpoint(endpoint), store, environment.GetVariable, UserOverrideEndpoint(config));
+        return await ArbiterKeyResolver.ResolveAsync(
+            ArbiterUserSettings.NormalizeEndpoint(endpoint), store, environment.GetVariable, UserOverrideEndpoint(config), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public string? ResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint)
+    public async Task<string?> ResolveKeyAsync(
+        KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(effectiveProvider);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
-        return ArbiterKeyResolver.Resolve(
+        return await ArbiterKeyResolver.ResolveAsync(
             ArbiterUserSettings.NormalizeEndpoint(endpoint),
             store,
             environment.GetVariable,
-            UserOverrideEndpoint(config.Arbiter.Provider, effectiveProvider));
+            UserOverrideEndpoint(config.Arbiter.Provider, effectiveProvider),
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public string? TryResolveKey(KyberWeaveConfig config, string endpoint)
+    public async Task<string?> TryResolveKeyAsync(KyberWeaveConfig config, string endpoint, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
         try
         {
-            return ResolveKey(config, endpoint);
+            return await ResolveKeyAsync(config, endpoint, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -54,14 +56,15 @@ public sealed class ArbiterKeyService(
     }
 
     /// <inheritdoc />
-    public string? TryResolveKey(KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint)
+    public async Task<string?> TryResolveKeyAsync(
+        KyberWeaveConfig config, ArbiterProviderConfig effectiveProvider, string endpoint, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(effectiveProvider);
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
         try
         {
-            return ResolveKey(config, effectiveProvider, endpoint);
+            return await ResolveKeyAsync(config, effectiveProvider, endpoint, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -70,11 +73,12 @@ public sealed class ArbiterKeyService(
     }
 
     /// <inheritdoc />
-    public Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config)
+    public Func<Uri, CancellationToken, Task<string?>> CreateKeyResolverAsync(KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         string? userOverrideEndpoint = UserOverrideEndpoint(config);
-        return uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, environment.GetVariable, userOverrideEndpoint);
+        return (uri, cancellationToken) => ArbiterKeyResolver.ResolveAsync(
+            uri.ToString(), store, environment.GetVariable, userOverrideEndpoint, cancellationToken);
     }
 
     private string? UserOverrideEndpoint(KyberWeaveConfig config)

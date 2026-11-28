@@ -34,12 +34,12 @@ public sealed class DoctorPostCheckoutTests
     /// only control the owner needs.
     /// </summary>
     [Fact]
-    public void PostCheckoutWithWorktreeIndexHookFalseStartsNoCodeGraphChildAndExitsZero()
+    public async Task PostCheckoutWithWorktreeIndexHookFalseStartsNoCodeGraphChildAndExitsZero()
     {
         WriteGoverned("worktree-index-hook: false\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = _world.Doctor.RunPostCheckout(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
+        DoctorReport report = await _world.Doctor.RunPostCheckoutAsync(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         Assert.Empty(executor.CallsTo("codegraph"));
         Assert.Equal(0, report.ExitCode);
@@ -55,7 +55,7 @@ public sealed class DoctorPostCheckoutTests
     /// future CodeGraph release that writes a tracked file is restored by name without editing this test.
     /// </remarks>
     [Fact]
-    public void PostCheckoutRestoresOnlyTheInitConfigFilesAndNamesEveryOtherDirtyFileAsLeftAlone()
+    public async Task PostCheckoutRestoresOnlyTheInitConfigFilesAndNamesEveryOtherDirtyFileAsLeftAlone()
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         bool initialised = false;
@@ -91,7 +91,7 @@ public sealed class DoctorPostCheckoutTests
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorReport report = _world.Doctor.RunPostCheckout(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
+        DoctorReport report = await _world.Doctor.RunPostCheckoutAsync(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         string[] restored = executor.CallsTo("git")
             .Where(call => call.ArgumentList.Contains("restore", StringComparer.Ordinal))
@@ -113,13 +113,13 @@ public sealed class DoctorPostCheckoutTests
     /// must never start that server. The stub records its own start, and the test checks it never ran.
     /// </summary>
     [Fact]
-    public void PostCheckoutNeverStartsTheMcpExecutable()
+    public async Task PostCheckoutNeverStartsTheMcpExecutable()
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         _world.HealthyMcp(Root);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        _world.Doctor.RunPostCheckout(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
+        await _world.Doctor.RunPostCheckoutAsync(Root, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         Assert.Null(_world.Mcp.Executable);
         Assert.DoesNotContain(executor.Calls, call => call.FileName == McpExecutable);
@@ -129,13 +129,13 @@ public sealed class DoctorPostCheckoutTests
     /// A repository with no governed docs has no index to keep, so the hook path starts nothing for it.
     /// </summary>
     [Fact]
-    public void PostCheckoutInARepositoryWithoutGovernedDocsStartsNoCodeGraphChild()
+    public async Task PostCheckoutInARepositoryWithoutGovernedDocsStartsNoCodeGraphChild()
     {
         string bare = Path.Combine(_world.Files.Root, "kw", "bare");
         _world.Files.CreateDirectory(bare);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(bare);
 
-        _world.Doctor.RunPostCheckout(bare, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
+        await _world.Doctor.RunPostCheckoutAsync(bare, DoctorHarness.Options(McpExecutable), executor, _world.Locks);
 
         Assert.Empty(executor.CallsTo("codegraph"));
     }
@@ -161,7 +161,7 @@ public sealed class DoctorPostCheckoutTests
     /// warning in it is a passing check, so the exit code of the whole ensure run is unchanged.
     /// </summary>
     [Fact]
-    public void EnsureOnAGovernedRootReportsOneHookCheckAndAHookWarningKeepsTheExitCode()
+    public async Task EnsureOnAGovernedRootReportsOneHookCheckAndAHookWarningKeepsTheExitCode()
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         string hooks = Path.Combine(Root, ".git", "hooks");
@@ -199,7 +199,7 @@ public sealed class DoctorPostCheckoutTests
         });
 
         _world.HealthyMcp(Root);
-        DoctorReport report = _world.Doctor.Run(
+        DoctorReport report = await _world.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(McpExecutable),

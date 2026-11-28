@@ -408,4 +408,257 @@ public sealed class ConductorGuard(
             }
         }
     }
+
+    /// <summary>
+    /// Answers one hook event, without blocking a thread. Always returns 0: a deny rides stdout.
+    /// </summary>
+    /// <param name="stdin">The hook event as JSON.</param>
+    /// <param name="stdout">Receives the decision document, and nothing else.</param>
+    /// <param name="log">Receives diagnostics.</param>
+    /// <param name="allowedMcpServer">An MCP server whose tools the conductor may call, or null.</param>
+    /// <param name="copilotHome">Copilot's home directory, or null to resolve it from the environment.</param>
+    /// <param name="homeDirectory">The operator's home, which holds the run records, or null for the user profile.</param>
+    /// <param name="cancellationToken">Cancels the reads the guard makes.</param>
+    /// <returns>The process exit code.</returns>
+    public async Task<int> RunAsync(
+        string stdin,
+        TextWriter stdout,
+        TextWriter log,
+        string? allowedMcpServer = null,
+        string? copilotHome = null,
+        string? homeDirectory = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stdin);
+        ArgumentNullException.ThrowIfNull(stdout);
+        ArgumentNullException.ThrowIfNull(log);
+
+        string? answer;
+        try
+        {
+            ConductorGuardEvent hookEvent = ConductorHookEventReader.Read(stdin);
+            answer = await DecideAsync(
+                hookEvent,
+                allowedMcpServer,
+                copilotHome ?? ResolveCopilotHome(),
+                homeDirectory ?? process.HomeDirectory,
+                log,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            // Hook entry point: nothing may crash the host, and the deny is logged.
+            answer = ConductorGuardRules.Deny("The conductor guard could not read this tool call, so it was denied.");
+            TryLog(log, $"conductor guard could not read the event: {ex.Message}");
+        }
+
+        return Respond(answer, stdout, log);
+    }
+
+    private async Task<string?> DecideAsync(
+        ConductorGuardEvent hookEvent,
+        string? allowedMcpServer,
+        string copilotHome,
+        string home,
+        TextWriter log,
+        CancellationToken cancellationToken)
+    {
+        if (hookEvent.Calls.Count == 0)
+        {
+            return hookEvent.TransformedPrompt is { } prompt
+                ? new JsonObject { ["modifiedTransformedPrompt"] = $"{prompt}\n\n{ConductorGuardRules.WorkflowReminder}" }.ToJsonString()
+                : ConductorGuardRules.Deny("The conductor guard found no tool name in this event, so it was denied.");
+        }
+
+        if (hookEvent.IsWorkerCall)
+        {
+            return null;
+        }
+
+        bool needsContext = hookEvent.Calls.Any(call =>
+            string.Equals(call.Name, "view", StringComparison.Ordinal)
+            || ConductorGuardRules.RunStartTargetOf(call) is not null);
+        HookRunContext? context = needsContext
+            ? await ResolveContextAsync(hookEvent.Cwd, home, cancellationToken).ConfigureAwait(false)
+            : null;
+        IReadOnlyList<string> roots = context?.Worktrees ?? [];
+        string? cwd = hookEvent.Cwd;
+
+        ConductorToolCall? denied = null;
+        foreach (ConductorToolCall call in hookEvent.Calls)
+        {
+            if (!await IsPermittedAsync(call, cwd, roots, allowedMcpServer, copilotHome, home, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                denied = call;
+                break;
+            }
+        }
+
+        if (denied is not null)
+        {
+            return ConductorGuardRules.Deny($"{ConductorGuardRules.DenyReason} Blocked tool: {denied.Name}.");
+        }
+
+        foreach (ConductorToolCall call in hookEvent.Calls)
+        {
+            if (await RunStartRefusalAsync(call, cwd, context, home, log, cancellationToken).ConfigureAwait(false) is { } refusal)
+            {
+                return ConductorGuardRules.Deny(refusal);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<HookRunContext?> ResolveContextAsync(
+        string? cwd,
+        string home,
+        CancellationToken cancellationToken)
+    {
+        if (runContexts is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await runContexts.ResolveAsync(
+                new HookRunContextRequest(
+                    HarnessRegistry.CopilotCliToken,
+                    WorkspaceRoot: null,
+                    EventCwd: cwd,
+                    ProcessDirectory: process.CurrentDirectory,
+                    AgentWorktree: null,
+                    Prompt: null,
+                    home),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> RunStartRefusalAsync(
+        ConductorToolCall call,
+        string? cwd,
+        HookRunContext? context,
+        string home,
+        TextWriter log,
+        CancellationToken cancellationToken)
+    {
+        if (ConductorGuardRules.RunStartTargetOf(call) is not { } target)
+        {
+            return null;
+        }
+
+        string? repository = context is null
+            ? (cwd is null
+                ? null
+                : await git.GetCommonDirectoryAsync(cwd, cancellationToken: cancellationToken).ConfigureAwait(false))
+            : context.CommonDirectory;
+        bool? started = repository is null ? null : RunStarted(repository, home);
+        if (started is null)
+        {
+            TryLog(log, $"conductor guard could not read whether a run was started for '{cwd}'; the dispatch to {target} continues.");
+            return null;
+        }
+
+        return started.Value
+            ? null
+            : $"KW-ARB-RUN-001: no run has been started for this repository, so {target} would write into a checkout " +
+              $"with no branch of its own. Next: {RunWriterProfiles.Remedy}";
+    }
+
+    private async Task<bool> IsPermittedAsync(
+        ConductorToolCall call,
+        string? cwd,
+        IReadOnlyList<string> roots,
+        string? allowedMcpServer,
+        string copilotHome,
+        string home,
+        CancellationToken cancellationToken)
+    {
+        if (ConductorGuardRules.IsPermittedByName(call, allowedMcpServer))
+        {
+            return true;
+        }
+
+        if (!call.HasArguments)
+        {
+            return false;
+        }
+
+        return call.Name switch
+        {
+            "view" => call.Path is { } path
+                && await IsContractPathAsync(path, cwd, roots, copilotHome, home, cancellationToken).ConfigureAwait(false),
+            "bash" or "powershell" => call.Command is { } command && ConductorGuardRules.RunStartCommand().IsMatch(command),
+            _ => false,
+        };
+    }
+
+    private async Task<bool> IsContractPathAsync(
+        string path,
+        string? cwd,
+        IReadOnlyList<string> roots,
+        string copilotHome,
+        string home,
+        CancellationToken cancellationToken)
+    {
+        if (cwd is null && !Path.IsPathRooted(path))
+        {
+            return false;
+        }
+
+        string fullPath = ConductorGuardRules.Normalize(Path.GetFullPath(path, cwd ?? process.CurrentDirectory));
+
+        if (Path.IsPathRooted(copilotHome)
+            && (fullPath.StartsWith(Prefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(Prefix(Path.Combine(copilotHome, "skills")), StringComparison.OrdinalIgnoreCase)))
+        {
+            return !links.HasLinkBelow(Prefix(copilotHome), fullPath);
+        }
+
+        if (Path.IsPathRooted(home)
+            && fullPath.StartsWith(Prefix(UserStatePaths.RunsDirectory(home)), StringComparison.OrdinalIgnoreCase))
+        {
+            return !links.HasLinkBelow(Prefix(home), fullPath);
+        }
+
+        if (cwd is null)
+        {
+            return false;
+        }
+
+        if (fullPath.StartsWith(Prefix(cwd), StringComparison.OrdinalIgnoreCase))
+        {
+            return IsContractUnder(Prefix(cwd), fullPath);
+        }
+
+        IReadOnlyList<string> worktrees = roots.Count > 0
+            ? roots
+            : await ListWorktreesOrNoneAsync(cwd, cancellationToken).ConfigureAwait(false);
+        string? worktree = worktrees
+            .Select(Prefix)
+            .Where(root => fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(root => root.Length)
+            .FirstOrDefault();
+        return worktree is not null && IsContractUnder(worktree, fullPath);
+    }
+
+    private async Task<IReadOnlyList<string>> ListWorktreesOrNoneAsync(
+        string cwd,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await git.ListWorktreesAsync(cwd, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
+        {
+            return [];
+        }
+    }
 }

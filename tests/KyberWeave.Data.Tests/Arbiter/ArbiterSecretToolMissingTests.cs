@@ -18,46 +18,46 @@ public sealed class ArbiterSecretToolMissingTests
     private const string TypeSafeOrigin = "https://api.typesafe.ai";
 
     [Fact]
-    public void ReadWithoutSecretToolRaisesActionableFailure()
+    public async Task ReadWithoutSecretToolRaisesActionableFailure()
     {
         SecretServiceCredentialStore store = new(new MissingExecutableCredentialProcessRunner());
 
-        SecretServiceUnavailableException exception = Assert.Throws<SecretServiceUnavailableException>(
-            () => store.Read(TypeSafeOrigin));
+        SecretServiceUnavailableException exception = await Assert.ThrowsAsync<SecretServiceUnavailableException>(
+            () => store.ReadAsync(TypeSafeOrigin).AsTask());
 
         AssertActionable(exception.Message);
         Assert.IsType<Win32Exception>(exception.InnerException);
     }
 
     [Fact]
-    public void WriteWithoutSecretToolRaisesTheSameActionableFailure()
+    public async Task WriteWithoutSecretToolRaisesTheSameActionableFailure()
     {
         SecretServiceCredentialStore store = new(new MissingExecutableCredentialProcessRunner());
 
-        SecretServiceUnavailableException exception = Assert.Throws<SecretServiceUnavailableException>(
-            () => store.Write(TypeSafeOrigin, "TS-WRITE-KEY-5e6f7a8b"));
+        SecretServiceUnavailableException exception = await Assert.ThrowsAsync<SecretServiceUnavailableException>(
+            () => store.WriteAsync(TypeSafeOrigin, "TS-WRITE-KEY-5e6f7a8b").AsTask());
 
         AssertActionable(exception.Message);
     }
 
     [Fact]
-    public void MissingSecretToolFailureIsAnInvalidOperationForSetupAndStatus()
+    public async Task MissingSecretToolFailureIsAnInvalidOperationForSetupAndStatus()
     {
         SecretServiceCredentialStore store = new(new MissingExecutableCredentialProcessRunner());
 
-        InvalidOperationException exception = Assert.Throws<SecretServiceUnavailableException>(
-            () => store.Read(TypeSafeOrigin));
+        InvalidOperationException exception = await Assert.ThrowsAsync<SecretServiceUnavailableException>(
+            () => store.ReadAsync(TypeSafeOrigin).AsTask());
 
         Assert.IsAssignableFrom<InvalidOperationException>(exception);
     }
 
     [Fact]
-    public void ReadWithSecretToolPresentAndEntryAbsentStillReturnsNull()
+    public async Task ReadWithSecretToolPresentAndEntryAbsentStillReturnsNull()
     {
         FakeRunner present = new(new ProcessResult(1, string.Empty, "No such secret."));
         SecretServiceCredentialStore store = new(present);
 
-        Assert.Null(store.Read(TypeSafeOrigin));
+        Assert.Null(await store.ReadAsync(TypeSafeOrigin));
     }
 
     private static void AssertActionable(string message)
@@ -72,11 +72,15 @@ public sealed class ArbiterSecretToolMissingTests
 
     private sealed class FakeRunner(ProcessResult next) : ICredentialProcessRunner
     {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+        public Task<ProcessResult> RunAsync(
+            ProcessStartInfo startInfo,
+            string standardInput,
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(startInfo);
             ArgumentNullException.ThrowIfNull(standardInput);
-            return next;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(next);
         }
     }
 }

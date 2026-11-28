@@ -24,7 +24,7 @@ public sealed class ArbiterStatusCommand(
     IUserHostConfigStore userConfig,
     IArbiterRepositoryLocator locator,
     IArbiterHarnessGating gating,
-    IAnsiConsole console) : Command<ArbiterSettings>
+    IAnsiConsole console) : AsyncCommand<ArbiterSettings>
 {
     /// <summary>A remote provider is configured, and no key resolves for its origin.</summary>
     public const string KeyMissing = ArbiterKeyResolver.MissingKeyCode;
@@ -34,49 +34,88 @@ public sealed class ArbiterStatusCommand(
     /// nothing. Exits 1 only when the configuration itself fails to load; a missing
     /// key is a warning and exits 0.
     /// </summary>
-    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
-        CommandHelpers.WriteUnfolded(console, () => Inspect(settings, report));
+
+        StatusFacts? facts = null;
+        if (configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
+        {
+            // The key lookup and the repository-root resolution run processes, so they await here, before the fold
+            // lifts the width; the fold then wraps the printing alone.
+            facts = await CollectFactsAsync(config, settings.Path, cancellationToken).ConfigureAwait(false);
+        }
+
+        CommandHelpers.WriteUnfolded(console, () => Inspect(facts, report));
 
         CommandHelpers.Finish(console, report, settings, "arbiter status", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 
-    private void Inspect(ArbiterSettings settings, DiagnosticReport report)
-    {
-        if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
-        {
-            return;
-        }
+    /// <summary>
+    /// The facts the report prints: the provider with its resolved key, and the scope rows the key and the resolved
+    /// root feed.
+    /// </summary>
+    /// <param name="Provider">The effective provider.</param>
+    /// <param name="Origin">The endpoint origin, or null when the endpoint has none.</param>
+    /// <param name="Remote">Whether the provider is remote, so a key is needed.</param>
+    /// <param name="Key">The resolved key, or null when none resolves or the provider needs none.</param>
+    /// <param name="GlobalTargets">The harnesses listed under <c>arbiter.global.targets</c>.</param>
+    /// <param name="Gating">The per-harness gating rows for the project scope.</param>
+    private sealed record StatusFacts(
+        ArbiterProviderConfig Provider,
+        string? Origin,
+        bool Remote,
+        string? Key,
+        IReadOnlyList<string> GlobalTargets,
+        HarnessGatingReport Gating);
 
+    /// <summary>
+    /// Resolves what the report prints: the key through the credential store and the repository root through git,
+    /// each awaited rather than blocked, and the scope rows they feed.
+    /// </summary>
+    private async Task<StatusFacts> CollectFactsAsync(
+        KyberWeaveConfig config,
+        string repositoryPath,
+        CancellationToken cancellationToken)
+    {
         ArbiterProviderConfig provider = config.Arbiter.Provider;
         string? origin = ArbiterKeyResolver.GetOrigin(provider.Endpoint);
         bool remote = provider.Kind != ArbiterProviderKind.None
             && !ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint);
-        string? key = remote ? keys.TryResolveKey(config, provider.Endpoint) : null;
+        string? key = remote ? await keys.TryResolveKeyAsync(config, provider.Endpoint, cancellationToken).ConfigureAwait(false) : null;
         string home = environment.HomeDirectory;
         IReadOnlyList<string> globalTargets = userConfig.ReadGlobalTargets(home);
-        string root = locator.ResolveRepositoryRoot(settings.Path);
+        string root = await locator.ResolveRepositoryRootAsync(repositoryPath, cancellationToken).ConfigureAwait(false);
         HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
 
+        return new StatusFacts(provider, origin, remote, key, globalTargets, gatingReport);
+    }
+
+    private void Inspect(StatusFacts? facts, DiagnosticReport report)
+    {
+        if (facts is null)
+        {
+            return;
+        }
+
         console.MarkupLine("[bold]Arbiter status[/]");
-        console.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(provider.Kind))}[/]");
-        console.MarkupLine($"  Model: [bold]{Markup.Escape(provider.Model)}[/]");
-        console.MarkupLine($"  Endpoint: [bold]{Markup.Escape(provider.Endpoint)}[/]");
-        console.MarkupLine($"  Origin: [bold]{Markup.Escape(origin ?? "none")}[/]");
-        if (!remote)
+        console.MarkupLine($"  Provider: [bold]{Markup.Escape(KindName(facts.Provider.Kind))}[/]");
+        console.MarkupLine($"  Model: [bold]{Markup.Escape(facts.Provider.Model)}[/]");
+        console.MarkupLine($"  Endpoint: [bold]{Markup.Escape(facts.Provider.Endpoint)}[/]");
+        console.MarkupLine($"  Origin: [bold]{Markup.Escape(facts.Origin ?? "none")}[/]");
+        if (!facts.Remote)
         {
             console.MarkupLine("  Key: [grey]not needed (none or loopback provider).[/]");
         }
-        else if (key is null)
+        else if (facts.Key is null)
         {
             console.MarkupLine("  Key: [yellow]missing.[/]");
             report.Add(new Diagnostic(
                 KeyMissing,
                 Severity.Warning,
-                $"A remote provider is configured, and no key resolves for origin '{origin}'.",
+                $"A remote provider is configured, and no key resolves for origin '{facts.Origin}'.",
                 "arbiter.provider",
                 Hint: $"Run 'arbiter setup' or export {ArbiterKeyResolver.EnvVarName}."));
         }
@@ -85,13 +124,9 @@ public sealed class ArbiterStatusCommand(
             console.MarkupLine("  Key: [green]found.[/]");
         }
 
-        WriteGlobalScope(globalTargets);
-        WriteProjectScope(gatingReport);
+        WriteGlobalScope(facts.GlobalTargets);
+        WriteProjectScope(facts.Gating);
     }
-
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     private void WriteGlobalScope(IReadOnlyList<string> targets)
     {

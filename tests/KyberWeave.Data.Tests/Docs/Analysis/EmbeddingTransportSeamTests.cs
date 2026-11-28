@@ -15,14 +15,14 @@ public sealed class EmbeddingTransportSeamTests
     private const string OneVector = """{ "data": [{ "index": 0, "embedding": [1, 0] }] }""";
 
     [Fact]
-    public void TheClientCallsTheEndpointThroughTheTransportAndReadsTheTokenFromTheEnvironment()
+    public async Task TheClientCallsTheEndpointThroughTheTransportAndReadsTheTokenFromTheEnvironment()
     {
         using FakeHttpMessageHandler handler = new(FakeHttpMessageHandler.Response(HttpStatusCode.OK, OneVector));
         FakeEmbeddingTransport transport = new(handler, IPAddress.Loopback);
         FakeProcessEnvironment environment = new(readVariable: name => name == "LOCAL_TOKEN" ? "token-1" : null);
         using OpenAiCompatibleEmbeddingGenerator generator = new(transport, environment, new FakeTimeProvider());
 
-        EmbeddingGenerationResult result = generator.Generate([Key()], ["input"], Config());
+        EmbeddingGenerationResult result = await generator.GenerateAsync([Key()], ["input"], Config());
 
         Assert.Single(result.Embeddings);
         RecordedHttpRequest request = Assert.Single(handler.Requests);
@@ -31,7 +31,7 @@ public sealed class EmbeddingTransportSeamTests
     }
 
     [Fact]
-    public void AHostThatResolvesOffLoopbackIsRefusedBeforeAnyRequestLeaves()
+    public async Task AHostThatResolvesOffLoopbackIsRefusedBeforeAnyRequestLeaves()
     {
         using FakeHttpMessageHandler handler = new(FakeHttpMessageHandler.Response(HttpStatusCode.OK, OneVector));
         using OpenAiCompatibleEmbeddingGenerator generator = new(
@@ -39,31 +39,31 @@ public sealed class EmbeddingTransportSeamTests
             new FakeProcessEnvironment(),
             new FakeTimeProvider());
 
-        _ = Assert.Throws<InvalidOperationException>(() => generator.Generate([Key()], ["input"], Config()));
+        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => generator.GenerateAsync([Key()], ["input"], Config()));
 
         Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public void AServerErrorFailsTheCallAndNamesTheStatus()
+    public async Task AServerErrorFailsTheCallAndNamesTheStatus()
     {
         using FakeHttpMessageHandler handler = new(FakeHttpMessageHandler.Response(HttpStatusCode.InternalServerError, "boom"));
         using OpenAiCompatibleEmbeddingGenerator generator = Generator(handler, new FakeTimeProvider());
 
-        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
-            generator.Generate([Key()], ["input"], Config()));
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            generator.GenerateAsync([Key()], ["input"], Config()));
 
         Assert.Contains("500", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnUnreachableServerSurfacesTheTransportFailure()
+    public async Task AnUnreachableServerSurfacesTheTransportFailure()
     {
         using FakeHttpMessageHandler handler = FakeHttpMessageHandler.Failing(new HttpRequestException("connection refused"));
         using OpenAiCompatibleEmbeddingGenerator generator = Generator(handler, new FakeTimeProvider());
 
-        HttpRequestException failure = Assert.Throws<HttpRequestException>(() =>
-            generator.Generate([Key()], ["input"], Config()));
+        HttpRequestException failure = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            generator.GenerateAsync([Key()], ["input"], Config()));
 
         Assert.Equal("connection refused", failure.Message);
     }
@@ -75,7 +75,7 @@ public sealed class EmbeddingTransportSeamTests
         using FakeHttpMessageHandler handler = FakeHttpMessageHandler.Hanging();
         using OpenAiCompatibleEmbeddingGenerator generator = Generator(handler, clock);
 
-        Task<EmbeddingGenerationResult> call = Task.Run(() => generator.Generate([Key()], ["input"], Config(timeoutSeconds: 5)));
+        Task<EmbeddingGenerationResult> call = generator.GenerateAsync([Key()], ["input"], Config(timeoutSeconds: 5));
         await WaitUntil(() => handler.Requests.Count == 1);
         clock.Advance(TimeSpan.FromSeconds(4));
         Assert.False(call.IsCompleted);

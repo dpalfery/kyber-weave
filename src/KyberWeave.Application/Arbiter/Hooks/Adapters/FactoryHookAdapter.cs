@@ -121,12 +121,13 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
-    public string Handle(
+    public async Task<string> HandleAsync(
         JsonElement payload,
         string rawJson,
         string? renderedCaller,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(context);
@@ -138,24 +139,33 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config, context);
+            return await HandlePreAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config, context);
+            return await HandlePostAsync(payload, tool, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (string.Equals(eventName, "SubagentStop", StringComparison.Ordinal))
         {
-            return HandleSubagentStop(payload, caller, config, context);
+            return await HandleSubagentStopAsync(payload, caller, config, context, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         throw new InvalidOperationException(
             $"Malformed Factory hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
-    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePreAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -173,7 +183,8 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         string prompt = GetString(toolInput, "prompt")
             ?? throw new InvalidOperationException(
                 "Malformed Factory hook event: Task input carries no prompt.");
-        HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+        HookOutcome outcome = await DecidePreAsync(
+            payload, caller, target, prompt, config, context, cancellationToken).ConfigureAwait(false);
 
         // The rule's denial is the decision: a prompt that also could not be built must not hide it.
         if (outcome.Kind == HookOutcomeKind.Deny)
@@ -218,7 +229,13 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandlePostAsync(
+        JsonElement payload,
+        string? tool,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (!IsDispatchTool(tool))
         {
@@ -254,7 +271,8 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
             prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
-        HookOutcome outcome = DecidePost(payload, caller, target, prompt, toolOutput, config, context);
+        HookOutcome outcome = await DecidePostAsync(
+            payload, caller, target, prompt, toolOutput, config, context, cancellationToken).ConfigureAwait(false);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -280,7 +298,12 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
     /// Records a background task's return. Writes nothing: the event ends a sub-agent, so
     /// its output has no conductor context to reach, and the engine logs any non-allow.
     /// </summary>
-    private string HandleSubagentStop(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
+    private async Task<string> HandleSubagentStopAsync(
+        JsonElement payload,
+        string caller,
+        KyberWeaveConfig config,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         string? description = GetString(payload, "task_name");
         string? transcriptPath = GetString(payload, "transcript_path");
@@ -294,10 +317,11 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
         if (dispatch is null)
         {
             // The description names no dispatch on its own; the transcript's Task call names the agent it ran.
-            RecoverLostReturn(
+            await RecoverLostReturnAsync(
                 payload,
                 FactoryTranscript.DispatchTargets(_transcripts, transcriptPath, description),
-                context);
+                context,
+                cancellationToken).ConfigureAwait(false);
             return string.Empty;
         }
 
@@ -307,66 +331,77 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
             : dispatch.Prompt;
         string? result = GetString(payload, "task_result");
         string output = string.IsNullOrWhiteSpace(result) ? GetString(payload, "task_error") ?? string.Empty : result;
-        _ = DecidePost(payload, caller, dispatch.Target, prompt, output, config, context);
+        _ = await DecidePostAsync(
+            payload, caller, dispatch.Target, prompt, output, config, context, cancellationToken)
+            .ConfigureAwait(false);
 
         // A return the rules could not pair leaves the dispatch looking in flight; the stop event itself is the
         // evidence that the agent's work is over, so close the one dispatch it left open.
-        RecoverLostReturn(payload, [dispatch.Target], context);
+        await RecoverLostReturnAsync(payload, [dispatch.Target], context, cancellationToken).ConfigureAwait(false);
         return string.Empty;
     }
 
     /// <summary>Closes the one dispatch the stopped agent left open when its return hook never reached the ledger.</summary>
-    private void RecoverLostReturn(JsonElement payload, IReadOnlyList<string> agents, HookContext context)
+    private async Task RecoverLostReturnAsync(
+        JsonElement payload,
+        IReadOnlyList<string> agents,
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is not ILostReturnRecovery recovery)
         {
             return;
         }
 
-        recovery.RecoverLostReturn(
+        await recovery.RecoverLostReturnAsync(
             Token,
             GetString(payload, "session_id"),
             agents,
-            context);
+            context,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePre(
+    private async Task<HookOutcome> DecidePreAsync(
         JsonElement payload,
         string caller,
         string target,
         string prompt,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
             // Factory documents no call id ([F11]): null keeps pairing on
             // pair-digest at the ledger layer, with session_id for scoping.
-            return contextual.DecidePreDispatch(
+            return await contextual.DecidePreDispatchAsync(
                 Token, caller, target, prompt, config, context,
-                toolCallId: null, GetString(payload, "session_id"));
+                toolCallId: null, GetString(payload, "session_id"), cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePreDispatch(caller, target, prompt, config);
+        return await _engine.DecidePreDispatchAsync(
+            caller, target, prompt, config, cancellationToken).ConfigureAwait(false);
     }
 
-    private HookOutcome DecidePost(
+    private async Task<HookOutcome> DecidePostAsync(
         JsonElement payload,
         string caller,
         string? target,
         string prompt,
         string toolOutput,
         KyberWeaveConfig config,
-        HookContext context)
+        HookContext context,
+        CancellationToken cancellationToken)
     {
         if (_engine is IContextualHookDecisionEngine contextual)
         {
-            return contextual.DecidePostDispatch(
+            return await contextual.DecidePostDispatchAsync(
                 Token, caller, target, prompt, toolOutput, config, context,
-                toolCallId: null, GetString(payload, "session_id"));
+                toolCallId: null, GetString(payload, "session_id"), cancellationToken).ConfigureAwait(false);
         }
 
-        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        return await _engine.DecidePostDispatchAsync(
+            caller, target, toolOutput, config, cancellationToken).ConfigureAwait(false);
     }
 
     private static JsonElement RequireToolInput(JsonElement payload)

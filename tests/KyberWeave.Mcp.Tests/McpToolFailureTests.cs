@@ -56,12 +56,13 @@ public sealed class McpToolFailureTests
     /// agent that stops without naming the repair has to ask a human what to do.
     /// </remarks>
     [Fact]
-    public void DocsToolsReportToolFailureWithReasonAndFixUnderTheDefaultStopRule()
+    public async Task DocsToolsReportToolFailureWithReasonAndFixUnderTheDefaultStopRule()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
-        string response = Tools().Explore("anything");
+        DocsTools tools = Tools();
+        string response = await tools.ExploreAsync("anything");
 
         Assert.Contains(ToolFailure, response, StringComparison.Ordinal);
         Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
@@ -78,16 +79,17 @@ public sealed class McpToolFailureTests
     /// which is the failure this half of the pair prevents.
     /// </remarks>
     [Fact]
-    public void DocsToolsWarnInsteadOfFailingWhenTheRepositoryOptsOutOfTheStopRule()
+    public async Task DocsToolsWarnInsteadOfFailingWhenTheRepositoryOptsOutOfTheStopRule()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
         string configPath = _host.InRepo(".kyber-weave/kyber-weave.yml");
         _host.Files.WriteAllText(
             configPath,
             _host.Files.ReadAllText(configPath) + "\nstop-on-tool-failure: false\n");
 
-        string response = Tools().Explore("anything");
+        DocsTools tools = Tools();
+        string response = await tools.ExploreAsync("anything");
 
         Assert.DoesNotContain(ToolFailure, response, StringComparison.Ordinal);
         Assert.Contains(FailingToolName, response, StringComparison.OrdinalIgnoreCase);
@@ -104,14 +106,13 @@ public sealed class McpToolFailureTests
     /// broken server was bound to, which is the first question after a tool failure.
     /// </remarks>
     [Fact]
-    public void TheRevisionToolStillAnswersWhileTheOtherDocsToolsReportToolFailure()
+    public async Task TheRevisionToolStillAnswersWhileTheOtherDocsToolsReportToolFailure()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
         DocsTools tools = Tools();
-
-        string explore = tools.Explore("anything");
-        string status = tools.DocsStatus();
+        string explore = await tools.ExploreAsync("anything");
+        string status = await tools.DocsStatusAsync();
 
         Assert.Contains(ToolFailure, explore, StringComparison.Ordinal);
         Assert.DoesNotContain(ToolFailure, status, StringComparison.Ordinal);
@@ -150,10 +151,7 @@ public sealed class McpToolFailureTests
             services.GetRequiredService<IFileSystem>(),
             services.GetRequiredService<IPathResolver>(),
             services.GetRequiredService<IProcessEnvironment>(),
-            services.GetRequiredService<IProcessRunner>(),
-            services.GetRequiredService<IBoundedProcessExecutor>(),
-            null,
-            null);
+            services.GetRequiredService<IProcessRunner>());
 
         return DocsToolsComposition.Create(host, null, freshness);
     }

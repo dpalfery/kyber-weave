@@ -101,67 +101,109 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
-    public void TheSeatsCommandLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    public async Task TheSeatsCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
     {
         RecordingConfigs configs = new();
 
-        ReviewCommandResult result = Seats(configs).Prepare(
+        ReviewCommandResult result = await Seats(configs).PrepareAsync(
             new ReviewSeatsRequest("repo", null, null, null, false, false, false),
-            (_, _) => throw new InvalidOperationException("unexpected call"),
-            new FakeProcessExecutor(),
-            TextWriter.Null);
+            (_, _, _) => throw new InvalidOperationException("unexpected call"),
+            new ScriptedProcessRunner(),
+            TextWriter.Null,
+            CancellationToken.None);
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal("/work/repo", configs.Root);
     }
 
     [Fact]
-    public void ATaskInAnotherWorktreeIsFoundWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
+    public async Task TheGatesCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewCommandResult result = await Gates(configs).RunAsync(
+            new ReviewGatesRequest(
+                "repo", null, null, null, null, [], [], false, false, false, false, false, null, false, false, false, false),
+            new ScriptedProcessRunner(),
+            TextWriter.Null,
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public async Task TheVerdictCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
+    {
+        RecordingConfigs configs = new();
+
+        ReviewVerdictResult result = await Verdict(configs).DecideAsync(
+            new ReviewVerdictRequest(
+                "repo", null, null, null, null, null, null, null, null, [], [], false, false, "kyber-weave review verdict ."),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Equal("/work/repo", configs.Root);
+    }
+
+    [Fact]
+    public async Task TheDecisionModelFactoryAsyncSwitchesOffWithoutAskingForKey()
+    {
+        ReviewDecisionModelFactory factory = new(null!, null!, null!, null!, TimeProvider.System, new FakeIdGenerator());
+
+        IReviewDecisionModel model = await factory.CreateForRepositoryAsync(
+            "/work/repo", Config(), switchedOff: true, cachePath: null, CancellationToken.None);
+
+        Assert.False(model.Configured);
+    }
+
+    [Fact]
+    public async Task ATaskInAnotherWorktreeIsFoundAsyncWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
     {
         _files.CreateDirectory("/work/wt");
         PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
 
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
 
-        Assert.NotNull(match);
-        Assert.Null(reason);
-        Assert.Equal("docs/plan.md", match.Plan);
+        Assert.NotNull(lookup.Match);
+        Assert.Null(lookup.Reason);
+        Assert.Equal("docs/plan.md", lookup.Match.Plan);
     }
 
     [Fact]
-    public void AWorktreeThatIsNotADirectoryIsNotSearched()
-    {
-        PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
-
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
-
-        Assert.Null(match);
-        Assert.NotNull(reason);
-    }
-
-    [Fact]
-    public void TheCheckoutsOwnWorktreeEntryIsNotSearchedAgainWhateverItsSpelling()
-    {
-        _files.CreateDirectory("/work/repo");
-        PlanTaskTargetService service = Targets(worktrees: ["repo/"], activeIn: "/work/repo");
-
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out _);
-
-        Assert.Null(match);
-    }
-
-    [Fact]
-    public void ATaskIsStillFoundInThisCheckoutsPlanThatHasMovedIntoReview()
+    public async Task ATaskIsStillFoundAsyncInThisCheckoutsPlanThatHasMovedIntoReview()
     {
         _files.CreateDirectory("/work/repo");
         PlanTaskTargetService service = Targets(worktrees: [], activeIn: null, reviewPlans: ["docs/plan.md"]);
 
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
 
-        Assert.Null(reason);
-        Assert.NotNull(match);
-        Assert.Equal("docs/plan.md", match.Plan);
-        Assert.Equal("T1", match.Entry.Id);
+        Assert.Null(lookup.Reason);
+        Assert.NotNull(lookup.Match);
+        Assert.Equal("docs/plan.md", lookup.Match.Plan);
+        Assert.Equal("T1", lookup.Match.Entry.Id);
+    }
+
+    [Fact]
+    public async Task AWorktreeThatIsNotADirectoryIsNotSearched()
+    {
+        PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
+
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
+
+        Assert.Null(lookup.Match);
+        Assert.NotNull(lookup.Reason);
+    }
+
+    [Fact]
+    public async Task TheCheckoutsOwnWorktreeEntryIsNotSearchedAgainWhateverItsSpelling()
+    {
+        _files.CreateDirectory("/work/repo");
+        PlanTaskTargetService service = Targets(worktrees: ["repo/"], activeIn: "/work/repo");
+
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
+
+        Assert.Null(lookup.Match);
     }
 
     [Fact]
@@ -206,6 +248,16 @@ public sealed class ReviewServiceSeamTests
 
     private ReviewSeatsService Seats(IConfigLoadService configs) =>
         new(null!, null!, null!, null!, null!, null!, null!, _files, _environment, null!, configs, null!, Paths);
+
+    private ReviewGatesService Gates(IConfigLoadService configs) =>
+        new(
+            null!, null!, null!, null!, null!, null!, null!, null!, null!, null!,
+            _files, _environment, Paths, null!, configs, null!, null!);
+
+    private ReviewVerdictService Verdict(IConfigLoadService configs) =>
+        new(
+            configs, null!, null!, null!, null!, null!, null!, _files, null!, null!, null!,
+            Paths, _environment, TimeProvider.System);
 
     /// <summary>
     /// A target service over the shared fakes. The fake worktree list answers for the checkout named

@@ -23,10 +23,10 @@ public sealed class ArbiterSectionsCommand(
     IArbiterSectionSelectionService sections,
     IPathResolver paths,
     IProcessEnvironment environment,
-    IAnsiConsole console) : Command<ArbiterSectionsSettings>
+    IAnsiConsole console) : AsyncCommand<ArbiterSectionsSettings>
 {
     /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
-    public override int Execute(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -52,10 +52,9 @@ public sealed class ArbiterSectionsCommand(
             return 1;
         }
 
-        SectionSelection selection = sections
+        SectionSelection selection = await sections
             .SelectAsync(full, settings.Task, new NoneProvider(), cancellationToken)
-            .GetAwaiter()
-            .GetResult();
+            .ConfigureAwait(false);
         if (selection.FailedSafe && selection.Selected.Count == 0)
         {
             console.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' could not be read.[/]");
@@ -80,7 +79,4 @@ public sealed class ArbiterSectionsCommand(
         return 2;
     }
 
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSectionsSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 }

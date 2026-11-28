@@ -65,5 +65,8 @@ public sealed class RunStartRunnerWorktreeTests
     private sealed class UnusedGit : IGitCommandRunner
     {
         public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments) => throw new NotSupportedException();
+
+        public Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

@@ -35,7 +35,7 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public string? Read(string origin)
+    public async ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         if (HasNewline(origin))
@@ -57,7 +57,7 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add(origin);
         startInfo.ArgumentList.Add("-w");
 
-        ProcessResult result = _runner.Run(startInfo, string.Empty);
+        ProcessResult result = await _runner.RunAsync(startInfo, string.Empty, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode == ItemNotFoundExitCode)
         {
             // errSecItemNotFound: nothing matched these attributes, so there is no key.
@@ -78,7 +78,7 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public void Write(string origin, string key)
+    public async ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
@@ -118,7 +118,7 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         // backslash is parsed as one argument; a newline cannot be quoted on this
         // line protocol and is rejected above.
         string command = $"add-generic-password -U -s {Service} -a {Quote(origin)} -w {Quote(key)}\n";
-        ProcessResult result = _runner.Run(startInfo, command);
+        ProcessResult result = await _runner.RunAsync(startInfo, command, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
@@ -127,7 +127,7 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public void Delete(string origin)
+    public async ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         if (HasNewline(origin))
@@ -149,7 +149,7 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add("-a");
         startInfo.ArgumentList.Add(origin);
 
-        ProcessResult result = _runner.Run(startInfo, string.Empty);
+        ProcessResult result = await _runner.RunAsync(startInfo, string.Empty, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode == ItemNotFoundExitCode)
         {
             // errSecItemNotFound: nothing matched, which is already the desired end state.

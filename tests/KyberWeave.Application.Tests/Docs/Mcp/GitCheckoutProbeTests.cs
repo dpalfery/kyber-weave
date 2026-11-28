@@ -92,13 +92,13 @@ public sealed class GitCheckoutProbeTests
     }
 
     [Fact]
-    public void TheRevisionIsGitsFirstLineAndACleanTreeIsNotDirty()
+    public async Task TheRevisionIsGitsFirstLineAndACleanTreeIsNotDirty()
     {
         _ = _git
             .Script("git", new ProcessRunResult(0, "abc1234\n", false), RevisionArgv)
             .Script("git", new ProcessRunResult(0, "  \n", false), StatusArgv);
 
-        GitCheckoutRevision revision = Probe().ReadRevision(Root);
+        GitCheckoutRevision revision = await Probe().ReadRevisionAsync(Root);
 
         Assert.Equal("abc1234", revision.Revision);
         Assert.Equal("no", revision.Dirty);
@@ -110,29 +110,29 @@ public sealed class GitCheckoutProbeTests
     }
 
     [Fact]
-    public void AnyStatusOutputMeansDirty()
+    public async Task AnyStatusOutputMeansDirty()
     {
         _ = _git
             .Script("git", new ProcessRunResult(0, "abc1234\n", false), RevisionArgv)
             .Script("git", new ProcessRunResult(0, " M file.cs\n", false), StatusArgv);
 
-        Assert.Equal("yes", Probe().ReadRevision(Root).Dirty);
+        Assert.Equal("yes", (await Probe().ReadRevisionAsync(Root)).Dirty);
     }
 
     [Fact]
-    public void AFailedTimedOutOrMissingGitIsUnavailableAndUnknownNeverInvented()
+    public async Task AFailedTimedOutOrMissingGitIsUnavailableAndUnknownNeverInvented()
     {
         _ = _git
             .Script("git", new ProcessRunResult(128, string.Empty, false), RevisionArgv)
             .ScriptTimeout("git", StatusArgv);
 
-        GitCheckoutRevision failed = Probe().ReadRevision(Root);
+        GitCheckoutRevision failed = await Probe().ReadRevisionAsync(Root);
 
         Assert.Equal("unavailable", failed.Revision);
         Assert.Equal("unknown", failed.Dirty);
 
         ScriptedProcessRunner none = new ScriptedProcessRunner().WithMissingProgram("git");
-        GitCheckoutRevision missing = new GitCheckoutProbe(_files, none, new FakePathResolver(_files)).ReadRevision(Root);
+        GitCheckoutRevision missing = await new GitCheckoutProbe(_files, none, new FakePathResolver(_files)).ReadRevisionAsync(Root);
 
         Assert.Equal("unavailable", missing.Revision);
         Assert.Equal("unknown", missing.Dirty);

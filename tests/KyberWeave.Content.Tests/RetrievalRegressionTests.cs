@@ -122,7 +122,7 @@ public sealed class RetrievalRegressionTests
 
     [Theory]
     [MemberData(nameof(AnswerableCases))]
-    public void APlainlyAskedQuestionReturnsOneAnswerBlob(
+    public async Task APlainlyAskedQuestionReturnsOneAnswerBlob(
         string query,
         string expectedId,
         string phrase,
@@ -131,7 +131,7 @@ public sealed class RetrievalRegressionTests
     {
         DocsTools tools = Tools.Value;
 
-        string response = Explore(tools, query);
+        string response = await Explore(tools, query);
 
         Assert.Contains(phrase, response, StringComparison.Ordinal);
         Assert.DoesNotContain(IncompletePrefix, response, StringComparison.Ordinal);
@@ -167,11 +167,11 @@ public sealed class RetrievalRegressionTests
     [InlineData("who won the 1998 world cup")]
     [InlineData("how do I train for a marathon")]
     [InlineData("tell me a joke")]
-    public void AnUnanswerableQuestionReturnsNothing(string query)
+    public async Task AnUnanswerableQuestionReturnsNothing(string query)
     {
         DocsTools tools = Tools.Value;
 
-        string response = Explore(tools, query);
+        string response = await Explore(tools, query);
 
         Assert.Contains("No document", response, StringComparison.Ordinal);
         Assert.DoesNotContain("confidence:", response, StringComparison.Ordinal);
@@ -206,7 +206,7 @@ public sealed class RetrievalRegressionTests
         return McpTestServices.Tools(index, services, host.Repo);
     }
 
-    private static string Explore(DocsTools tools, string query) => tools.Explore(query);
+    private static Task<string> Explore(DocsTools tools, string query) => tools.ExploreAsync(query);
 
     private static double ParseConfidence(string response)
     {

@@ -88,9 +88,9 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     /// <summary>An enforced triage answer denies the investigator with the exact digest the caller takes as the result.</summary>
     [Fact]
-    public void AnEnforcedTriageAnswerDeniesTheWorkerWithItsSubstituteDigest()
+    public async Task AnEnforcedTriageAnswerDeniesTheWorkerWithItsSubstituteDigest()
     {
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Trivial, 0.95, threshold: 0.9)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(Trivial, 0.95, threshold: 0.9)).DecidePreDispatchAsync(
             "claude",
             "bug-crusher",
             "bug-crusher-investigator",
@@ -105,9 +105,9 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     /// <summary>A shipped (shadow) triage answer allows the investigator to run, with no reason and no denial.</summary>
     [Fact]
-    public void AShadowTriageAnswerAllowsTheInvestigatorUnchanged()
+    public async Task AShadowTriageAnswerAllowsTheInvestigatorUnchanged()
     {
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Trivial, 0.95, threshold: 0.9)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(Trivial, 0.95, threshold: 0.9)).DecidePreDispatchAsync(
             "claude",
             "bug-crusher",
             "bug-crusher-investigator",
@@ -127,10 +127,10 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     /// which has no escalation text, and the hook let the dispatch continue.
     /// </summary>
     [Fact]
-    public void ADelegateEscalationWithAModelTargetingSecondaryIsStillDenied()
+    public async Task ADelegateEscalationWithAModelTargetingSecondaryIsStillDenied()
     {
         ArbiterRule difficulty = Raw("KW-ARB-DIFFICULTY-001");
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering("names-plan", 0.95, threshold: 0.8)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering("names-plan", 0.95, threshold: 0.8)).DecidePreDispatchAsync(
             "copilot-cli",
             "conductor",
             "dev-medium",
@@ -147,9 +147,9 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     /// <summary>An enforced drop tells the host, after the return, one line for each dropped finding, each naming its decision.</summary>
     [Fact]
-    public void AnEnforcedDropNamesEveryDroppedFindingInItsPostDispatchLine()
+    public async Task AnEnforcedDropNamesEveryDroppedFindingInItsPostDispatchLine()
     {
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85)).DecidePostDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85)).DecidePostDispatchAsync(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -168,9 +168,9 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     /// <summary>A shipped (shadow) nitpick rule drops nothing: the host gets the return untouched.</summary>
     [Fact]
-    public void AShadowNitpickRuleAnnotatesNothing()
+    public async Task AShadowNitpickRuleAnnotatesNothing()
     {
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85)).DecidePostDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85)).DecidePostDispatchAsync(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -192,7 +192,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         ArbiterRunStore store = _host.State.RunStore(ArbiterDirectory, null, _host.Clock);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatchAsync(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -212,7 +212,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         ArbiterRunStore store = _host.State.RunStore(ArbiterDirectory, null, _host.Clock);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
-        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
+        HookOutcome outcome = await Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatchAsync(
             "claude",
             "code-reviewer",
             "review-lens",

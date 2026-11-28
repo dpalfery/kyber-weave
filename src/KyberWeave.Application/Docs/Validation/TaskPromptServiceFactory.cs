@@ -1,7 +1,9 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 
@@ -38,6 +40,28 @@ public sealed class TaskPromptServiceFactory(
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
+        return new TaskPromptService(
+            tasks,
+            hostFacts,
+            files,
+            index.StandardsFor,
+            environment,
+            skills.ForRepository(root, config));
+    }
+
+    /// <inheritdoc />
+    public async Task<ITaskPromptService> ForRepositoryAsync(
+        string repositoryRoot,
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(config);
+
+        string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+        DocumentSet loaded = documents.Create(root, config.Ontology).Load();
+        CodeGraphPorts codeGraphPorts = await codeGraph.ForRepositoryAsync(root, cancellationToken).ConfigureAwait(false);
+        DocumentIndex index = DocumentIndex.Build(loaded, codeGraphPorts.Resolver);
         return new TaskPromptService(
             tasks,
             hostFacts,

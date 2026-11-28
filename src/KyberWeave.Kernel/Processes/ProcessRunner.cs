@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace KyberWeave.Core.Processes;
@@ -81,33 +82,75 @@ public static class ProcessRunner
         using Process process = StartRetryingTextFileBusy(CreateSafeStartInfo(startInfo));
 
         // Reads start before the write because a child may produce more than one pipe
-        // buffer of output before it consumes any stdin.
-        Task<string> standardOutput = ReadBoundedAsync(process.StandardOutput, maxOutputBytes);
-        Task<string> standardError = ReadBoundedAsync(process.StandardError, maxOutputBytes);
-        Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
+        // buffer of output before it consumes any stdin. The three transfers run on their
+        // own threads: this is the synchronous adapter, so it waits on threads rather than
+        // blocking on a Task.
+        string standardOutput = string.Empty;
+        string standardError = string.Empty;
+        Exception? ioFailure = null;
+        using ManualResetEventSlim ioDone = new(false);
+        int remaining = 3;
+
+        void Complete()
+        {
+            if (Interlocked.Decrement(ref remaining) == 0)
+            {
+                try
+                {
+                    ioDone.Set();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The timeout path already gave the killed tree its bounded wait and returned; a reader
+                    // that only then reaches EOF must not fault a background thread.
+                }
+            }
+        }
+
+        void Capture(Exception ex) => Interlocked.CompareExchange(ref ioFailure, ex, null);
+
+        Thread outputReader = new(() =>
+            ReadCaptured(process.StandardOutput, maxOutputBytes, text => standardOutput = text, Capture, Complete))
+        { IsBackground = true };
+
+        Thread errorReader = new(() =>
+            ReadCaptured(process.StandardError, maxOutputBytes, text => standardError = text, Capture, Complete))
+        { IsBackground = true };
+
+        Thread inputWriter = new(() =>
+            WriteCaptured(process.StandardInput, standardInput, Capture, Complete))
+        { IsBackground = true };
+
+        outputReader.Start();
+        errorReader.Start();
+        inputWriter.Start();
 
         bool timedOut = false;
         try
         {
-            Task io = Task.WhenAll(inputWrite, standardOutput, standardError);
             if (timeout is { } limit)
             {
-                if (!io.Wait(limit, cancellationToken))
+                if (!ioDone.Wait(limit, cancellationToken))
                 {
                     timedOut = true;
                     TryKillTree(process);
-                    io.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
+                    _ = ioDone.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
                     throw new TimeoutException(
                         $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
                 }
             }
             else if (cancellationToken.CanBeCanceled)
             {
-                io.Wait(cancellationToken);
+                ioDone.Wait(cancellationToken);
             }
             else
             {
-                io.GetAwaiter().GetResult();
+                ioDone.Wait(Timeout.Infinite, CancellationToken.None);
+            }
+
+            if (ioFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(ioFailure).Throw();
             }
         }
         catch (Exception ex) when (ex is not TimeoutException)
@@ -120,7 +163,7 @@ public static class ProcessRunner
         finally
         {
             // After a timeout kill or fault, an unbounded WaitForExit can hang if the tree did not
-            // actually die. The success path still waits without a cap: WhenAll already
+            // actually die. The success path still waits without a cap: the readers already
             // drained both pipes, so the child cannot be blocked on write.
             if (timedOut || !process.HasExited)
                 process.WaitForExit(TimeSpan.FromSeconds(5));
@@ -128,10 +171,137 @@ public static class ProcessRunner
                 process.WaitForExit();
         }
 
+        return new ProcessResult(process.ExitCode, standardOutput, standardError);
+    }
+
+    /// <summary>
+    ///     Starts a child process, transfers its standard input, and captures its output without blocking a thread.
+    /// </summary>
+    /// <remarks>
+    ///     This is the asynchronous twin of <see cref="Run" />: it starts both output reads before writing input,
+    ///     enforces the same timeout and output budget, and kills the process tree on every failure path. A missing
+    ///     program still surfaces as the platform's start failure, and a timeout still surfaces as a
+    ///     <see cref="TimeoutException" /> with the same message.
+    /// </remarks>
+    /// <param name="startInfo">
+    ///     Process configuration with stdin, stdout, and stderr redirected, shell execution
+    ///     disabled, and arguments supplied through <see cref="ProcessStartInfo.ArgumentList" />
+    ///     rather than the concatenated <see cref="ProcessStartInfo.Arguments" /> string.
+    /// </param>
+    /// <param name="standardInput">The complete text to write to the child process.</param>
+    /// <param name="timeout">
+    ///     When set, the process tree is killed and a <see cref="TimeoutException" /> is thrown
+    ///     if the child has not finished within this limit.
+    /// </param>
+    /// <param name="maxOutputBytes">
+    ///     When set, bounds standard output and standard error reading to this many bytes. If the child process
+    ///     produces more output, its process tree is killed and an <see cref="OutputLimitExceededException" />
+    ///     is thrown before the full output is buffered in memory.
+    /// </param>
+    /// <param name="cancellationToken">
+    ///     When cancelled, the process tree is killed and an <see cref="OperationCanceledException" /> is thrown.
+    /// </param>
+    /// <param name="time">The clock the timeout delay is measured on; null uses the system clock.</param>
+    /// <returns>The finished process's exit code and captured streams.</returns>
+    public static async Task<ProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        string standardInput,
+        TimeSpan? timeout = null,
+        long? maxOutputBytes = null,
+        TimeProvider? time = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        ArgumentNullException.ThrowIfNull(standardInput);
+
+        if (startInfo.UseShellExecute ||
+            !startInfo.RedirectStandardInput ||
+            !startInfo.RedirectStandardOutput ||
+            !startInfo.RedirectStandardError)
+            throw new ArgumentException(
+                "Standard input, standard output, and standard error must be redirected " +
+                "with shell execution disabled.",
+                nameof(startInfo));
+
+        if (!string.IsNullOrEmpty(startInfo.Arguments))
+            throw new ArgumentException(
+                "Pass arguments through ArgumentList, not Arguments.",
+                nameof(startInfo));
+
+        TimeProvider clock = time ?? TimeProvider.System;
+        using Process process = StartRetryingTextFileBusy(CreateSafeStartInfo(startInfo));
+
+        // Reads start before the write for the same reason as the synchronous twin: a child may
+        // produce more than one pipe buffer of output before it consumes any stdin.
+        Task<string> standardOutput = ReadBoundedAsync(process.StandardOutput, maxOutputBytes);
+        Task<string> standardError = ReadBoundedAsync(process.StandardError, maxOutputBytes);
+        Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
+        Task io = Task.WhenAll(inputWrite, standardOutput, standardError);
+
+        bool timedOut = false;
+        try
+        {
+            if (timeout is { } limit)
+            {
+                Task delay = Task.Delay(limit, clock, cancellationToken);
+                Task completed = await Task.WhenAny(io, delay).ConfigureAwait(false);
+                if (completed == delay && !io.IsCompleted)
+                {
+                    // The delay either expired or the caller cancelled. Awaiting it surfaces the
+                    // cancellation; an expiry falls through to the same kill-and-report path as Run.
+                    await delay.ConfigureAwait(false);
+                    timedOut = true;
+                    TryKillTree(process);
+                    await WaitForIoBoundedAsync(io).ConfigureAwait(false);
+                    throw new TimeoutException(
+                        $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
+                }
+
+                await io.ConfigureAwait(false);
+            }
+            else if (cancellationToken.CanBeCanceled)
+            {
+                await io.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await io.ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not TimeoutException)
+        {
+            TryKillTree(process);
+            if (ex is AggregateException ae)
+                throw ae.Flatten().InnerExceptions[0];
+            throw;
+        }
+        finally
+        {
+            // After a timeout kill or fault, an unbounded wait for exit can hang if the tree did not
+            // actually die. The success path still waits without a cap: WhenAll already drained both
+            // pipes, so the child cannot be blocked on write.
+            if (timedOut || !process.HasExited)
+            {
+                using CancellationTokenSource reap = new(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await process.WaitForExitAsync(reap.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The killed tree did not reap within the same five-second bound as Run.
+                }
+            }
+            else
+            {
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+
         return new ProcessResult(
             process.ExitCode,
-            standardOutput.GetAwaiter().GetResult(),
-            standardError.GetAwaiter().GetResult());
+            await standardOutput.ConfigureAwait(false),
+            await standardError.ConfigureAwait(false));
     }
 
     /// <summary>Whether a process with this id is still running.</summary>
@@ -232,36 +402,30 @@ public static class ProcessRunner
     }
 
     /// <summary>
-    ///     Drains both redirected streams, waits for exit, and returns what was captured.
+    ///     Drains both redirected streams without blocking a thread, waits for exit, and returns what was captured.
     /// </summary>
     /// <remarks>
-    ///     <para>
-    ///         Draining both pipes concurrently is required, not tidy. An OS pipe buffer is finite
-    ///         — commonly 64 KB — so a child that fills the stream the parent is not currently
-    ///         reading blocks on write. The parent is meanwhile blocked reading the other stream,
-    ///         which the blocked child will never close. Neither side can proceed.
-    ///     </para>
-    ///     <para>
-    ///         Both of the obvious spellings hit this: reading one stream to the end and then the
-    ///         other, and calling <see cref="Process.WaitForExit()" /> before draining either. Both
-    ///         survive testing because test fixtures are quiet, then hang on the one real input
-    ///         that is talkative. Route every redirected process through here.
-    ///     </para>
+    ///     Both reads are started before either is awaited, so neither pipe can fill while the other is being
+    ///     consumed.
     /// </remarks>
     /// <param name="process">A started process with both output streams redirected.</param>
-    public static ProcessResult ReadToEnd(Process process)
+    /// <param name="cancellationToken">Cancels the wait for the child to exit.</param>
+    /// <returns>The finished process's exit code and captured streams.</returns>
+    public static async Task<ProcessResult> ReadToEndAsync(
+        Process process,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(process);
 
         // Both reads are started before either is awaited, so neither pipe can fill while
         // the other is being consumed.
-        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        Task<string> standardError = process.StandardError.ReadToEndAsync(cancellationToken);
 
-        string[] captured = Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+        string[] captured = await Task.WhenAll(standardOutput, standardError).ConfigureAwait(false);
 
         // Safe only now: both streams are at EOF, so the child cannot be blocked on write.
-        process.WaitForExit();
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 
         return new ProcessResult(process.ExitCode, captured[0], captured[1]);
     }
@@ -363,6 +527,119 @@ public static class ProcessRunner
                 safe.Environment[pair.Key] = pair.Value;
 
         return safe;
+    }
+
+    private static async Task WaitForIoBoundedAsync(Task io)
+    {
+        // The killed tree may never reap. Give the pipe reads the same five-second bound as Run, on the real
+        // clock like the reap bound in RunAsync's finally, so a caller's clock that stops advancing cannot
+        // hold the timeout path open. A failure here is not surfaced: the path already reports a timeout.
+        Task delay = Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None);
+        _ = await Task.WhenAny(io, delay).ConfigureAwait(false);
+    }
+
+    private static void ReadCaptured(
+        StreamReader reader,
+        long? maxBytes,
+        Action<string> store,
+        Action<Exception> capture,
+        Action complete)
+    {
+        try
+        {
+            store(ReadBounded(reader, maxBytes));
+        }
+        catch (IOException ex)
+        {
+            capture(ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            capture(ex);
+        }
+        catch (ArgumentException ex)
+        {
+            capture(ex);
+        }
+        catch (NotSupportedException ex)
+        {
+            capture(ex);
+        }
+        finally
+        {
+            complete();
+        }
+    }
+
+    private static void WriteCaptured(
+        StreamWriter writer,
+        string input,
+        Action<Exception> capture,
+        Action complete)
+    {
+        try
+        {
+            WriteAndClose(writer, input);
+        }
+        catch (IOException ex)
+        {
+            capture(ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            capture(ex);
+        }
+        catch (ArgumentException ex)
+        {
+            capture(ex);
+        }
+        catch (NotSupportedException ex)
+        {
+            capture(ex);
+        }
+        finally
+        {
+            complete();
+        }
+    }
+
+    private static string ReadBounded(StreamReader reader, long? maxBytes)
+    {
+        if (maxBytes is null)
+            return reader.ReadToEnd();
+
+        if (maxBytes.Value < 0)
+            throw new ArgumentOutOfRangeException(nameof(maxBytes), maxBytes.Value, "maxBytes cannot be negative.");
+
+        long max = maxBytes.Value;
+        int bufferSize = (int)Math.Clamp(max > 16383 ? 16384 : max + 1, 1, 16384);
+        char[] buffer = new char[bufferSize];
+        StringBuilder sb = new();
+        long totalBytes = 0;
+        int read;
+        while ((read = reader.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            totalBytes += reader.CurrentEncoding.GetByteCount(buffer, 0, read);
+            if (totalBytes > max)
+                throw new OutputLimitExceededException($"The process output exceeded the limit of {max.ToString(CultureInfo.InvariantCulture)} bytes.");
+
+            sb.Append(buffer, 0, read);
+        }
+        return sb.ToString();
+    }
+
+    private static void WriteAndClose(StreamWriter writer, string input)
+    {
+        try
+        {
+            writer.Write(input);
+        }
+        finally
+        {
+            // Close communicates EOF even for empty input. It also flushes any text still
+            // buffered by StreamWriter, so failures during that final transfer propagate.
+            writer.Close();
+        }
     }
 
     private static async Task<string> ReadBoundedAsync(StreamReader reader, long? maxBytes)

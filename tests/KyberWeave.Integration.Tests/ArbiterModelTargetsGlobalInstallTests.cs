@@ -83,7 +83,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         RealUserHostConfigStore.Create().WriteGlobalTargets(_home, ["copilot"]);
         WriteProjectConfig();
 
-        string output = RunDoctor();
+        string output = await RunDoctorAsync();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", output, StringComparison.Ordinal);
     }
@@ -114,7 +114,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         Assert.Equal(installedContent, await File.ReadAllBytesAsync(targetsPath));
         Assert.Equal(installedAt, File.GetLastWriteTimeUtc(targetsPath));
 
-        string output = RunDoctor();
+        string output = await RunDoctorAsync();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", output, StringComparison.Ordinal);
     }
@@ -142,7 +142,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         Assert.NotEqual(installedContent, updatedContent);
         Assert.Contains("o3-mini", System.Text.Encoding.UTF8.GetString(updatedContent), StringComparison.Ordinal);
 
-        string output = RunDoctor();
+        string output = await RunDoctorAsync();
 
         Assert.DoesNotContain("KW-ARB-MODEL-001", output, StringComparison.Ordinal);
     }
@@ -167,7 +167,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
             StringComparison.Ordinal);
         await File.WriteAllTextAsync(targetsPath, edited);
 
-        string output = RunDoctor();
+        string output = await RunDoctorAsync();
 
         Assert.Contains("KW-ARB-MODEL-001", output, StringComparison.Ordinal);
     }
@@ -239,9 +239,10 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), ShadowModelTargetingYaml);
     }
 
-    private string RunDoctor() =>
-        ProcessConsoleCapture.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
+    private async Task<string> RunDoctorAsync() =>
+        (await ProcessConsoleCapture.RunAsync(() => _host.Command<ArbiterDoctorCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = _repo })).Output;
+            new ArbiterSettings { Path = _repo },
+            CancellationToken.None))).Output;
 
 }

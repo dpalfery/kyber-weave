@@ -48,13 +48,13 @@ public sealed class McpDocsProvenanceTests
     private readonly MemoryDocsHost _host = new();
 
     [Fact]
-    public void EachDocsToolLeadsWithProvenanceForItsOwnRepositoryRoot()
+    public async Task EachDocsToolLeadsWithProvenanceForItsOwnRepositoryRoot()
     {
-        (string rootA, _) = CreateTwoCorpora();
+        (string rootA, _) = await CreateTwoCorporaAsync();
         DocsTools tools = CreateTools(rootA);
         int expectedDocuments = CreateHost(rootA).Current().DocumentCount;
 
-        foreach (string response in AllResponses(tools))
+        await foreach (string response in AllResponses(tools))
         {
             ProvenanceLine line = ParseProvenance(response);
             Assert.Equal(Path.GetFullPath(rootA), Path.GetFullPath(line.Root));
@@ -63,16 +63,16 @@ public sealed class McpDocsProvenanceTests
     }
 
     [Fact]
-    public void MissAndEmptyResponsesStillLeadWithProvenance()
+    public async Task MissAndEmptyResponsesStillLeadWithProvenance()
     {
-        (string rootA, _) = CreateTwoCorpora();
+        (string rootA, _) = await CreateTwoCorporaAsync();
         DocsTools tools = CreateTools(rootA);
 
-        string miss = tools.Explore("zzz-no-such-subject-zzz");
-        string symbolMiss = tools.ForSymbol("NoSuchSymbolXyz");
-        string glossaryMiss = tools.Glossary("no-such-term-xyz");
-        string analysis = tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
-        string standardsMiss = AgentCodingStandardsMiss(tools);
+        string miss = await tools.ExploreAsync("zzz-no-such-subject-zzz");
+        string symbolMiss = await tools.ForSymbolAsync("NoSuchSymbolXyz");
+        string glossaryMiss = await tools.GlossaryAsync("no-such-term-xyz");
+        string analysis = await tools.AnalysisCandidatesAsync(kind: null, cursor: null, limit: 20, charBudget: 4000);
+        string standardsMiss = await AgentCodingStandardsMiss(tools);
 
         foreach (string response in new[] { miss, symbolMiss, glossaryMiss, analysis, standardsMiss })
         {
@@ -82,27 +82,27 @@ public sealed class McpDocsProvenanceTests
     }
 
     [Fact]
-    public void ProvenanceDocumentCountsDifferBetweenTwoCorpora()
+    public async Task ProvenanceDocumentCountsDifferBetweenTwoCorpora()
     {
-        (string rootA, string rootB) = CreateTwoCorpora();
+        (string rootA, string rootB) = await CreateTwoCorporaAsync();
         int countA = CreateHost(rootA).Current().DocumentCount;
         int countB = CreateHost(rootB).Current().DocumentCount;
 
         Assert.NotEqual(countA, countB);
 
-        ProvenanceLine lineA = ParseProvenance(CreateTools(rootA).Explore("documentation"));
-        ProvenanceLine lineB = ParseProvenance(CreateTools(rootB).Explore("documentation"));
+        ProvenanceLine lineA = ParseProvenance(await CreateTools(rootA).ExploreAsync("documentation"));
+        ProvenanceLine lineB = ParseProvenance(await CreateTools(rootB).ExploreAsync("documentation"));
 
         Assert.Equal(countA, lineA.Documents);
         Assert.Equal(countB, lineB.Documents);
     }
 
     [Fact]
-    public void NeitherRootsProvenanceAppearsInTheOtherRootsResponses()
+    public async Task NeitherRootsProvenanceAppearsInTheOtherRootsResponses()
     {
-        (string rootA, string rootB) = CreateTwoCorpora();
-        string responseA = CreateTools(rootA).Explore("documentation");
-        string responseB = CreateTools(rootB).Explore("documentation");
+        (string rootA, string rootB) = await CreateTwoCorporaAsync();
+        string responseA = await CreateTools(rootA).ExploreAsync("documentation");
+        string responseB = await CreateTools(rootB).ExploreAsync("documentation");
 
         Assert.Equal(Path.GetFullPath(rootA), Path.GetFullPath(ParseProvenance(responseA).Root));
         Assert.Equal(Path.GetFullPath(rootB), Path.GetFullPath(ParseProvenance(responseB).Root));
@@ -111,12 +111,12 @@ public sealed class McpDocsProvenanceTests
     }
 
     [Fact]
-    public void FixturesWithoutGitRenderUnavailableRevisionAndUnknownDirty()
+    public async Task FixturesWithoutGitRenderUnavailableRevisionAndUnknownDirty()
     {
-        (string rootA, string rootB) = CreateTwoCorpora();
+        (string rootA, string rootB) = await CreateTwoCorporaAsync();
 
-        ProvenanceLine lineA = ParseProvenance(CreateTools(rootA).Explore("documentation"));
-        ProvenanceLine lineB = ParseProvenance(CreateTools(rootB).Explore("documentation"));
+        ProvenanceLine lineA = ParseProvenance(await CreateTools(rootA).ExploreAsync("documentation"));
+        ProvenanceLine lineB = ParseProvenance(await CreateTools(rootB).ExploreAsync("documentation"));
 
         Assert.Equal("unavailable", lineA.Revision);
         Assert.Equal("unknown", lineA.Dirty);
@@ -130,21 +130,22 @@ public sealed class McpDocsProvenanceTests
         MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
         McpServerToolAttribute attribute = status.GetCustomAttribute<McpServerToolAttribute>()!;
 
-        Assert.Equal(typeof(string), status.ReturnType);
-        Assert.Equal(["projectPath"], status.GetParameters().Select(parameter => parameter.Name));
+        Assert.Equal(typeof(Task<string>), status.ReturnType);
+        Assert.Equal(["projectPath", "cancellationToken"], status.GetParameters().Select(parameter => parameter.Name));
         Assert.True(attribute.ReadOnly, "docs_get_source_repository_and_revision must declare ReadOnly so clients see readOnlyHint.");
         Assert.False(attribute.OpenWorld, "docs_get_source_repository_and_revision reads a local corpus and must not claim an open world.");
     }
 
     [Fact]
-    public void DocsStatusReturnsExactlyTheProvenanceLineTheDocsToolsLeadWith()
+    public async Task DocsStatusReturnsExactlyTheProvenanceLineTheDocsToolsLeadWith()
     {
-        (string rootA, _) = CreateTwoCorpora();
+        (string rootA, _) = await CreateTwoCorporaAsync();
         DocsTools tools = CreateTools(rootA);
         MethodInfo status = FindMcpTool("docs_get_source_repository_and_revision");
 
-        string expected = ParseProvenance(tools.Explore("documentation")).Raw;
-        string actual = (string)status.Invoke(tools, [null])!;
+        string expected = ParseProvenance(await tools.ExploreAsync("documentation")).Raw;
+        Task<string> invoked = (Task<string>)status.Invoke(tools, [null, CancellationToken.None])!;
+        string actual = await invoked;
 
         Assert.Equal(expected, actual.TrimEnd('\n', '\r'));
     }
@@ -153,15 +154,15 @@ public sealed class McpDocsProvenanceTests
     /// Two initialized roots whose corpora differ by exactly one document, so a header that
     /// did not actually reflect the live index could not report the same count for both.
     /// </summary>
-    private (string RootA, string RootB) CreateTwoCorpora()
+    private async Task<(string RootA, string RootB)> CreateTwoCorporaAsync()
     {
         string rootA = Path.Combine(_host.Files.Root, "repo-a");
         string rootB = Path.Combine(_host.Files.Root, "repo-b");
         _host.Files.CreateDirectory(rootA);
         _host.Files.CreateDirectory(rootB);
         IDocsScaffoldingService scaffolding = _host.Services().GetRequiredService<IDocsScaffoldingService>();
-        scaffolding.Scaffold(rootA, owner: "alpha-team");
-        scaffolding.Scaffold(rootB, owner: "beta-team");
+        await scaffolding.ScaffoldAsync(rootA, owner: "alpha-team");
+        await scaffolding.ScaffoldAsync(rootB, owner: "beta-team");
         _host.WriteText(
             rootB,
             "docs/second-only.md",
@@ -169,16 +170,16 @@ public sealed class McpDocsProvenanceTests
         return (rootA, rootB);
     }
 
-    private static IEnumerable<string> AllResponses(DocsTools tools)
+    private static async IAsyncEnumerable<string> AllResponses(DocsTools tools)
     {
-        yield return tools.Explore("documentation");
-        yield return tools.ForSymbol("NoSuchSymbolXyz");
-        yield return tools.Glossary("documentation");
-        yield return tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
+        yield return await tools.ExploreAsync("documentation");
+        yield return await tools.ForSymbolAsync("NoSuchSymbolXyz");
+        yield return await tools.GlossaryAsync("documentation");
+        yield return await tools.AnalysisCandidatesAsync(kind: null, cursor: null, limit: 20, charBudget: 4000);
         // Direct, like the four calls above. Reflection exists in this file for the tests whose
         // subject is a tool's declared metadata — docs_get_source_repository_and_revision's shape — and this one's subject
         // is the response, which a call returns without asking the metadata a question.
-        yield return AgentCodingStandardsMiss(tools);
+        yield return await AgentCodingStandardsMiss(tools);
     }
 
     /// <summary>
@@ -187,8 +188,8 @@ public sealed class McpDocsProvenanceTests
     /// optional arguments a reflective call has to pass by hand are the ones a direct call
     /// already applies, so the metadata lookup would add an indirection that asserts nothing.
     /// </summary>
-    private static string AgentCodingStandardsMiss(DocsTools tools) =>
-        tools.AgentCodingStandards("zzz-no-such-technology-zzz");
+    private static Task<string> AgentCodingStandardsMiss(DocsTools tools) =>
+        tools.AgentCodingStandardsAsync("zzz-no-such-technology-zzz");
 
     private DocsTools CreateTools(string root)
     {

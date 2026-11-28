@@ -45,11 +45,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// could pass against a stub that never works.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_MatchingRoot_PassesAllMcpChecks()
+    public async Task McpLiveProbe_MatchingRoot_PassesAllMcpChecks()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -72,12 +72,12 @@ public sealed class McpLiveProbeTests : IDisposable
     /// The check id is a contract that other tooling matches on, so the rename moves the request and not the id.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_RequestsTheRenamedDocsTool_AndKeepsItsCheckId()
+    public async Task McpLiveProbe_RequestsTheRenamedDocsTool_AndKeepsItsCheckId()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string callPath = Path.Combine(_stubs.Path, "call.json");
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.CallRecordingStub(_stubs.Path, Root, callPath)),
@@ -86,7 +86,7 @@ public sealed class McpLiveProbeTests : IDisposable
 
         Assert.True(DoctorHarness.CheckNamed(report, "mcp.docs_explore").Passed);
         Assert.Equal(0, report.ExitCode);
-        string request = File.ReadAllText(callPath);
+        string request = await File.ReadAllTextAsync(callPath);
         Assert.Contains("\"name\":\"docs_answer_question_from_repo_documentation\"", request, StringComparison.Ordinal);
         Assert.DoesNotContain("\"name\":\"docs_explore\"", request, StringComparison.Ordinal);
     }
@@ -97,12 +97,12 @@ public sealed class McpLiveProbeTests : IDisposable
     /// wrong checkout — the exact confusion the probe exists to prevent.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_StartsTheServerWithTheResolvedRoot()
+    public async Task McpLiveProbe_StartsTheServerWithTheResolvedRoot()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string argvPath = Path.Combine(_stubs.Path, "argv.txt");
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
@@ -110,7 +110,7 @@ public sealed class McpLiveProbeTests : IDisposable
             _ => null);
 
         Assert.Equal(0, report.ExitCode);
-        string[] argv = File.ReadAllLines(argvPath);
+        string[] argv = await File.ReadAllLinesAsync(argvPath);
         Assert.Contains("--repo-root", argv);
         Assert.Contains(Root, argv);
     }
@@ -124,11 +124,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// session needs a process seam the contract does not expose, so the assertion here is the outcome.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_HandshakeTimeout_KillsChild_Exits1_McpHandshake()
+    public async Task McpLiveProbe_HandshakeTimeout_KillsChild_Exits1_McpHandshake()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.SilentStub(_stubs.Path), TimeSpan.FromSeconds(1)),
@@ -146,14 +146,14 @@ public sealed class McpLiveProbeTests : IDisposable
     /// command that adds it: raising the timeout, which it used to suggest, can never help a server that refused.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_NoHostConfiguration_NamesTheMissingFileAndTheCommandThatAddsIt()
+    public async Task McpLiveProbe_NoHostConfiguration_NamesTheMissingFileAndTheCommandThatAddsIt()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string stub = DoctorHarness.WriteStub(
             _stubs.Path,
             "echo 'KW-MCP-ROOT-001: No Kyber-Weave host configuration was found for MCP root' >&2\nexit 1");
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(stub),
@@ -173,12 +173,12 @@ public sealed class McpLiveProbeTests : IDisposable
     /// server that really used up the budget is told to raise it.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_ServerThatExitsBeforeAnswering_IsNotToldToRaiseTheTimeout()
+    public async Task McpLiveProbe_ServerThatExitsBeforeAnswering_IsNotToldToRaiseTheTimeout()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string stub = DoctorHarness.WriteStub(_stubs.Path, "echo 'something else broke' >&2\nexit 1");
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(stub),
@@ -199,7 +199,7 @@ public sealed class McpLiveProbeTests : IDisposable
     [Theory]
     [InlineData(DoctorMode.Ensure)]
     [InlineData(DoctorMode.Provision)]
-    public void FolderNeverInitialised_IsSetUpWithInit(DoctorMode mode)
+    public async Task FolderNeverInitialised_IsSetUpWithInit(DoctorMode mode)
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -208,7 +208,7 @@ public sealed class McpLiveProbeTests : IDisposable
                 ? new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root)
                 : DoctorHarness.Ok("1.5.0"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             mode,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -229,7 +229,7 @@ public sealed class McpLiveProbeTests : IDisposable
     /// doctor prints must be the one that works, <c>codegraph init .</c>, not the command that just failed.
     /// </summary>
     [Fact]
-    public void Ensure_FolderNeverInitialised_PrintsInitAsTheFix()
+    public async Task Ensure_FolderNeverInitialised_PrintsInitAsTheFix()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -243,7 +243,7 @@ public sealed class McpLiveProbeTests : IDisposable
                     : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root);
             });
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -262,7 +262,7 @@ public sealed class McpLiveProbeTests : IDisposable
     /// hide the real error behind advice about a folder that is fine.
     /// </summary>
     [Fact]
-    public void Provision_UnrelatedNotInitializedMessage_DoesNotRunInit()
+    public async Task Provision_UnrelatedNotInitializedMessage_DoesNotRunInit()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(
@@ -271,7 +271,7 @@ public sealed class McpLiveProbeTests : IDisposable
                 ? new ProcessResult(1, string.Empty, "telemetry not initialized, sync failed")
                 : DoctorHarness.Ok("1.5.0"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Provision,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -289,11 +289,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// liveness is not enough: <c>docs_get_source_repository_and_revision</c> alone would pass here, which is why D8 chose <c>docs_answer_question_from_repo_documentation</c>.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_DocsExploreError_Exits1()
+    public async Task McpLiveProbe_DocsExploreError_Exits1()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ErroringDocsExploreStub(_stubs.Path, Root)),
@@ -310,11 +310,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// </summary>
     /// <remarks>D8: the <c>provenance: root=</c> value must equal <c>git rev-parse --show-toplevel</c>.</remarks>
     [Fact]
-    public void McpLiveProbe_RootMismatch_Exits1_McpRoot()
+    public async Task McpLiveProbe_RootMismatch_Exits1_McpRoot()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.WrongRootStub(_stubs.Path)),
@@ -332,12 +332,12 @@ public sealed class McpLiveProbeTests : IDisposable
     [Theory]
     [InlineData("yes")]
     [InlineData("no")]
-    public void McpLiveProbe_ProvenanceRootWithMetadata_PassesWhenRootMatches(string dirty)
+    public async Task McpLiveProbe_ProvenanceRootWithMetadata_PassesWhenRootMatches(string dirty)
     {
         string root = Path.Combine(_root.Path, "repo with spaces");
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(
@@ -357,13 +357,13 @@ public sealed class McpLiveProbeTests : IDisposable
     [Theory]
     [InlineData("yes")]
     [InlineData("no")]
-    public void McpLiveProbe_ProvenanceRootWithMetadata_MismatchFails(string dirty)
+    public async Task McpLiveProbe_ProvenanceRootWithMetadata_MismatchFails(string dirty)
     {
         string root = Path.Combine(_root.Path, "repo with spaces");
         string wrongRoot = Path.Combine(_root.Path, "other repo with spaces");
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(
@@ -381,14 +381,14 @@ public sealed class McpLiveProbeTests : IDisposable
     /// Older servers that emit only the bare root remain accepted for backward compatibility.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_BareProvenanceRoot_IsStillAccepted()
+    public async Task McpLiveProbe_BareProvenanceRoot_IsStillAccepted()
     {
         string root = Path.Combine(_root.Path, "bare repo");
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
 
         string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + "\"}]}}";
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(
@@ -413,11 +413,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// skips the renderer and breaks the 0/1/2/3 exit contract.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_ServerClosesInput_ReportsAFailureInsteadOfThrowing()
+    public async Task McpLiveProbe_ServerClosesInput_ReportsAFailureInsteadOfThrowing()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ClosesInputAfterInitializeStub(_stubs.Path), TimeSpan.FromSeconds(5)),
@@ -442,7 +442,7 @@ public sealed class McpLiveProbeTests : IDisposable
     [InlineData("initialize-is-an-array")]
     [InlineData("result-is-an-array")]
     [InlineData("content-item-is-a-number")]
-    public void McpLiveProbe_NonObjectReply_FailsACheckInsteadOfThrowing(string shape)
+    public async Task McpLiveProbe_NonObjectReply_FailsACheckInsteadOfThrowing(string shape)
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
@@ -456,7 +456,7 @@ public sealed class McpLiveProbeTests : IDisposable
             _ => """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/elsewhere"}]}}""",
         };
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(_stubs.Path, initialize, call)),
@@ -476,12 +476,12 @@ public sealed class McpLiveProbeTests : IDisposable
     /// <c>\u0000</c> decodes to a NUL character, which reaches the path call and throws <c>ArgumentException</c>.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_ProvenanceRootWithNulChar_FailsMcpRootInsteadOfThrowing()
+    public async Task McpLiveProbe_ProvenanceRootWithNulChar_FailsMcpRootInsteadOfThrowing()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         const string call = """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/tmp/ev\u0000il"}]}}""";
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
@@ -498,11 +498,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// </summary>
     /// <remarks>D9: a failure never echoes the child's environment or stderr beyond the first error line.</remarks>
     [Fact]
-    public void McpLiveProbe_StartFailure_DoesNotDiscloseEnvironment()
+    public async Task McpLiveProbe_StartFailure_DoesNotDiscloseEnvironment()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options("kyber-weave-mcp-absent-for-test"),
@@ -524,11 +524,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// <remarks>
     /// The cap is the session's own classification of a child it must stop reading, and the session reports it as
     /// <see cref="InvalidDataException"/>. A reply is the child's data, so an unterminated one must reach the same
-    /// check line as any other bad reply. Escaping <c>IRepositoryDoctor.Run</c> would skip the renderer and
+    /// check line as any other bad reply. Escaping <c>IRepositoryDoctor.RunAsync</c> would skip the renderer and
     /// break the documented 0/1/2/3 exit contract, which is the whole point of the probe.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_ReplyOverTheLineCap_FailsMcpHandshakeInsteadOfThrowing()
+    public async Task McpLiveProbe_ReplyOverTheLineCap_FailsMcpHandshakeInsteadOfThrowing()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
@@ -540,7 +540,7 @@ public sealed class McpLiveProbeTests : IDisposable
             sleep 30
             """);
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(stub, TimeSpan.FromSeconds(30)),
@@ -560,11 +560,11 @@ public sealed class McpLiveProbeTests : IDisposable
     /// reader to pass a timeout the parser refuses. The hint is capped where the parser's own limit is.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_HugeBudget_PrintsAPositiveTimeoutInTheRemedy()
+    public async Task McpLiveProbe_HugeBudget_PrintsAPositiveTimeoutInTheRemedy()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(
@@ -597,12 +597,12 @@ public sealed class McpLiveProbeTests : IDisposable
     /// write it was told would not happen.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_StartsTheServerWithCodeGraphRefreshDisabled()
+    public async Task McpLiveProbe_StartsTheServerWithCodeGraphRefreshDisabled()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string argvPath = Path.Combine(_stubs.Path, "argv.txt");
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
@@ -610,7 +610,7 @@ public sealed class McpLiveProbeTests : IDisposable
             _ => null);
 
         Assert.Equal(0, report.ExitCode);
-        Assert.Contains("--no-codegraph-refresh", File.ReadAllLines(argvPath));
+        Assert.Contains("--no-codegraph-refresh", await File.ReadAllLinesAsync(argvPath));
     }
 
     /// <summary>
@@ -625,7 +625,7 @@ public sealed class McpLiveProbeTests : IDisposable
     /// server into a "wrong repository" diagnosis.
     /// </remarks>
     [Fact]
-    public void McpLiveProbe_ProvenanceWithBranchAndRepoMetadata_StillPassesMcpRoot()
+    public async Task McpLiveProbe_ProvenanceWithBranchAndRepoMetadata_StillPassesMcpRoot()
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string served = "provenance: root=" + Root
@@ -635,7 +635,7 @@ public sealed class McpLiveProbeTests : IDisposable
             + served
             + "\"}]}}";
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(
@@ -654,7 +654,7 @@ public sealed class McpLiveProbeTests : IDisposable
     /// A provenance line carrying a repository path with spaces in repo= still passes mcp.root.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_ProvenanceWithSpacedRootAndRepo_StillPassesMcpRoot()
+    public async Task McpLiveProbe_ProvenanceWithSpacedRootAndRepo_StillPassesMcpRoot()
     {
         string spacedRoot = Path.Combine(Root, "repo with spaces");
         Directory.CreateDirectory(Path.Combine(spacedRoot, ".codegraph"));
@@ -665,7 +665,7 @@ public sealed class McpLiveProbeTests : IDisposable
             + served
             + "\"}]}}";
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             spacedRoot,
             DoctorMode.Check,
             DoctorHarness.Options(
@@ -685,7 +685,7 @@ public sealed class McpLiveProbeTests : IDisposable
     /// is not truncated by the metadata stripper.
     /// </summary>
     [Fact]
-    public void McpLiveProbe_ProvenancePathContainingTokenSubstrings_StillPassesMcpRoot()
+    public async Task McpLiveProbe_ProvenancePathContainingTokenSubstrings_StillPassesMcpRoot()
     {
         string evilRoot = Path.Combine(Root, "my rev=evil");
         Directory.CreateDirectory(Path.Combine(evilRoot, ".codegraph"));
@@ -696,7 +696,7 @@ public sealed class McpLiveProbeTests : IDisposable
             + served
             + "\"}]}}";
 
-        DoctorReport report = DoctorTestServices.Doctor.Run(
+        DoctorReport report = await DoctorTestServices.Doctor.RunAsync(
             evilRoot,
             DoctorMode.Check,
             DoctorHarness.Options(

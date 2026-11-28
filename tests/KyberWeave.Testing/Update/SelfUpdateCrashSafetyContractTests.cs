@@ -58,29 +58,29 @@ public abstract class SelfUpdateCrashSafetyContractTests
 
     /// <summary>A killed update recovers by running again, on the Unix branch.</summary>
     [Fact]
-    public void AnUpdateKilledAtEveryOperationCompletesWhenRunAgain() => Sweep("update", windows: false, failLastCommit: false, handled: false);
+    public async Task AnUpdateKilledAtEveryOperationCompletesWhenRunAgain() => await Sweep("update", windows: false, failLastCommit: false, handled: false);
 
     /// <summary>A killed update recovers by running again, on the Windows branch.</summary>
     [Fact]
-    public void AnUpdateKilledAtEveryOperationCompletesWhenRunAgainOnWindows() => Sweep("update", windows: true, failLastCommit: false, handled: false);
+    public async Task AnUpdateKilledAtEveryOperationCompletesWhenRunAgainOnWindows() => await Sweep("update", windows: true, failLastCommit: false, handled: false);
 
     /// <summary>A rollback killed at every operation recovers by running again, on the Unix branch.</summary>
     [Fact]
-    public void ARollbackKilledAtEveryOperationCompletesWhenTheUpdateRunsAgain() => Sweep("rollback", windows: false, failLastCommit: true, handled: false);
+    public async Task ARollbackKilledAtEveryOperationCompletesWhenTheUpdateRunsAgain() => await Sweep("rollback", windows: false, failLastCommit: true, handled: false);
 
     /// <summary>A rollback killed at every operation recovers by running again, on the Windows branch.</summary>
     [Fact]
-    public void ARollbackKilledAtEveryOperationCompletesWhenTheUpdateRunsAgainOnWindows() => Sweep("rollback", windows: true, failLastCommit: true, handled: false);
+    public async Task ARollbackKilledAtEveryOperationCompletesWhenTheUpdateRunsAgainOnWindows() => await Sweep("rollback", windows: true, failLastCommit: true, handled: false);
 
     /// <summary>A failure at any operation leaves the old tree, or the new tree once every commit is done, on the Unix branch.</summary>
     [Fact]
-    public void AHandledFailureAtEveryOperationLeavesTheOldOrTheNewTree() => Sweep("handled", windows: false, failLastCommit: false, handled: true);
+    public async Task AHandledFailureAtEveryOperationLeavesTheOldOrTheNewTree() => await Sweep("handled", windows: false, failLastCommit: false, handled: true);
 
     /// <summary>A failure at any operation leaves the old tree, or the new tree once every commit is done, on the Windows branch.</summary>
     [Fact]
-    public void AHandledFailureAtEveryOperationLeavesTheOldOrTheNewTreeOnWindows() => Sweep("handled", windows: true, failLastCommit: false, handled: true);
+    public async Task AHandledFailureAtEveryOperationLeavesTheOldOrTheNewTreeOnWindows() => await Sweep("handled", windows: true, failLastCommit: false, handled: true);
 
-    private void Sweep(string flowName, bool windows, bool failLastCommit, bool handled)
+    private async Task Sweep(string flowName, bool windows, bool failLastCommit, bool handled)
     {
         SelfUpdateCrashScenario scenario = new(windows);
         string flow = $"{flowName}/{(windows ? "windows" : "unix")}";
@@ -98,7 +98,7 @@ public abstract class SelfUpdateCrashSafetyContractTests
             }
 
             int start = clean.OperationCount;
-            SelfUpdateOutcome outcome = scenario.Run(clean, "0.1.0");
+            SelfUpdateOutcome outcome = await scenario.RunAsync(clean, "0.1.0").ConfigureAwait(false);
             operations = clean.OperationCount - start;
             clean.Restart();
             IReadOnlyDictionary<string, byte[]> after = clean.CaptureInstall();
@@ -123,7 +123,7 @@ public abstract class SelfUpdateCrashSafetyContractTests
             scenario.SeedOldInstall(workspace);
             if (handled)
             {
-                HandledFailureAt(workspace, scenario, point, oldTree, newTree, failures);
+                await HandledFailureAtAsync(workspace, scenario, point, oldTree, newTree, failures).ConfigureAwait(false);
                 continue;
             }
 
@@ -134,7 +134,7 @@ public abstract class SelfUpdateCrashSafetyContractTests
                 workspace.FailWhen(LastCommitFailure(scenario));
             }
 
-            Exception? stop = Record.Exception(() => scenario.Run(workspace, "0.1.0"));
+            Exception? stop = await Record.ExceptionAsync(() => scenario.RunAsync(workspace, "0.1.0")).ConfigureAwait(false);
             if (!workspace.Killed)
             {
                 failures.Add((point, $"the update ended without reaching the kill ({stop?.GetType().Name ?? "no exception"})"));
@@ -155,7 +155,7 @@ public abstract class SelfUpdateCrashSafetyContractTests
                 }
             }
 
-            SelfUpdateOutcome rerun = scenario.Run(workspace, scenario.VersionOf(crashed));
+            SelfUpdateOutcome rerun = await scenario.RunAsync(workspace, scenario.VersionOf(crashed)).ConfigureAwait(false);
             if (rerun.ExitCode != 0)
             {
                 failures.Add((point, $"running the update again failed: {rerun.Message} (stopped at: {stop?.Message})"));
@@ -173,7 +173,7 @@ public abstract class SelfUpdateCrashSafetyContractTests
         Report(flow, failures, operations);
     }
 
-    private static void HandledFailureAt(
+    private static async Task HandledFailureAtAsync(
         SelfUpdateCrashWorkspace workspace,
         SelfUpdateCrashScenario scenario,
         int point,
@@ -184,7 +184,7 @@ public abstract class SelfUpdateCrashSafetyContractTests
         int target = workspace.OperationCount + point;
         int calls = 0;
         workspace.FailWhen((_, _) => ++calls == point);
-        SelfUpdateOutcome outcome = scenario.Run(workspace, "0.1.0");
+        SelfUpdateOutcome outcome = await scenario.RunAsync(workspace, "0.1.0").ConfigureAwait(false);
         workspace.Restart();
         IReadOnlyDictionary<string, byte[]> tree = workspace.CaptureInstall();
         bool isOld = Differences(oldTree, tree).Count == 0;

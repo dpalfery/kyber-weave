@@ -38,10 +38,10 @@ internal sealed class FakeCredentialStore : ICredentialStore
     /// <summary>Gets the keys the host holds, so a test can assert what was stored.</summary>
     public IReadOnlyDictionary<string, string> Entries => _host.Entries;
 
-    /// <summary>Gets or sets the key <see cref="Read"/> answers for an origin nothing was stored for; null answers nothing.</summary>
+    /// <summary>Gets or sets the key a read answers for an origin nothing was stored for; null answers nothing.</summary>
     public string? DefaultKey { get; set; }
 
-    /// <summary>Gets or sets the failure <see cref="Read"/> raises instead of answering; null answers normally.</summary>
+    /// <summary>Gets or sets the failure a read raises instead of answering; null answers normally.</summary>
     public Exception? ReadFailure { get; set; }
 
     /// <summary>Stores a key without recording a write, for a test arranging what the store already holds.</summary>
@@ -57,8 +57,9 @@ internal sealed class FakeCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public string? Read(string origin)
+    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         RejectLineBreak(origin, nameof(origin));
         Reads.Add(origin);
@@ -67,27 +68,31 @@ internal sealed class FakeCredentialStore : ICredentialStore
             throw failure;
         }
 
-        return _host.Entries.TryGetValue(origin, out string? key) ? key : DefaultKey;
+        return new ValueTask<string?>(_host.Entries.TryGetValue(origin, out string? key) ? key : DefaultKey);
     }
 
     /// <inheritdoc />
-    public void Write(string origin, string key)
+    public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
         RejectLineBreak(origin, nameof(origin));
         RejectLineBreak(key, nameof(key));
         Writes.Add((origin, key));
         _host.Set(origin, key);
+        return new ValueTask();
     }
 
     /// <inheritdoc />
-    public void Delete(string origin)
+    public ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         RejectLineBreak(origin, nameof(origin));
         Deletes.Add(origin);
         _ = _host.Entries.Remove(origin);
+        return new ValueTask();
     }
 
     private static void RejectLineBreak(string value, string parameterName)

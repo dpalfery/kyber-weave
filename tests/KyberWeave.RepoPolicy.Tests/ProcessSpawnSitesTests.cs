@@ -52,6 +52,7 @@ public sealed class ProcessSpawnSitesTests
     private static readonly Regex CSharpSpawn = new(
         @"(?<start>\b(?:\w+\.)*Process\.Start\s*\()" +
         @"|(?<run>\bProcessRunner\.Run\s*\()" +
+        @"|(?<runasync>\bProcessRunner\.RunAsync\s*\()" +
         @"|(?<interactive>\bProcessRunner\.RunInteractive\b)" +
         @"|(?<proc>\bnew\s+(?:\w+\.)*Process\b)" +
         @"|(?<info>\bnew\s+(?:\w+\.)*ProcessStartInfo\s*\(|\bProcessStartInfo\s+\w+\s*=\s*new\s*\()" +
@@ -131,6 +132,7 @@ public sealed class ProcessSpawnSitesTests
     [Theory]
     [InlineData("        using Process process = Process.Start(startInfo)", "Process.Start")]
     [InlineData("        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);", "ProcessRunner.Run")]
+    [InlineData("        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty);", "ProcessRunner.RunAsync")]
     [InlineData("        ProcessStartInfo startInfo = new(\"git\")", "ProcessStartInfo")]
     [InlineData("        ProcessStartInfo startInfo = new ProcessStartInfo(\"/bin/sh\")", "ProcessStartInfo")]
     [InlineData("        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(", "BuildStartInfo")]
@@ -213,6 +215,9 @@ public sealed class ProcessSpawnSitesTests
 
         if (match.Groups["run"].Success)
             return "ProcessRunner.Run";
+
+        if (match.Groups["runasync"].Success)
+            return "ProcessRunner.RunAsync";
 
         if (match.Groups["interactive"].Success)
             return "ProcessRunner.RunInteractive";

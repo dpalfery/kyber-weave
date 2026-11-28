@@ -18,31 +18,31 @@ public sealed class KyberDashCapturePluginStepConsoleTests
     }
 
     [Fact]
-    public void Run_KyberDashNotFound_SaysSkipped()
+    public async Task Run_KyberDashNotFound_SaysSkipped()
     {
-        CapturePluginStepOutcome outcome = Step(new FakeProcessExecutor(), () => null).Run("/oc", false);
+        CapturePluginStepOutcome outcome = await Step(new FakeProcessExecutor(), () => null).RunAsync("/oc", false, CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Skipped, outcome);
         Assert.StartsWith("skipped OpenCode capture plugin: KyberDash was not found", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Run_VerbSucceeds_PrintsItsFirstLineEscaped()
+    public async Task Run_VerbSucceeds_PrintsItsFirstLineEscaped()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", "\ninstalled [x]\nmore\n");
 
-        CapturePluginStepOutcome outcome = Step(executor, () => "/fake/bin/kyberdash").Run("/oc", false);
+        CapturePluginStepOutcome outcome = await Step(executor, () => "/fake/bin/kyberdash").RunAsync("/oc", false, CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
         Assert.Equal("installed [x]\n", Output());
     }
 
     [Fact]
-    public void Run_VerbFails_WarnsWithTheRetryCommand()
+    public async Task Run_VerbFails_WarnsWithTheRetryCommand()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", "boom", exitCode: 3);
 
-        CapturePluginStepOutcome outcome = Step(executor, () => "/fake/bin/kyberdash").Run("/oc", false);
+        CapturePluginStepOutcome outcome = await Step(executor, () => "/fake/bin/kyberdash").RunAsync("/oc", false, CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Warned, outcome);
         Assert.Contains("OpenCode capture plugin step failed (exit 3): boom.", Output(), StringComparison.Ordinal);
@@ -50,22 +50,22 @@ public sealed class KyberDashCapturePluginStepConsoleTests
     }
 
     [Fact]
-    public void Run_OlderKyberDash_SaysItPredatesTheVerb()
+    public async Task Run_OlderKyberDash_SaysItPredatesTheVerb()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", "error: unknown command 'kyber'", exitCode: 1);
 
-        CapturePluginStepOutcome outcome = Step(executor, () => "/fake/bin/kyberdash").Run("/oc", false);
+        CapturePluginStepOutcome outcome = await Step(executor, () => "/fake/bin/kyberdash").RunAsync("/oc", false, CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Skipped, outcome);
         Assert.Contains("this KyberDash predates the capture plugin command", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Run_VerbCannotStart_WarnsAndLeavesTheDeploymentAlone()
+    public async Task Run_VerbCannotStart_WarnsAndLeavesTheDeploymentAlone()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithException("kyberdash", new InvalidOperationException("no exec"));
 
-        CapturePluginStepOutcome outcome = Step(executor, () => "/fake/bin/kyberdash").Run("/oc", false);
+        CapturePluginStepOutcome outcome = await Step(executor, () => "/fake/bin/kyberdash").RunAsync("/oc", false, CancellationToken.None);
 
         Assert.Equal(CapturePluginStepOutcome.Warned, outcome);
         Assert.Contains("OpenCode capture plugin step could not run KyberDash: no exec.", Output(), StringComparison.Ordinal);

@@ -1,3 +1,4 @@
+using KyberWeave.Core.CodeGraph;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -32,29 +33,30 @@ public sealed class RepositoryDoctorService(
     IPathResolver paths,
     ICodeGraphPortsFactory codeGraph) : IRepositoryDoctor
 {
-    /// <summary>Runs the doctor against <paramref name="root"/>.</summary>
+    /// <summary>Runs the doctor against <paramref name="root"/> without blocking a thread.</summary>
     /// <param name="root">The directory to check. The git toplevel of this directory becomes the repository root.</param>
     /// <param name="mode">Read-only, provisioning, or the ensure run that leaves the index and both tools proved.</param>
     /// <param name="options">The budgets and executable names.</param>
-    /// <param name="executor">
-    ///     Runs git and CodeGraph children. Production passes an executor bounded by <see cref="DoctorOptions.IndexTimeout"/>.
-    /// </param>
+    /// <param name="executor">Runs git and CodeGraph children.</param>
     /// <param name="environment">Reads one environment variable. Injected so the home-directory refusal is testable.</param>
     /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
-    public DoctorReport Run(
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    public async Task<DoctorReport> RunAsync(
         string root,
         DoctorMode mode,
         DoctorOptions options,
-        IProcessExecutor executor,
+        IProcessRunner executor,
         Func<string, string?> environment,
-        string? lockDirectory = null)
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(environment);
 
-        (string? repositoryRoot, string? notRepository) = ResolveRepositoryRoot(root, executor);
+        (string? repositoryRoot, string? notRepository) =
+            await ResolveRepositoryRootAsync(root, executor, cancellationToken).ConfigureAwait(false);
         if (repositoryRoot is null)
             return Refused(root, mode, new DoctorCheck(
                 "repository.root",
@@ -73,14 +75,17 @@ public sealed class RepositoryDoctorService(
                 "the repository root is the home directory; refusing to index it",
                 "cd into a repository and run kyber-weave doctor"));
 
-        CodeGraphOutcome codegraph = provisioner.Run(
+        CodeGraphOutcome codegraph = await provisioner.RunAsync(
             repositoryRoot,
             mode,
             options,
             executor,
-            lockDirectory ?? processEnvironment.TempDirectory);
+            lockDirectory ?? processEnvironment.TempDirectory,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        List<DoctorCheck> checks = [.. codegraph.Checks, NestedWorktreesCheck(repositoryRoot), .. mcpProbe.Run(repositoryRoot, options)];
+        IReadOnlyList<DoctorCheck> mcpChecks = await mcpProbe.RunAsync(repositoryRoot, options, cancellationToken).ConfigureAwait(false);
+        DoctorCheck nested = await NestedWorktreesCheckAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        List<DoctorCheck> checks = [.. codegraph.Checks, nested, .. mcpChecks];
 
         // D1: a repository may set `stop-on-tool-failure: false` to be told about a broken tool and carry on. The exit
         // code is what a caller branches on, so the opt-out has to change the code and not only the wording. It applies
@@ -93,8 +98,8 @@ public sealed class RepositoryDoctorService(
         // The git post-checkout hook is a shared file, so only the ensure run may write it; check and provision report
         // on it without touching it. A hook problem is a passing warning, so it never changes the exit code.
         DoctorCheck? hook = mode == DoctorMode.Ensure
-            ? postCheckoutHook.Ensure(repositoryRoot, executor)
-            : postCheckoutHook.Inspect(repositoryRoot, executor);
+            ? await postCheckoutHook.EnsureAsync(repositoryRoot, executor, cancellationToken).ConfigureAwait(false)
+            : await postCheckoutHook.InspectAsync(repositoryRoot, executor, cancellationToken).ConfigureAwait(false);
         if (hook is not null)
             checks = [.. checks, hook];
 
@@ -113,30 +118,25 @@ public sealed class RepositoryDoctorService(
         return new DoctorReport(repositoryRoot, mode, exitCode, checks);
     }
 
-    /// <summary>
-    ///     Runs the doctor for the git post-checkout hook: indexes a new worktree without restoring the tracked edits
-    ///     the index run would otherwise revert.
-    /// </summary>
-    /// <remarks>
-    ///     The hook fires on every checkout, including ones where a human has uncommitted work, so this path must not
-    ///     restore files beyond the ones <c>codegraph init</c> writes. It runs the ensure flow with
-    ///     <see cref="CodeGraphRestore.InitConfigFilesOnly"/> and never installs or removes the hook itself.
-    /// </remarks>
+    /// <summary>Runs the doctor for the git post-checkout hook without blocking a thread.</summary>
     /// <param name="root">The worktree root the hook was fired in.</param>
     /// <param name="options">The index budget and executable names.</param>
     /// <param name="executor">Runs git and CodeGraph children.</param>
     /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
-    public DoctorReport RunPostCheckout(
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    public async Task<DoctorReport> RunPostCheckoutAsync(
         string root,
         DoctorOptions options,
-        IProcessExecutor executor,
-        string? lockDirectory = null)
+        IProcessRunner executor,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(executor);
 
-        (string? repositoryRoot, string? notRepository) = ResolveRepositoryRoot(root, executor);
+        (string? repositoryRoot, string? notRepository) =
+            await ResolveRepositoryRootAsync(root, executor, cancellationToken).ConfigureAwait(false);
         if (repositoryRoot is null)
             return Refused(root, DoctorMode.Ensure, new DoctorCheck(
                 "repository.root",
@@ -149,12 +149,13 @@ public sealed class RepositoryDoctorService(
         bool hookOff = !settings.Read(repositoryRoot).WorktreeIndexHook;
         if (!hookOff)
         {
-            WorktreeIndexOutcome outcome = worktreeIndex.Ensure(
+            WorktreeIndexOutcome outcome = await worktreeIndex.EnsureAsync(
                 repositoryRoot,
                 options,
                 executor,
                 lockDirectory ?? processEnvironment.TempDirectory,
-                CodeGraphRestore.InitConfigFilesOnly);
+                CodeGraphRestore.InitConfigFilesOnly,
+                cancellationToken).ConfigureAwait(false);
 
             int exitCode = outcome.Status switch
             {
@@ -188,9 +189,14 @@ public sealed class RepositoryDoctorService(
     ///     the same finding. The check sits before the <c>stop-on-tool-failure</c> downgrade, so the opt-out turns it
     ///     into a warning in the ensure run exactly as it does the other CodeGraph checks.
     /// </remarks>
-    private DoctorCheck NestedWorktreesCheck(string repositoryRoot)
+    private async Task<DoctorCheck> NestedWorktreesCheckAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
-        ICodeGraphResolver resolver = codeGraph.ForRepository(repositoryRoot).Resolver;
+        CodeGraphPorts ports = await codeGraph.ForRepositoryAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
+        return NestedWorktreesResult(ports.Resolver);
+    }
+
+    private static DoctorCheck NestedWorktreesResult(ICodeGraphResolver resolver)
+    {
         if (!resolver.IsAvailable || !resolver.HasFilesUnder(AgentWorktreeFolder.Name))
             return new DoctorCheck(NestedWorktreesCheckId, true, null, null);
 
@@ -215,7 +221,10 @@ public sealed class RepositoryDoctorService(
     ///     Asks git for the toplevel of <paramref name="root"/>. A directory outside any repository, or a git that
     ///     cannot run, is a refusal rather than a crash.
     /// </summary>
-    private static (string? Root, string? Reason) ResolveRepositoryRoot(string root, IProcessExecutor executor)
+    private static async Task<(string? Root, string? Reason)> ResolveRepositoryRootAsync(
+        string root,
+        IProcessRunner executor,
+        CancellationToken cancellationToken)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -230,7 +239,7 @@ public sealed class RepositoryDoctorService(
 
         try
         {
-            ProcessResult result = executor.Run(startInfo, string.Empty);
+            ProcessResult result = await executor.RunAsync(startInfo, string.Empty, timeout: null, cancellationToken).ConfigureAwait(false);
             if (result.ExitCode != 0)
                 return (null, $"'{root}' is not inside a git repository");
 

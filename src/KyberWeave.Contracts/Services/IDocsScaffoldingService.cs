@@ -7,7 +7,8 @@ public interface IDocsScaffoldingService
 {
     /// <summary>
     /// Writes the host configuration, the component catalogue, the ontology reference, one
-    /// index per scaffolded folder, and a draft coding standard per declared technology.
+    /// index per scaffolded folder, and a draft coding standard per declared technology without
+    /// blocking a thread.
     /// </summary>
     /// <param name="repoRoot">The repository to scaffold into.</param>
     /// <param name="docsRoot">The documentation root; null reads it from configuration, else by convention.</param>
@@ -19,16 +20,18 @@ public interface IDocsScaffoldingService
     /// The technology, role and platform template folders to install, or null to install only
     /// what the configuration already declares. Each name is declared in the ontology.
     /// </param>
+    /// <param name="cancellationToken">Cancels the repository file listing used to plan review gates.</param>
     /// <returns>What was created, updated, skipped and preserved.</returns>
     /// <exception cref="ArgumentException">The docs root escapes the repository, or the owner cannot be emitted.</exception>
     /// <exception cref="InvalidDataException">The host configuration exists and cannot be read.</exception>
     /// <exception cref="IOException">A write fails.</exception>
-    ScaffoldResult Scaffold(
+    Task<ScaffoldResult> ScaffoldAsync(
         string repoRoot,
         string? docsRoot = null,
         string owner = "unassigned",
         bool force = false,
         bool kyberStandards = false,
         bool reviewGates = true,
-        IReadOnlyList<string>? standards = null);
+        IReadOnlyList<string>? standards = null,
+        CancellationToken cancellationToken = default);
 }

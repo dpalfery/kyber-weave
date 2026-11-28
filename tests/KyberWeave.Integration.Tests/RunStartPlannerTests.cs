@@ -32,7 +32,7 @@ namespace KyberWeave.Integration.Tests;
 ///         <c>origin/HEAD</c> is set. Nothing reaches the network.
 ///     </para>
 /// </remarks>
-public sealed class RunStartPlannerTests : IDisposable
+public sealed class RunStartPlannerTests : IAsyncLifetime
 {
     private static readonly KyberWeave.Contracts.Services.IRunStartEvidence Evidence =
         new KyberWeave.Application.RunStart.RunStartEvidenceService(
@@ -45,11 +45,17 @@ public sealed class RunStartPlannerTests : IDisposable
                 new KyberWeave.Data.Paths.PhysicalPathResolver(new KyberWeave.Data.Hooks.PhysicalFileSystem()),
                 new KyberWeave.Data.Host.ProcessEnvironment()));
 
-    private readonly RunStartProbe _probe = RunStartProbe.Create();
+    private RunStartProbe _probe = null!;
 
-    public void Dispose()
+    public async ValueTask InitializeAsync()
+    {
+        _probe = await RunStartProbe.CreateAsync();
+    }
+
+    public ValueTask DisposeAsync()
     {
         _probe.Dispose();
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -62,13 +68,13 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     operator only discovers at the end of the work.
     /// </remarks>
     [Fact]
-    public void CreatesTheBranchFromTheHarnessTypeAndSlug()
+    public async Task CreatesTheBranchFromTheHarnessTypeAndSlug()
     {
         ProbeResult result = _probe.RunStart("--harness", "commandcode", "--type", "fix", "--slug",
             "arbiter-global-block-identity");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a ready run. {result.Output}");
-        Assert.Equal("commandcode/fix/arbiter-global-block-identity", _probe.CurrentBranch());
+        Assert.Equal("commandcode/fix/arbiter-global-block-identity", await _probe.CurrentBranchAsync());
     }
 
     /// <summary>
@@ -76,7 +82,7 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     <c>origin/main</c> lets a bare <c>git push</c> aim at the wrong branch.
     /// </summary>
     [Fact]
-    public void CreatesTheBranchWithoutAnUpstreamSoABarePushCannotAimAtTheBase()
+    public async Task CreatesTheBranchWithoutAnUpstreamSoABarePushCannotAimAtTheBase()
     {
         const string Branch = "commandcode/fix/arbiter-global-block-identity";
 
@@ -84,7 +90,7 @@ public sealed class RunStartPlannerTests : IDisposable
             "arbiter-global-block-identity");
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a ready run. {result.Output}");
 
-        string upstream = _probe.GitOutput("for-each-ref", "--format=%(upstream)", "refs/heads/" + Branch).Trim();
+        string upstream = (await _probe.GitOutputAsync("for-each-ref", "--format=%(upstream)", "refs/heads/" + Branch)).Trim();
 
         Assert.True(
             upstream.Length == 0,
@@ -97,18 +103,18 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     working in the directory they are already in.
     /// </summary>
     [Fact]
-    public void BranchesACleanUnusedCheckoutInPlace()
+    public async Task BranchesACleanUnusedCheckoutInPlace()
     {
-        int worktreesBefore = _probe.WorktreeCount();
+        int worktreesBefore = await _probe.WorktreeCountAsync();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a ready run. {result.Output}");
-        Assert.Equal("claude/fix/tighten-the-gate", _probe.CurrentBranch());
+        Assert.Equal("claude/fix/tighten-the-gate", await _probe.CurrentBranchAsync());
         Assert.True(
-            _probe.WorktreeCount() == worktreesBefore,
+            await _probe.WorktreeCountAsync() == worktreesBefore,
             $"A clean unused checkout must be branched in place, but the worktree count went from " +
-            $"{worktreesBefore} to {_probe.WorktreeCount()}.");
+            $"{worktreesBefore} to {_probe.WorktreeCountAsync()}.");
     }
 
     /// <summary>
@@ -120,24 +126,24 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     were not made for. A worktree leaves both the edits and their branch untouched.
     /// </remarks>
     [Fact]
-    public void BranchesADirtyCheckoutInAWorktreeInsteadOfInPlace()
+    public async Task BranchesADirtyCheckoutInAWorktreeInsteadOfInPlace()
     {
         const string Branch = "claude/fix/tighten-the-gate";
         _probe.AppendLine("README.md", "uncommitted work");
-        string currentBefore = _probe.CurrentBranch();
-        int worktreesBefore = _probe.WorktreeCount();
+        string currentBefore = await _probe.CurrentBranchAsync();
+        int worktreesBefore = await _probe.WorktreeCountAsync();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a dirty checkout. {result.Output}");
-        Assert.Equal(currentBefore, _probe.CurrentBranch());
+        Assert.Equal(currentBefore, await _probe.CurrentBranchAsync());
         Assert.True(
-            _probe.WorktreeCount() == worktreesBefore + 1,
+            await _probe.WorktreeCountAsync() == worktreesBefore + 1,
             $"A dirty checkout must get its own worktree, but the worktree count went from " +
-            $"{worktreesBefore} to {_probe.WorktreeCount()}.");
+            $"{worktreesBefore} to {_probe.WorktreeCountAsync()}.");
         Assert.Contains(
             Branch,
-            _probe.WorktreeBranches(),
+            await _probe.WorktreeBranchesAsync(),
             StringComparison.Ordinal);
     }
 
@@ -146,42 +152,44 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     to its own worktree rather than taking over the checkout in use.
     /// </summary>
     [Fact]
-    public void BranchesABusyCheckoutInAWorktreeInsteadOfInPlace()
+    public async Task BranchesABusyCheckoutInAWorktreeInsteadOfInPlace()
     {
         const string Branch = "claude/fix/tighten-the-gate";
-        string currentBefore = _probe.CurrentBranch();
-        _probe.AddLinkedWorktree("spare");
-        int worktreesBefore = _probe.WorktreeCount();
+        string currentBefore = await _probe.CurrentBranchAsync();
+        await _probe.AddLinkedWorktreeAsync("spare");
+        int worktreesBefore = await _probe.WorktreeCountAsync();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a busy checkout. {result.Output}");
-        Assert.Equal(currentBefore, _probe.CurrentBranch());
+        Assert.Equal(currentBefore, await _probe.CurrentBranchAsync());
         Assert.True(
-            _probe.WorktreeCount() == worktreesBefore + 1,
+            await _probe.WorktreeCountAsync() == worktreesBefore + 1,
             $"A checkout already in use must get the new branch in its own worktree, but the worktree " +
-            $"count went from {worktreesBefore} to {_probe.WorktreeCount()}.");
-        Assert.Contains(Branch, _probe.WorktreeBranches(), StringComparison.Ordinal);
+            $"count went from {worktreesBefore} to {_probe.WorktreeCountAsync()}.");
+        Assert.Contains(Branch, await _probe.WorktreeBranchesAsync(), StringComparison.Ordinal);
     }
 
     /// <summary>
     ///     The record the real command writes is the one <c>KW-ARB-RUN-001</c> reads: after a run start,
     ///     in place or in a worktree, the repository counts as having a live run from either checkout.
     /// </summary>
+    /// <param name="busy">Whether a second worktree is already attached to the probe repository.</param>
+    /// <returns>The completed test.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void TheRecordItWritesSatisfiesTheRunStartGuard(bool busy)
+    public async Task TheRecordItWritesSatisfiesTheRunStartGuard(bool busy)
     {
         if (busy)
-            _probe.AddLinkedWorktree("spare");
-        Assert.False(Evidence.Started(_probe.Root, _probe.Home));
+            await _probe.AddLinkedWorktreeAsync("spare");
+        Assert.False(await Evidence.StartedAsync(_probe.Root, _probe.Home, TestContext.Current.CancellationToken));
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0. {result.Output}");
         Assert.True(
-            Evidence.Started(_probe.Root, _probe.Home),
+            await Evidence.StartedAsync(_probe.Root, _probe.Home, TestContext.Current.CancellationToken),
             $"run start must leave a record the guard reads as a live run. {result.Output}");
     }
 
@@ -190,11 +198,11 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     new, because the plan or pull request already owns that branch and its history.
     /// </summary>
     [Fact]
-    public void ResumesTheNamedBranchInsteadOfCreatingANewOne()
+    public async Task ResumesTheNamedBranchInsteadOfCreatingANewOne()
     {
         const string Resumed = "claude/fix/existing-fix";
-        _probe.CreateBranchWithCommit(Resumed, "earlier work");
-        _probe.Git("switch", "main");
+        await _probe.CreateBranchWithCommitAsync(Resumed, "earlier work");
+        await _probe.GitAsync("switch", "main");
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -203,9 +211,9 @@ public sealed class RunStartPlannerTests : IDisposable
             "--resume", Resumed);
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming. {result.Output}");
-        Assert.Equal(Resumed, _probe.CurrentBranch());
+        Assert.Equal(Resumed, await _probe.CurrentBranchAsync());
         Assert.False(
-            _probe.BranchExists("claude/fix/tighten-the-gate"),
+            await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"),
             "A resume must keep the resumed branch rather than creating a second one from the arguments.");
     }
 
@@ -214,13 +222,13 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     remote, checking out that branch without duplicating the remote prefix into the branch name.
     /// </summary>
     [Fact]
-    public void ResumesRemoteBranchWhenPassedWithOriginPrefix()
+    public async Task ResumesRemoteBranchWhenPassedWithOriginPrefix()
     {
         const string Resumed = "claude/fix/remote-fix";
-        _probe.CreateBranchWithCommit(Resumed, "earlier work");
-        _probe.Git("push", "origin", Resumed);
-        _probe.Git("switch", "main");
-        _probe.Git("branch", "-D", Resumed);
+        await _probe.CreateBranchWithCommitAsync(Resumed, "earlier work");
+        await _probe.GitAsync("push", "origin", Resumed);
+        await _probe.GitAsync("switch", "main");
+        await _probe.GitAsync("branch", "-D", Resumed);
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -229,7 +237,7 @@ public sealed class RunStartPlannerTests : IDisposable
             "--resume", "origin/" + Resumed);
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming origin/branch. {result.Output}");
-        Assert.Equal(Resumed, _probe.CurrentBranch());
+        Assert.Equal(Resumed, await _probe.CurrentBranchAsync());
     }
 
     /// <summary>
@@ -238,18 +246,18 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     the remote revision.
     /// </summary>
     [Fact]
-    public void PrefersRemoteBranchWhenExplicitlyQualifiedWithOriginPrefix()
+    public async Task PrefersRemoteBranchWhenExplicitlyQualifiedWithOriginPrefix()
     {
         const string Resumed = "claude/fix/diverged-fix";
-        _probe.CreateBranchWithCommit(Resumed, "local stale commit");
-        string localRevision = _probe.GitOutput("rev-parse", "HEAD").Trim();
+        await _probe.CreateBranchWithCommitAsync(Resumed, "local stale commit");
+        string localRevision = (await _probe.GitOutputAsync("rev-parse", "HEAD")).Trim();
 
-        _probe.Git("switch", "main");
-        _probe.CreateBranchWithCommit("temp-remote", "remote commit");
-        _probe.Git("push", "origin", "temp-remote:" + Resumed);
-        string remoteRevision = _probe.GitOutput("rev-parse", "origin/" + Resumed).Trim();
-        _probe.Git("switch", "main");
-        _probe.Git("branch", "-D", "temp-remote");
+        await _probe.GitAsync("switch", "main");
+        await _probe.CreateBranchWithCommitAsync("temp-remote", "remote commit");
+        await _probe.GitAsync("push", "origin", "temp-remote:" + Resumed);
+        string remoteRevision = (await _probe.GitOutputAsync("rev-parse", "origin/" + Resumed)).Trim();
+        await _probe.GitAsync("switch", "main");
+        await _probe.GitAsync("branch", "-D", "temp-remote");
 
         Assert.NotEqual(localRevision, remoteRevision);
 
@@ -269,16 +277,16 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     the command creates a worktree with a tracking branch from the remote ref.
     /// </summary>
     [Fact]
-    public void ResumesRemoteOnlyBranchInWorktreeWithTrackingBranch()
+    public async Task ResumesRemoteOnlyBranchInWorktreeWithTrackingBranch()
     {
         const string Resumed = "claude/fix/remote-worktree-tracking";
-        _probe.CreateBranchWithCommit(Resumed, "remote work");
-        _probe.Git("push", "origin", Resumed);
-        _probe.Git("switch", "main");
-        _probe.Git("branch", "-D", Resumed);
-        _probe.Git("config", "branch.autoSetupMerge", "false");
+        await _probe.CreateBranchWithCommitAsync(Resumed, "remote work");
+        await _probe.GitAsync("push", "origin", Resumed);
+        await _probe.GitAsync("switch", "main");
+        await _probe.GitAsync("branch", "-D", Resumed);
+        await _probe.GitAsync("config", "branch.autoSetupMerge", "false");
 
-        _probe.AddLinkedWorktree("linked-worker");
+        await _probe.AddLinkedWorktreeAsync("linked-worker");
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -287,9 +295,9 @@ public sealed class RunStartPlannerTests : IDisposable
             "--resume", "origin/" + Resumed);
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming remote branch in worktree: {result.Output}");
-        Assert.Contains(Resumed, _probe.WorktreeBranches(), StringComparison.Ordinal);
-        Assert.True(_probe.BranchExists(Resumed), $"Local branch '{Resumed}' must be created.");
-        Assert.Equal("origin", _probe.GitOutput("config", $"branch.{Resumed}.remote").Trim());
+        Assert.Contains(Resumed, await _probe.WorktreeBranchesAsync(), StringComparison.Ordinal);
+        Assert.True(await _probe.BranchExistsAsync(Resumed), $"Local branch '{Resumed}' must be created.");
+        Assert.Equal("origin", (await _probe.GitOutputAsync("config", $"branch.{Resumed}.remote")).Trim());
     }
 
     /// <summary>
@@ -299,7 +307,7 @@ public sealed class RunStartPlannerTests : IDisposable
     [Theory]
     [InlineData("HEAD")]
     [InlineData("origin/HEAD")]
-    public void RefusesToResumeHeadSymbolicReferenceWithExitTwo(string candidate)
+    public async Task RefusesToResumeHeadSymbolicReferenceWithExitTwo(string candidate)
     {
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -316,11 +324,11 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     and resuming it succeeds with exit 0 and checks out the branch.
     /// </summary>
     [Fact]
-    public void DoesNotRefuseLowercaseHeadBranchAsSymbolicRef()
+    public async Task DoesNotRefuseLowercaseHeadBranchAsSymbolicRef()
     {
         const string Resumed = "head";
-        _probe.CreateBranchWithCommit(Resumed, "branch named head");
-        _probe.Git("switch", "main");
+        await _probe.CreateBranchWithCommitAsync(Resumed, "branch named head");
+        await _probe.GitAsync("switch", "main");
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -329,7 +337,7 @@ public sealed class RunStartPlannerTests : IDisposable
             "--resume", Resumed);
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming branch named 'head': {result.Output}");
-        Assert.Equal(Resumed, _probe.CurrentBranch());
+        Assert.Equal(Resumed, await _probe.CurrentBranchAsync());
         Assert.DoesNotContain("symbolic reference", result.Output, StringComparison.Ordinal);
     }
 
@@ -338,14 +346,14 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     the worktree for the tracking branch without failing on an invalid reference.
     /// </summary>
     [Fact]
-    public void ResumesRemoteOnlyBranchInWorktreeWhenCheckoutIsDirty()
+    public async Task ResumesRemoteOnlyBranchInWorktreeWhenCheckoutIsDirty()
     {
         const string Resumed = "claude/fix/remote-only-worktree";
-        _probe.CreateBranchWithCommit(Resumed, "remote work");
-        _probe.Git("push", "origin", Resumed);
-        _probe.Git("switch", "main");
-        _probe.Git("branch", "-D", Resumed);
-        _probe.Git("config", "worktree.guessRemote", "false");
+        await _probe.CreateBranchWithCommitAsync(Resumed, "remote work");
+        await _probe.GitAsync("push", "origin", Resumed);
+        await _probe.GitAsync("switch", "main");
+        await _probe.GitAsync("branch", "-D", Resumed);
+        await _probe.GitAsync("config", "worktree.guessRemote", "false");
 
         _probe.AppendLine("README.md", "dirty local changes");
 
@@ -356,7 +364,7 @@ public sealed class RunStartPlannerTests : IDisposable
             "--resume", "origin/" + Resumed);
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 when resuming in worktree: {result.Output}");
-        Assert.Contains(Resumed, _probe.WorktreeBranches(), StringComparison.Ordinal);
+        Assert.Contains(Resumed, await _probe.WorktreeBranchesAsync(), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -364,10 +372,10 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     the command fails rather than guessing 'main'.
     /// </summary>
     [Fact]
-    public void FailsWhenOriginHeadCannotBeResolvedInsteadOfGuessingMain()
+    public async Task FailsWhenOriginHeadCannotBeResolvedInsteadOfGuessingMain()
     {
-        _probe.GitRemote("symbolic-ref", "HEAD", "refs/heads/nonexistent");
-        _probe.Git("remote", "set-head", "origin", "-d");
+        await _probe.GitRemoteAsync("symbolic-ref", "HEAD", "refs/heads/nonexistent");
+        await _probe.GitAsync("remote", "set-head", "origin", "-d");
 
         ProbeResult result = _probe.RunStart(
             "--harness", "claude",
@@ -384,9 +392,9 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     history.
     /// </summary>
     [Fact]
-    public void StopsOnAFetchFailureWhenStopOnToolFailureIsUnset()
+    public async Task StopsOnAFetchFailureWhenStopOnToolFailureIsUnset()
     {
-        _probe.BreakOrigin();
+        await _probe.BreakOriginAsync();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
@@ -394,7 +402,7 @@ public sealed class RunStartPlannerTests : IDisposable
             result.ExitCode == 1,
             $"A failed fetch with stop-on-tool-failure unset must exit 1, not {result.ExitCode}. {result.Output}");
         Assert.False(
-            _probe.BranchExists("claude/fix/tighten-the-gate"),
+            await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"),
             "A stopped run must not leave a branch behind for the operator to discover later.");
     }
 
@@ -403,10 +411,10 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     repository that accepts a stale base still gets its branch.
     /// </summary>
     [Fact]
-    public void ContinuesPastAFetchFailureWhenStopOnToolFailureIsFalse()
+    public async Task ContinuesPastAFetchFailureWhenStopOnToolFailureIsFalse()
     {
         _probe.WriteHostConfig("stop-on-tool-failure: false\nonboarding: done\n");
-        _probe.BreakOrigin();
+        await _probe.BreakOriginAsync();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
@@ -415,7 +423,7 @@ public sealed class RunStartPlannerTests : IDisposable
             $"stop-on-tool-failure: false must let the run continue past a failed fetch, " +
             $"but it exited {result.ExitCode}. {result.Output}");
         Assert.True(
-            _probe.BranchExists("claude/fix/tighten-the-gate"),
+            await _probe.BranchExistsAsync("claude/fix/tighten-the-gate"),
             "A run that continued past the fetch must still create its branch.");
     }
 
@@ -424,17 +432,17 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     new branch starts at the configured base's tip.
     /// </summary>
     [Fact]
-    public void BranchesFromTheConfiguredBaseBranchRatherThanAssumingMain()
+    public async Task BranchesFromTheConfiguredBaseBranchRatherThanAssumingMain()
     {
         const string Branch = "claude/fix/tighten-the-gate";
         _probe.WriteHostConfig("run:\n  base-branch: develop\nonboarding: done\n");
-        string developTip = _probe.GitOutput("rev-parse", "origin/develop").Trim();
+        string developTip = (await _probe.GitOutputAsync("rev-parse", "origin/develop")).Trim();
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0 on a ready run. {result.Output}");
         Assert.True(
-            string.Equals(_probe.GitOutput("rev-parse", "refs/heads/" + Branch).Trim(), developTip,
+            string.Equals((await _probe.GitOutputAsync("rev-parse", "refs/heads/" + Branch)).Trim(), developTip,
                 StringComparison.Ordinal),
             $"'{Branch}' must start at origin/develop ({developTip}), not at main. The configured " +
             "run.base-branch is the base, so a repository whose default is not main is compared " +
@@ -522,13 +530,13 @@ internal sealed class RunStartProbe : IDisposable
     ///     Builds the origin and the working clone: <c>main</c> and <c>develop</c> on the remote, and a
     ///     clone whose <c>origin/HEAD</c> is set so the default base resolves.
     /// </summary>
-    public static RunStartProbe Create()
+    public static async Task<RunStartProbe> CreateAsync()
     {
         SkipIfGitUnavailable();
 
         RunStartProbe probe = new();
         probe.WriteCodegraphStub();
-        probe.InitializeRepository();
+        await probe.InitializeRepositoryAsync();
         return probe;
     }
 
@@ -554,31 +562,28 @@ internal sealed class RunStartProbe : IDisposable
     }
 
     /// <summary>Runs any other CLI verb, for the help and usage cases.</summary>
-    public ProbeResult RunCli(params string[] arguments)
+    public Task<ProbeResult> RunCliAsync(params string[] arguments)
     {
         List<string> argv = [.. arguments];
-        return RunCliWith(_pathWithStub, argv);
+        return RunCliWithAsync(_pathWithStub, argv);
     }
 
     /// <summary>Runs git in the working clone and asserts it succeeded.</summary>
-    public void Git(params string[] arguments)
+    public async Task GitAsync(params string[] arguments)
     {
-        ProbeResult result = RunGit(Root, arguments);
+        ProbeResult result = await RunGitAsync(Root, arguments);
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} failed with exit {result.ExitCode}: {result.Output}");
     }
 
     /// <summary>Runs git on the bare origin repository.</summary>
-    public void GitRemote(params string[] arguments)
-    {
-        GitAt(Remote, arguments);
-    }
+    public Task GitRemoteAsync(params string[] arguments) => GitAtAsync(Remote, arguments);
 
     /// <summary>Runs git in the working clone and returns its standard output, asserting success.</summary>
-    public string GitOutput(params string[] arguments)
+    public async Task<string> GitOutputAsync(params string[] arguments)
     {
-        ProbeResult result = RunGit(Root, arguments);
+        ProbeResult result = await RunGitAsync(Root, arguments);
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} failed with exit {result.ExitCode}: {result.Output}");
@@ -586,29 +591,29 @@ internal sealed class RunStartProbe : IDisposable
     }
 
     /// <summary>The branch the working clone currently has checked out.</summary>
-    public string CurrentBranch()
+    public async Task<string> CurrentBranchAsync()
     {
-        return GitOutput("branch", "--show-current").Trim();
+        return (await GitOutputAsync("branch", "--show-current")).Trim();
     }
 
     /// <summary>Whether a local branch of that name exists, checked out anywhere or not.</summary>
-    public bool BranchExists(string branch)
+    public async Task<bool> BranchExistsAsync(string branch)
     {
-        return RunGit(Root, ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch]).ExitCode == 0;
+        return (await RunGitAsync(Root, ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch])).ExitCode == 0;
     }
 
     /// <summary>How many worktrees are attached to the working clone, the main one included.</summary>
-    public int WorktreeCount()
+    public async Task<int> WorktreeCountAsync()
     {
-        return WorktreePaths().Count;
+        return (await WorktreePathsAsync()).Count;
     }
 
     /// <summary>The branch each attached worktree has checked out, in <c>git worktree list</c> order.</summary>
-    public string WorktreeBranches()
+    public async Task<string> WorktreeBranchesAsync()
     {
         return string.Join(
             "\n",
-            GitOutput("worktree", "list", "--porcelain")
+            (await GitOutputAsync("worktree", "list", "--porcelain"))
                 .Split('\n')
                 .Where(line => line.StartsWith("branch ", StringComparison.Ordinal))
                 .Select(line => line["branch refs/heads/".Length..].Trim()));
@@ -625,19 +630,19 @@ internal sealed class RunStartProbe : IDisposable
     ///     Attaches a second worktree on its own branch, so the main checkout is one another worktree is
     ///     already sharing the repository with.
     /// </summary>
-    public void AddLinkedWorktree(string branch)
+    public async Task AddLinkedWorktreeAsync(string branch)
     {
-        Git("branch", branch, "main");
-        Git("worktree", "add", Path.Combine(_temp.Path, "linked-" + branch), branch);
+        await GitAsync("branch", branch, "main");
+        await GitAsync("worktree", "add", Path.Combine(_temp.Path, "linked-" + branch), branch);
     }
 
     /// <summary>Creates a branch with one commit of its own, so resuming it is visibly different work.</summary>
-    public void CreateBranchWithCommit(string branch, string message)
+    public async Task CreateBranchWithCommitAsync(string branch, string message)
     {
-        Git("switch", "-c", branch, "origin/main");
-        File.WriteAllText(Path.Combine(Root, "earlier.txt"), message + "\n", Encoding.UTF8);
-        Git("add", "-A");
-        Git("commit", "-m", message);
+        await GitAsync("switch", "-c", branch, "origin/main");
+        await File.WriteAllTextAsync(Path.Combine(Root, "earlier.txt"), message + "\n", Encoding.UTF8);
+        await GitAsync("add", "-A");
+        await GitAsync("commit", "-m", message);
     }
 
     /// <summary>Writes the host configuration a run reads its settings from.</summary>
@@ -649,10 +654,8 @@ internal sealed class RunStartProbe : IDisposable
     }
 
     /// <summary>Points <c>origin</c> at nothing, so the next fetch fails without touching the network.</summary>
-    public void BreakOrigin()
-    {
-        Git("remote", "set-url", "origin", Path.Combine(_temp.Path, "absent.git"));
-    }
+    public Task BreakOriginAsync() =>
+        GitAsync("remote", "set-url", "origin", Path.Combine(_temp.Path, "absent.git"));
 
     /// <summary>The file every CodeGraph stub call appends to: one line per call, the working directory then the arguments.</summary>
     public string CodegraphCallLog => Path.Combine(_temp.Path, "codegraph-calls.log");
@@ -674,14 +677,14 @@ internal sealed class RunStartProbe : IDisposable
     ///     Commits the host configuration and a docs folder, then pushes them. A worktree is cut from the remote, so an
     ///     uncommitted file would not reach it, and the repository would look ungoverned from inside the worktree.
     /// </summary>
-    public void PublishGovernance(string yaml)
+    public async Task PublishGovernance(string yaml)
     {
         WriteHostConfig(yaml);
         Directory.CreateDirectory(Path.Combine(Root, "docs"));
-        File.WriteAllText(Path.Combine(Root, "docs", "README.md"), "# docs\n", Encoding.UTF8);
-        Git("add", "-A");
-        Git("commit", "-m", "govern the repository");
-        Git("push", "origin", "main");
+        await File.WriteAllTextAsync(Path.Combine(Root, "docs", "README.md"), "# docs\n", Encoding.UTF8);
+        await GitAsync("add", "-A");
+        await GitAsync("commit", "-m", "govern the repository");
+        await GitAsync("push", "origin", "main");
     }
 
     /// <summary>
@@ -699,10 +702,10 @@ internal sealed class RunStartProbe : IDisposable
     ///     Runs <c>kyber-weave run start</c> as the real host process, for the one smoke case that proves the
     ///     composition root wires the command end to end.
     /// </summary>
-    public ProbeResult RunStartInChildProcess(params string[] arguments)
+    public Task<ProbeResult> RunStartInChildProcessAsync(params string[] arguments)
     {
         List<string> argv = ["run", "start", .. arguments];
-        return RunCliWith(_pathWithStub, argv);
+        return RunCliWithAsync(_pathWithStub, argv);
     }
 
     private ProbeResult RunStartOn(string path, params string[] arguments)
@@ -727,13 +730,13 @@ internal sealed class RunStartProbe : IDisposable
             {
                 _ = services.AddSingleton<IProcessEnvironment>(environment);
                 _ = services.AddSingleton<IGitCommandRunner>(git);
-                _ = services.AddSingleton<IProcessExecutor>(executor);
+                _ = services.AddSingleton<IProcessRunner>(executor);
             }).Run(argv), width: UnwrappedWidth);
 
         return new ProbeResult(run.Result, run.Output, run.Output + "\n" + run.ErrorOutput);
     }
 
-    private ProbeResult RunCliWith(string path, List<string> argv)
+    private async Task<ProbeResult> RunCliWithAsync(string path, List<string> argv)
     {
         ProcessStartInfo startInfo = new(CliHostPath())
         {
@@ -749,10 +752,10 @@ internal sealed class RunStartProbe : IDisposable
 
         Isolate(startInfo);
         startInfo.Environment["PATH"] = path;
-        return Run(startInfo);
+        return await RunAsync(startInfo);
     }
 
-    private ProbeResult RunGit(string workingDirectory, string[] arguments, string? path = null)
+    private async Task<ProbeResult> RunGitAsync(string workingDirectory, string[] arguments, string? path = null)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -775,16 +778,33 @@ internal sealed class RunStartProbe : IDisposable
             startInfo.Environment["PATH"] = path;
         }
 
-        return Run(startInfo);
+        return await RunAsync(startInfo);
     }
 
     /// <summary>
     ///     Bounds every child at sixty seconds, killing its tree on expiry, and is the one place this
     ///     suite starts a process.
     /// </summary>
-    private static ProbeResult Run(ProcessStartInfo startInfo)
+    /// <summary>The synchronous seam view a fake must implement; the real work is the async twin.</summary>
+    internal GitOutcome RunGitSync(string workingDirectory, string[] arguments, string? path = null)
     {
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+        ProbeResult result = RunGitAsync(workingDirectory, arguments, path).GetAwaiter().GetResult();
+        return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
+    }
+
+    /// <summary>The synchronous seam view a fake must implement; the real work is the async twin.</summary>
+    internal ProcessResult RunSync(ProcessStartInfo startInfo, string standardInput) =>
+        RunAsync(startInfo, standardInput).GetAwaiter().GetResult();
+
+    private static async Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, string standardInput)
+    {
+        ProbeResult result = await RunAsync(startInfo);
+        return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
+    }
+
+    private static async Task<ProbeResult> RunAsync(ProcessStartInfo startInfo)
+    {
+        ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
         return new ProbeResult(
             result.ExitCode,
             result.StandardOutput,
@@ -811,50 +831,50 @@ internal sealed class RunStartProbe : IDisposable
         startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
     }
 
-    private void InitializeRepository()
+    private async Task InitializeRepositoryAsync()
     {
-        GitAt(_temp.Path, "init", "--bare", "--initial-branch=main", Remote);
+        await GitAtAsync(_temp.Path, "init", "--bare", "--initial-branch=main", Remote);
 
         string seed = Path.Combine(_temp.Path, "seed");
-        GitAt(_temp.Path, "clone", Remote, seed);
-        ConfigureAuthor(seed);
+        await GitAtAsync(_temp.Path, "clone", Remote, seed);
+        await ConfigureAuthorAsync(seed);
 
-        File.WriteAllText(Path.Combine(seed, "README.md"), "# seed\n", Encoding.UTF8);
-        GitAt(seed, "add", "-A");
-        GitAt(seed, "commit", "-m", "initial");
-        GitAt(seed, "push", "origin", "main");
+        await File.WriteAllTextAsync(Path.Combine(seed, "README.md"), "# seed\n", Encoding.UTF8);
+        await GitAtAsync(seed, "add", "-A");
+        await GitAtAsync(seed, "commit", "-m", "initial");
+        await GitAtAsync(seed, "push", "origin", "main");
 
         // A second branch on the remote, so "the base is the configured branch" is separable from
         // "the base is whatever main happens to be".
-        GitAt(seed, "switch", "-c", "develop");
-        File.WriteAllText(Path.Combine(seed, "develop.txt"), "develop\n", Encoding.UTF8);
-        GitAt(seed, "add", "-A");
-        GitAt(seed, "commit", "-m", "develop");
-        GitAt(seed, "push", "origin", "develop");
+        await GitAtAsync(seed, "switch", "-c", "develop");
+        await File.WriteAllTextAsync(Path.Combine(seed, "develop.txt"), "develop\n", Encoding.UTF8);
+        await GitAtAsync(seed, "add", "-A");
+        await GitAtAsync(seed, "commit", "-m", "develop");
+        await GitAtAsync(seed, "push", "origin", "develop");
 
-        GitAt(_temp.Path, "clone", Remote, Root);
-        ConfigureAuthor(Root);
-        Git("remote", "set-head", "origin", "--auto");
+        await GitAtAsync(_temp.Path, "clone", Remote, Root);
+        await ConfigureAuthorAsync(Root);
+        await GitAsync("remote", "set-head", "origin", "--auto");
     }
 
-    private void ConfigureAuthor(string repository)
+    private async Task ConfigureAuthorAsync(string repository)
     {
-        GitAt(repository, "config", "user.name", "Kyber Weave Tests");
-        GitAt(repository, "config", "user.email", "tests@kyber-weave.invalid");
-        GitAt(repository, "config", "commit.gpgsign", "false");
+        await GitAtAsync(repository, "config", "user.name", "Kyber Weave Tests");
+        await GitAtAsync(repository, "config", "user.email", "tests@kyber-weave.invalid");
+        await GitAtAsync(repository, "config", "commit.gpgsign", "false");
     }
 
-    private void GitAt(string workingDirectory, params string[] arguments)
+    private async Task GitAtAsync(string workingDirectory, params string[] arguments)
     {
-        ProbeResult result = RunGit(workingDirectory, arguments);
+        ProbeResult result = await RunGitAsync(workingDirectory, arguments);
         Assert.True(
             result.ExitCode == 0,
             $"git {string.Join(' ', arguments)} in '{workingDirectory}' failed with exit {result.ExitCode}: {result.Output}");
     }
 
-    private List<string> WorktreePaths()
+    private async Task<List<string>> WorktreePathsAsync()
     {
-        return GitOutput("worktree", "list", "--porcelain")
+        return (await GitOutputAsync("worktree", "list", "--porcelain"))
             .Split('\n')
             .Where(line => line.StartsWith("worktree ", StringComparison.Ordinal))
             .Select(line => line["worktree ".Length..].Trim())
@@ -913,23 +933,55 @@ internal sealed class RunStartProbe : IDisposable
     /// <summary>Runs git against the probe's PATH, home and temp directory, the way the child process would have.</summary>
     private sealed class ProbeGit(RunStartProbe probe, string path) : IGitCommandRunner
     {
-        public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments)
+        public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments) =>
+            probe.RunGitSync(workingDirectory, [.. arguments], path);
+
+        public async Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
         {
-            ProbeResult result = probe.RunGit(workingDirectory, [.. arguments], path);
+            ProbeResult result = await probe.RunGitAsync(workingDirectory, [.. arguments], path);
             return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
         }
     }
 
     /// <summary>Runs the CodeGraph index step's children against the probe's PATH, so the stub answers to its name.</summary>
-    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessExecutor
+    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessRunner
     {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
+            probe.RunSync(startInfo, standardInput);
+
+        public async Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ProcessStartInfo startInfo = new(request.Program)
+            {
+                WorkingDirectory = request.WorkingDirectory ?? string.Empty,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (string argument in request.Arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            // A test fake of the async seam: it runs the probe's child the same way the sync view does.
+            ProcessResult result = await RunAsync(startInfo, request.StandardInput ?? string.Empty);
+            return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)
+            {
+                StandardOutput = result.StandardOutput,
+                StandardError = result.StandardError,
+            };
+        }
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => ResolveOnPath(program, path);
+
+        public async Task<ProcessResult> RunAsync(ProcessStartInfo startInfo, string standardInput)
         {
             string program = startInfo.FileName;
             startInfo.FileName = ResolveOnPath(program, path) ?? program;
             probe.Isolate(startInfo);
             startInfo.Environment["PATH"] = path;
-            ProbeResult result = RunStartProbe.Run(startInfo);
+            ProbeResult result = await RunStartProbe.RunAsync(startInfo);
             return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
         }
     }

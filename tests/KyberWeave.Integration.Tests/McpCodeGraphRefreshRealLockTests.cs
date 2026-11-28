@@ -90,13 +90,13 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     /// refresh that skipped the lock would let two processes rewrite one index at once.
     /// </remarks>
     [Fact]
-    public void TheFirstToolCallRefreshesCodeGraph()
+    public async Task TheFirstToolCallRefreshesCodeGraph()
     {
-        DocsTools tools = ToolsRequiringCodeGraph(Root);
+        DocsTools tools = await ToolsRequiringCodeGraphAsync(Root);
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
-        _ = tools.Explore("anything");
+        _ = await tools.ExploreAsync("anything");
 
         Assert.True(
             File.Exists(lockPath),
@@ -114,15 +114,15 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     /// put another process's eight-second index on this call's critical path.
     /// </remarks>
     [Fact]
-    public void ABusyRefreshLockAnswersOneNoteInsteadOfFailingOrWaiting()
+    public async Task ABusyRefreshLockAnswersOneNoteInsteadOfFailingOrWaiting()
     {
-        DocsTools tools = ToolsRequiringCodeGraph(Root);
+        DocsTools tools = await ToolsRequiringCodeGraphAsync(Root);
         string lockPath = LockPath(Root);
         Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
 
         using FileStream held = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         Stopwatch elapsed = Stopwatch.StartNew();
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
         elapsed.Stop();
 
         TimeSpan waitBudget = TimeSpan.FromSeconds(2);
@@ -151,20 +151,20 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     /// its silence is the record that no attempt was made.
     /// </remarks>
     [Fact]
-    public void TheRefreshIntervalSuppressesASecondAttempt()
+    public async Task TheRefreshIntervalSuppressesASecondAttempt()
     {
-        DocsTools tools = ToolsRequiringCodeGraph(Root);
+        DocsTools tools = await ToolsRequiringCodeGraphAsync(Root);
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
-        _ = tools.Explore("anything");
+        _ = await tools.ExploreAsync("anything");
         Assert.True(
             File.Exists(lockPath),
             $"The first docs tool call took no CodeGraph index lock at '{lockPath}', so it did not refresh the index.");
         DateTime firstRefresh = File.GetLastWriteTimeUtc(lockPath);
 
         using FileStream held = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        string second = tools.Explore("anything");
+        string second = await tools.ExploreAsync("anything");
 
         Assert.True(
             !BusyNote.IsMatch(second),
@@ -198,23 +198,23 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void ARepositoryThatRequiresNoCodeGraphNeitherRefreshesNorFailsItsDocsTools(bool stopsOnToolFailure)
+    public async Task ARepositoryThatRequiresNoCodeGraphNeitherRefreshesNorFailsItsDocsTools(bool stopsOnToolFailure)
     {
         string stopRule = stopsOnToolFailure ? "the default stop rule" : "stop-on-tool-failure: false";
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
-        DocsTestCommands.Scaffolding.Scaffold(Root);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(Root);
         if (!stopsOnToolFailure)
         {
-            File.AppendAllText(
+            await File.AppendAllTextAsync(
                 Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"),
                 Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
         }
 
         DocsTools tools = ScaffoldedTools(Root, () => DocsPorts.CodeGraph(Root));
 
-        string response = tools.Explore("anything");
+        string response = await tools.ExploreAsync("anything");
 
         Assert.False(
             File.Exists(lockPath),
@@ -246,9 +246,9 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     /// Tools over a repository that requires CodeGraph: the scaffold as it comes, plus the CodeGraph
     /// entry it leaves commented out. This is the repository the refresh applies to.
     /// </summary>
-    private static DocsTools ToolsRequiringCodeGraph(string root)
+    private static async Task<DocsTools> ToolsRequiringCodeGraphAsync(string root)
     {
-        DocsTestCommands.Scaffolding.Scaffold(root);
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(root);
         McpDeclarationFixture.RequireCodeGraph(root);
         return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols());
     }
@@ -263,8 +263,8 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     private static DocsTools ScaffoldedTools(
         string root,
         Func<ICodeGraphResolver> resolverFactory,
-        IProcessExecutor? executor = null,
-        Action<TimeSpan>? pause = null)
+        IProcessRunner? executor = null,
+        Func<TimeSpan, CancellationToken, Task>? pause = null)
     {
         KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
@@ -293,7 +293,7 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
     /// the refresh starts the index binary and nothing else, so a command this does not expect means
     /// the refresh grew a step these tests do not know about.
     /// </remarks>
-    private static IProcessExecutor ProvisionSucceeds() =>
+    private static IProcessRunner ProvisionSucceeds() =>
         new ScriptedProcessExecutor(startInfo =>
         {
             if (Path.GetFileName(startInfo.FileName) != "codegraph")

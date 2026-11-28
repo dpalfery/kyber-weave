@@ -111,14 +111,12 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
         return count;
     }
 
-    internal static bool TryEnableWindowsDirectoryCaseSensitivity(
-        string directory,
-        out string diagnostic)
+    internal static async Task<(bool Enabled, string Diagnostic)> TryEnableWindowsDirectoryCaseSensitivity(
+        string directory)
     {
         if (!OperatingSystem.IsWindows())
         {
-            diagnostic = "host is not Windows";
-            return false;
+            return (false, "host is not Windows");
         }
 
         try
@@ -138,19 +136,18 @@ public abstract class SquadDeploymentStateTestBase : SquadStateDocumentFixtures
 
             // Bounded: ProcessRunner kills the tree if fsutil has not exited in 60 s. A start failure throws
             // InvalidOperationException, which the catch below turns into the diagnostic.
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
-            diagnostic = string.Join(
+            ProcessResult result = await ProcessRunner.RunAsync(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+            string diagnostic = string.Join(
                 " ",
                 new[] { result.StandardOutput, result.StandardError }
                     .Where(value => !string.IsNullOrWhiteSpace(value))
                     .Select(value => value.Trim()));
-            return result.ExitCode == 0;
+            return (result.ExitCode == 0, diagnostic);
         }
         catch (Exception exception) when (
             exception is InvalidOperationException or Win32Exception)
         {
-            diagnostic = exception.Message;
-            return false;
+            return (false, exception.Message);
         }
     }
 

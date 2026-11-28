@@ -95,12 +95,12 @@ public sealed class DocsInitMcpCheckTests
     /// discipline as the retired-skill cleanup command.
     /// </summary>
     [Fact]
-    public void FindingsPrintTheirRuleIdentifiersAndTheCopyReadyRemedyCommand()
+    public async Task FindingsPrintTheirRuleIdentifiersAndTheCopyReadyRemedyCommand()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         string finding = TheLineContaining(Output, McpWiringInspector.NotWiredCode);
@@ -116,7 +116,7 @@ public sealed class DocsInitMcpCheckTests
     /// here would block the one thing the command exists to do.
     /// </summary>
     [Fact]
-    public void FindingsDoNotMoveTheExitCode()
+    public async Task FindingsDoNotMoveTheExitCode()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
@@ -136,7 +136,7 @@ public sealed class DocsInitMcpCheckTests
               level: recommended
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.Contains(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
@@ -168,7 +168,7 @@ public sealed class DocsInitMcpCheckTests
     /// who asked for none of it must not find a harness file written afterwards.
     /// </summary>
     [Fact]
-    public void TheOptOutSkipsTheCheckThePromptAndAnyRepairAndSaysSo()
+    public async Task TheOptOutSkipsTheCheckThePromptAndAnyRepairAndSaysSo()
     {
         bool offered = false;
 
@@ -185,7 +185,7 @@ public sealed class DocsInitMcpCheckTests
         CreateDirectory(".cursor");
 
         // The armed command first: neither seam may be reached.
-        int armed = RunDocsInit(new DocsInitSettings { Path = _host.Repo, NoSkill = true, NoMcpCheck = true });
+        int armed = await RunDocsInitAsync(new DocsInitSettings { Path = _host.Repo, NoSkill = true, NoMcpCheck = true });
         AssertSucceeded(armed);
         AssertOptOut(Output);
         Assert.False(offered, "The opt-out must skip the check, so the repair must never be offered.");
@@ -194,7 +194,7 @@ public sealed class DocsInitMcpCheckTests
         // console is its own: the app disposes the console it was given when the run ends.
         TestConsole cliConsole = new() { EmitAnsiSequences = false };
         cliConsole.Profile.Width = 80;
-        int exit = RunDocsApp(cliConsole, "--no-mcp-check");
+        int exit = await RunDocsAppAsync(cliConsole, "--no-mcp-check");
         Assert.True(
             exit == 0,
             $"docs init exited {exit}. Output:{Environment.NewLine}{cliConsole.Output}");
@@ -225,7 +225,7 @@ public sealed class DocsInitMcpCheckTests
     /// reached: a run that asked anyway would block on input it cannot receive.
     /// </summary>
     [Fact]
-    public void ARedirectedTerminalNeitherPromptsNorWritesAndLeavesTheManualCommand()
+    public async Task ARedirectedTerminalNeitherPromptsNorWritesAndLeavesTheManualCommand()
     {
         bool confirmed = false;
         _interactiveCheck = static () => false;
@@ -238,7 +238,7 @@ public sealed class DocsInitMcpCheckTests
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.Contains(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
@@ -258,7 +258,7 @@ public sealed class DocsInitMcpCheckTests
     /// receipt records what was written.
     /// </summary>
     [Fact]
-    public void ConfirmingThePromptWritesTheHarnessFileAndRecordsTheReceipt()
+    public async Task ConfirmingThePromptWritesTheHarnessFileAndRecordsTheReceipt()
     {
         IReadOnlyList<McpWiringFix> offered = [];
         _interactiveCheck = static () => true;
@@ -271,7 +271,7 @@ public sealed class DocsInitMcpCheckTests
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.NotEmpty(offered);
@@ -303,7 +303,7 @@ public sealed class DocsInitMcpCheckTests
     /// because declining the repair is not declining the diagnosis.
     /// </summary>
     [Fact]
-    public void DecliningThePromptWritesNothingAndKeepsTheFindings()
+    public async Task DecliningThePromptWritesNothingAndKeepsTheFindings()
     {
         _interactiveCheck = static () => true;
         _confirmFix = static _ => false;
@@ -311,7 +311,7 @@ public sealed class DocsInitMcpCheckTests
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.Contains(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
@@ -388,7 +388,7 @@ public sealed class DocsInitMcpCheckTests
     /// not do its job, and a question about wiring would bury that.
     /// </summary>
     [Fact]
-    public void AFailedScaffoldNeverReachesThePrompt()
+    public async Task AFailedScaffoldNeverReachesThePrompt()
     {
         bool asked = false;
         _interactiveCheck = static () => true;
@@ -405,7 +405,7 @@ public sealed class DocsInitMcpCheckTests
         // first write.
         _host.Files.WriteAllText(InRepo("docs"), "not a directory");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         Assert.NotEqual(0, exit);
         Assert.Contains("Could not scaffold", Output, StringComparison.Ordinal);
@@ -419,7 +419,7 @@ public sealed class DocsInitMcpCheckTests
     /// operator stops reading.
     /// </summary>
     [Fact]
-    public void AnAllWiredTreeIsConfirmedRatherThanWarnedAbout()
+    public async Task AnAllWiredTreeIsConfirmedRatherThanWarnedAbout()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".factory");
@@ -436,7 +436,7 @@ public sealed class DocsInitMcpCheckTests
             }
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.DoesNotContain(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
@@ -457,7 +457,7 @@ public sealed class DocsInitMcpCheckTests
     /// 80 columns, so a folded render is unmistakable.
     /// </summary>
     [Fact]
-    public void TheSectionIsPrintedUnfoldedOnARedirectedConsole()
+    public async Task TheSectionIsPrintedUnfoldedOnARedirectedConsole()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
@@ -469,7 +469,7 @@ public sealed class DocsInitMcpCheckTests
               level: required
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         string finding = TheLineContaining(Output, McpWiringInspector.NotWiredCode);
@@ -485,7 +485,7 @@ public sealed class DocsInitMcpCheckTests
     /// invalid declaration is tolerated.
     /// </summary>
     [Fact]
-    public void AMalformedDeclarationFailsAsAConfigurationErrorRatherThanBeingIgnored()
+    public async Task AMalformedDeclarationFailsAsAConfigurationErrorRatherThanBeingIgnored()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
@@ -496,7 +496,7 @@ public sealed class DocsInitMcpCheckTests
               provenance: first-party
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         Assert.NotEqual(0, exit);
         Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, Output, StringComparison.Ordinal);
@@ -515,7 +515,7 @@ public sealed class DocsInitMcpCheckTests
     /// operator told to configure something with no statement of how.
     /// </remarks>
     [Fact]
-    public void TheCopilotCodingAgentsSnippetAndWorkflowStepReachTheConsole()
+    public async Task TheCopilotCodingAgentsSnippetAndWorkflowStepReachTheConsole()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".factory");
@@ -532,7 +532,7 @@ public sealed class DocsInitMcpCheckTests
             }
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
 
@@ -577,7 +577,7 @@ public sealed class DocsInitMcpCheckTests
     /// advice".
     /// </remarks>
     [Fact]
-    public void AnUndetectableHarnessIsOneInfoLineAndNoAdvice()
+    public async Task AnUndetectableHarnessIsOneInfoLineAndNoAdvice()
     {
         PutLaunchBinaryOnPath(McpBinary);
 
@@ -594,7 +594,7 @@ public sealed class DocsInitMcpCheckTests
               level: recommended
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
 
@@ -615,7 +615,7 @@ public sealed class DocsInitMcpCheckTests
     /// specific write and consent to a refusal is consent to anything.
     /// </summary>
     [Fact]
-    public void ThePromptIsNotOfferedForAGapTheRepairWouldRefuse()
+    public async Task ThePromptIsNotOfferedForAGapTheRepairWouldRefuse()
     {
         bool offered = false;
         _interactiveCheck = static () => true;
@@ -639,7 +639,7 @@ public sealed class DocsInitMcpCheckTests
             }
             """);
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.Contains(McpWiringInspector.CommandDiffersCode, Output, StringComparison.Ordinal);
@@ -655,13 +655,13 @@ public sealed class DocsInitMcpCheckTests
     /// "this file declares no dependency" while still loading.
     /// </summary>
     [Fact]
-    public void ADeclarationNamingNoServerPrintsNoWiringFindingAndStaysAtExitZero()
+    public async Task ADeclarationNamingNoServerPrintsNoWiringFindingAndStaysAtExitZero()
     {
         WriteFile(
             ".kyber-weave/kyber-weave.yml",
             "ontology:\n  docs-root: docs\nmcp:\n");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         Assert.DoesNotContain(McpWiringInspector.NotWiredCode, Output, StringComparison.Ordinal);
@@ -681,7 +681,7 @@ public sealed class DocsInitMcpCheckTests
     /// one, which is exactly the asymmetry between the two verbs this case exists to rule out.
     /// </remarks>
     [Fact]
-    public void TheOfferedRepairResolvesARepositoryRelativeCommandAgainstTheRoot()
+    public async Task TheOfferedRepairResolvesARepositoryRelativeCommandAgainstTheRoot()
     {
         CreateDirectory(".cursor");
         string absolute = McpWiringFixture.WriteExecutable(_host.Files, Bin, "kw-t6-absolute-server");
@@ -702,7 +702,7 @@ public sealed class DocsInitMcpCheckTests
         _interactiveCheck = static () => true;
         _confirmFix = _ => true;
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
 
@@ -722,7 +722,7 @@ public sealed class DocsInitMcpCheckTests
     /// wiring fix for the harness that holds it, and does not move <c>docs init</c>'s exit code.
     /// </summary>
     [Fact]
-    public void AProvenOldKeyIsPrintedAsARenameNoticeWithNoWireFixAndTheExitCodeUnchanged()
+    public async Task AProvenOldKeyIsPrintedAsARenameNoticeWithNoWireFixAndTheExitCodeUnchanged()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
@@ -737,7 +737,7 @@ public sealed class DocsInitMcpCheckTests
             CursorConfigRelativePath,
             """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         string notice = TheLineContaining(Output, "KW-MCP-WIRE-007");
@@ -761,7 +761,7 @@ public sealed class DocsInitMcpCheckTests
     /// not depend on the inspector, which returns nothing when nothing is declared. The exit code is unchanged.
     /// </summary>
     [Fact]
-    public void AnOldKeyStillPrintsTheRenameNoticeWhenNoServerIsDeclared()
+    public async Task AnOldKeyStillPrintsTheRenameNoticeWhenNoServerIsDeclared()
     {
         PutLaunchBinaryOnPath(McpBinary);
         CreateDirectory(".cursor");
@@ -772,7 +772,7 @@ public sealed class DocsInitMcpCheckTests
             CursorConfigRelativePath,
             """{"mcpServers":{"kyber-weave":{"command":"kyber-weave-mcp","args":["--repo-root","."]}}}""");
 
-        int exit = RunDocsInit();
+        int exit = await RunDocsInitAsync();
 
         AssertSucceeded(exit);
         TheLineContaining(Output, "KW-MCP-WIRE-007");
@@ -837,8 +837,8 @@ public sealed class DocsInitMcpCheckTests
 
     private string InRepo(string relativePath) => _host.InRepo(relativePath);
 
-    private int RunDocsInit(DocsInitSettings? settings = null) =>
-        NewCommand(_host.Services()).Execute(
+    private Task<int> RunDocsInitAsync(DocsInitSettings? settings = null) =>
+        NewCommand(_host.Services()).ExecuteAsync(
             null!,
             settings ?? new DocsInitSettings { Path = _host.Repo, NoSkill = true },
             CancellationToken.None);
@@ -847,12 +847,12 @@ public sealed class DocsInitMcpCheckTests
     /// Runs <c>docs init</c> through the real CLI boundary with the arguments given, which is what
     /// proves a flag on the command line is bound and reaches the command.
     /// </summary>
-    private int RunDocsApp(TestConsole console, params string[] extraArguments)
+    private Task<int> RunDocsAppAsync(TestConsole console, params string[] extraArguments)
     {
         List<string> arguments = ["docs", "init", _host.Repo, "--no-skill"];
         arguments.AddRange(extraArguments);
 
-        return CommandAppFixture.DocsInit(_host.Register, console).Run([.. arguments]);
+        return CommandAppFixture.DocsInit(_host.Register, console).RunAsync([.. arguments]);
     }
 
     /// <summary>
@@ -868,7 +868,7 @@ public sealed class DocsInitMcpCheckTests
         provider.GetRequiredService<IFileSystem>(),
         provider.GetRequiredService<IPathResolver>(),
         provider.GetRequiredService<IProcessEnvironment>(),
-        provider.GetRequiredService<IBoundedProcessExecutor>())
+        provider.GetRequiredService<IProcessRunner>())
     {
         InteractiveCheck = _interactiveCheck,
         ConfirmFix = _confirmFix

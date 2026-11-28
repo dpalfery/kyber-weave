@@ -32,9 +32,9 @@ public class DocsInitTemplateChoiceTests
         _host.Clock.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
     [Fact]
-    public void NamingTwoTechnologiesInstallsExactlyThoseFoldersAndTheSharedRulesFile()
+    public async Task NamingTwoTechnologiesInstallsExactlyThoseFoldersAndTheSharedRulesFile()
     {
-        ScaffoldResult result = Scaffolding.Scaffold(_host.Repo, standards: ["csharp", "python"]);
+        ScaffoldResult result = await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["csharp", "python"]);
 
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.rules.md")));
@@ -50,9 +50,9 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void DocsInitWritesSkillsYmlAndCopiesTheAssignedShippedSkills()
+    public async Task DocsInitWritesSkillsYmlAndCopiesTheAssignedShippedSkills()
     {
-        Scaffolding.Scaffold(_host.Repo, standards: ["tauri"]);
+        await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["tauri"]);
 
         string list = _host.Files.ReadAllText(PathOf("docs/standards/tauri/tauri.skills.yml"));
         Assert.Contains("tauri-v2-reference", list, StringComparison.Ordinal);
@@ -64,23 +64,23 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void DocsInitDoesNotOverwriteAnExistingRepositorySkillFolder()
+    public async Task DocsInitDoesNotOverwriteAnExistingRepositorySkillFolder()
     {
         const string mine = "---\nname: tauri-v2-reference\ndescription: Mine.\n---\n\nMine.\n";
         string skill = PathOf("docs/standards/skills/tauri-v2-reference/SKILL.md");
         _host.Files.CreateDirectory(Path.GetDirectoryName(skill)!);
         _host.Files.WriteAllText(skill, mine);
 
-        Scaffolding.Scaffold(_host.Repo, standards: ["tauri"], force: true);
+        await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["tauri"], force: true);
 
         Assert.Equal(mine, _host.Files.ReadAllText(skill));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/skills/rust-cross-build/SKILL.md")));
     }
 
     [Fact]
-    public void DocsInitWritesNoSkillsMd()
+    public async Task DocsInitWritesNoSkillsMd()
     {
-        Scaffolding.Scaffold(_host.Repo, kyberStandards: true, standards: ["architect"]);
+        await Scaffolding.ScaffoldAsync(_host.Repo, kyberStandards: true, standards: ["architect"]);
 
         Assert.Empty(_host.Files.EnumerateFiles(PathOf("docs/standards"), "*.skills.md", recursive: true));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.skills.yml")));
@@ -88,14 +88,14 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void AnExistingFileIsUnchangedAndReported()
+    public async Task AnExistingFileIsUnchangedAndReported()
     {
         const string custom = "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n";
         string path = PathOf("docs/standards/csharp/csharp.standards.md");
         _host.Files.CreateDirectory(Path.GetDirectoryName(path)!);
         _host.Files.WriteAllText(path, custom);
 
-        ScaffoldResult result = Scaffolding.Scaffold(_host.Repo, standards: ["csharp"]);
+        ScaffoldResult result = await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["csharp"]);
 
         Assert.Equal(custom, _host.Files.ReadAllText(path));
         Assert.Contains(result.Files, file =>
@@ -109,14 +109,14 @@ public class DocsInitTemplateChoiceTests
     /// <c>docs init</c> leaves the standard name to the migration command.
     /// </summary>
     [Fact]
-    public void ALegacyReadmeStandardIsNotJoinedByAScaffoldedStub()
+    public async Task ALegacyReadmeStandardIsNotJoinedByAScaffoldedStub()
     {
         const string legacy = "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n";
         string path = PathOf("docs/standards/csharp/README.md");
         _host.Files.CreateDirectory(Path.GetDirectoryName(path)!);
         _host.Files.WriteAllText(path, legacy);
 
-        ScaffoldResult result = Scaffolding.Scaffold(_host.Repo, standards: ["csharp"]);
+        ScaffoldResult result = await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["csharp"]);
 
         Assert.False(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
         Assert.Equal(legacy, _host.Files.ReadAllText(path));
@@ -129,7 +129,7 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void ADeclaredTechnologyWithNoTemplateGetsFourStubs()
+    public async Task ADeclaredTechnologyWithNoTemplateGetsFourStubs()
     {
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
         _host.Files.CreateDirectory(Path.GetDirectoryName(configPath)!);
@@ -140,7 +140,7 @@ public class DocsInitTemplateChoiceTests
                 - elixir
             """);
 
-        Scaffolding.Scaffold(_host.Repo);
+        await Scaffolding.ScaffoldAsync(_host.Repo);
 
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.standards.md")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/elixir/elixir.rules.md")));
@@ -153,9 +153,9 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void NamingARoleInstallsItUnderOntologyRoles()
+    public async Task NamingARoleInstallsItUnderOntologyRoles()
     {
-        Scaffolding.Scaffold(_host.Repo, standards: ["reviewer"]);
+        await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["reviewer"]);
 
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
         Assert.Contains(
@@ -169,10 +169,10 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void NamingATechnologyThatShipsATemplateInstallsTheTemplateNotAStub()
+    public async Task NamingATechnologyThatShipsATemplateInstallsTheTemplateNotAStub()
     {
 
-        Scaffolding.Scaffold(_host.Repo, standards: ["csharp"]);
+        await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["csharp"]);
 
         Assert.Equal(
             Templates.RenderPart(
@@ -186,7 +186,7 @@ public class DocsInitTemplateChoiceTests
     /// generic stubs.
     /// </summary>
     [Fact]
-    public void KyberStandardsRendersAPlatformTemplateForADeclaredPlatform()
+    public async Task KyberStandardsRendersAPlatformTemplateForADeclaredPlatform()
     {
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
         _host.Files.CreateDirectory(Path.GetDirectoryName(configPath)!);
@@ -197,7 +197,7 @@ public class DocsInitTemplateChoiceTests
                 - github
             """);
 
-        Scaffolding.Scaffold(_host.Repo, kyberStandards: true);
+        await Scaffolding.ScaffoldAsync(_host.Repo, kyberStandards: true);
 
         Assert.Equal(
             Templates.RenderPart(
@@ -211,7 +211,7 @@ public class DocsInitTemplateChoiceTests
     /// the flag, so asking for one folder does not restyle every other one.
     /// </summary>
     [Fact]
-    public void NamingOneTechnologyDoesNotGiveAPreexistingTechnologyItsTemplate()
+    public async Task NamingOneTechnologyDoesNotGiveAPreexistingTechnologyItsTemplate()
     {
         string configPath = PathOf(".kyber-weave/kyber-weave.yml");
         _host.Files.CreateDirectory(Path.GetDirectoryName(configPath)!);
@@ -227,7 +227,7 @@ public class DocsInitTemplateChoiceTests
             Path.Combine(folder, "csharp.standards.md"),
             "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n");
 
-        Scaffolding.Scaffold(_host.Repo, standards: ["python"]);
+        await Scaffolding.ScaffoldAsync(_host.Repo, standards: ["python"]);
 
         string rules = _host.Files.ReadAllText(PathOf("docs/standards/csharp/csharp.rules.md"));
         Assert.NotEqual(
@@ -242,9 +242,9 @@ public class DocsInitTemplateChoiceTests
     /// both: the second choice is not a replacement for the first.
     /// </summary>
     [Fact]
-    public void NamingARoleBesideKyberStandardsInstallsBoth()
+    public async Task NamingARoleBesideKyberStandardsInstallsBoth()
     {
-        Scaffolding.Scaffold(_host.Repo, kyberStandards: true, standards: ["reviewer"]);
+        await Scaffolding.ScaffoldAsync(_host.Repo, kyberStandards: true, standards: ["reviewer"]);
 
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
         Assert.True(_host.Files.FileExists(PathOf("docs/standards/csharp/csharp.standards.md")));
@@ -254,18 +254,18 @@ public class DocsInitTemplateChoiceTests
     }
 
     [Fact]
-    public void AnUnknownNameIsRefusedWithTheNearestMatch()
+    public async Task AnUnknownNameIsRefusedWithTheNearestMatch()
     {
-        ArgumentException error = Assert.Throws<ArgumentException>(() =>
-            Scaffolding.Scaffold(_host.Repo, standards: ["cshar"]));
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            Scaffolding.ScaffoldAsync(_host.Repo, standards: ["cshar"]));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void KyberStandardsStillInstallsEveryTechnologyTemplate()
+    public async Task KyberStandardsStillInstallsEveryTechnologyTemplate()
     {
-        Scaffolding.Scaffold(_host.Repo, kyberStandards: true);
+        await Scaffolding.ScaffoldAsync(_host.Repo, kyberStandards: true);
 
         foreach (string technology in KyberStandardsTemplates.All)
         {

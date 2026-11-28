@@ -12,45 +12,51 @@ public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphI
     private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(100);
 
     /// <inheritdoc />
-    public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
+    public async Task<CodeGraphIndexLockAttempt> TryAcquireLockAsync(
+        string path,
+        TimeSpan wait,
+        CancellationToken cancellationToken = default)
     {
-        failure = null;
         long started = time.GetTimestamp();
         while (true)
         {
+            FileStream? held = null;
             try
             {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                held = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                CodeGraphIndexLockAttempt attempt = new(held, Failure: null);
+                held = null;
+                return attempt;
             }
             catch (DirectoryNotFoundException)
             {
                 // A missing lock directory is not contention, and retrying it until the deadline would only delay
                 // the same answer.
-                failure = $"the index lock directory for '{path}' does not exist";
-                return null;
+                return new CodeGraphIndexLockAttempt(null, $"the index lock directory for '{path}' does not exist");
             }
             catch (PathTooLongException)
             {
-                failure = $"the index lock path '{path}' is too long";
-                return null;
+                return new CodeGraphIndexLockAttempt(null, $"the index lock path '{path}' is too long");
             }
             catch (IOException ex) when (IsSharingViolation(ex) && time.GetElapsedTime(started) < wait)
             {
-                Task.Delay(LockPollInterval, time).GetAwaiter().GetResult();
+                await Task.Delay(LockPollInterval, time, cancellationToken).ConfigureAwait(false);
             }
             catch (IOException ex) when (IsSharingViolation(ex))
             {
-                return null;
+                return new CodeGraphIndexLockAttempt(null, Failure: null);
             }
             catch (IOException ex)
             {
-                failure = $"the index lock '{path}' could not be opened: {ex.Message}";
-                return null;
+                return new CodeGraphIndexLockAttempt(null, $"the index lock '{path}' could not be opened: {ex.Message}");
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or NotSupportedException or ArgumentException)
             {
-                failure = $"the index lock '{path}' could not be opened";
-                return null;
+                return new CodeGraphIndexLockAttempt(null, $"the index lock '{path}' could not be opened");
+            }
+            finally
+            {
+                DisposeHeld(held);
             }
         }
     }
@@ -95,6 +101,8 @@ public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphI
             return false;
         }
     }
+
+    private static void DisposeHeld(FileStream? held) => held?.Dispose();
 
     /// <summary>
     ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.

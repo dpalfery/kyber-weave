@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using Xunit;
@@ -61,6 +63,24 @@ public abstract class ProcessRunnerContractTests : IDisposable
     /// <param name="name">The file name.</param>
     /// <param name="content">The content the probe reads back.</param>
     protected abstract void PrepareWorkingDirectoryFile(string name, string content);
+
+    /// <summary>Builds the <see cref="ProcessStartInfo"/> twin of a request for the async role-view contract.</summary>
+    /// <param name="request">The request the probe would run.</param>
+    /// <returns>The start info the async role view accepts.</returns>
+    private static ProcessStartInfo StartInfoFor(ProcessRunRequest request)
+    {
+        ProcessStartInfo startInfo = new(request.Program)
+        {
+            WorkingDirectory = request.WorkingDirectory ?? string.Empty
+        };
+
+        foreach (string argument in request.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return startInfo;
+    }
 
     /// <summary>Releases anything the implementation under test created.</summary>
     public void Dispose()
@@ -215,6 +235,30 @@ public abstract class ProcessRunnerContractTests : IDisposable
             () => CreateRunner().RunAsync(request, CancellationToken.None));
 
         Assert.Contains("working directory not found", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheAsyncStartInfoViewReportsAMissingProgramAsAWin32StartFailure()
+    {
+        ProcessRunRequest request = Probe([ProcessProbeProgram.Echo, "hello"]) with { Program = MissingProgram };
+
+        Win32Exception exception = await Assert.ThrowsAsync<Win32Exception>(
+            () => CreateRunner().RunAsync(StartInfoFor(request), string.Empty, timeout: null, CancellationToken.None));
+
+        Assert.Equal(2, exception.NativeErrorCode);
+        Assert.Contains("command not found", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheAsyncStartInfoViewReportsATimeoutAsATimeoutException()
+    {
+        TimeSpan timeout = TimeSpan.FromSeconds(1);
+        ProcessRunRequest request = Probe([ProcessProbeProgram.Sleep, "10000"], timeout: timeout);
+
+        TimeoutException exception = await Assert.ThrowsAsync<TimeoutException>(
+            () => CreateRunner().RunAsync(StartInfoFor(request), string.Empty, timeout, CancellationToken.None));
+
+        Assert.Contains("did not exit", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

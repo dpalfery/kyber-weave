@@ -17,7 +17,7 @@ public sealed class ArbiterGlobalHookRefreshTests
     private readonly InMemorySquadState _state = new();
 
     [Fact]
-    public void Items13And14_ArbiterHookRefresher_FileShimTargetsAndReceiptUpdate()
+    public async Task Items13And14_ArbiterHookRefresher_FileShimTargetsAndReceiptUpdate()
     {
         string home = _state.UserPaths.HomeDirectory;
         FileUserHostConfigStore userConfig = new(_state.Files);
@@ -72,7 +72,7 @@ public sealed class ArbiterGlobalHookRefreshTests
             new FakeMcpWiringService(),
             log.Add);
 
-        ArbiterHookRefreshResult refreshResult = refresher.Refresh([]);
+        ArbiterHookRefreshResult refreshResult = await refresher.RefreshAsync([]);
         Assert.Equal(5, refreshResult.Refreshed);
 
         Assert.Contains("kilo", _state.Files.ReadAllText(kiloHook), StringComparison.Ordinal);
