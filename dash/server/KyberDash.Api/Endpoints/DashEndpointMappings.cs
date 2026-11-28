@@ -50,59 +50,59 @@ public static class DashEndpointMappings
         endpoints.MapGet("/api/events", StreamEventsAsync);
 
         RouteGroupBuilder kyber = endpoints.MapGroup("/api/kyber");
-        kyber.MapGet("/sessions", SessionsAsync);
-        kyber.MapGet("/session", SessionsAsync);
-        kyber.MapGet("/session/{id}/summary", SessionSummaryAsync);
-        kyber.MapGet("/session/{id}/charts", SessionChartsAsync);
-        kyber.MapGet("/session/{id}/requests", SessionRequestsAsync);
-        kyber.MapGet("/session/{id}/reconciliation", SessionReconciliationAsync);
-        kyber.MapGet("/session/{id}/problems", SessionProblemsAsync);
-        kyber.MapGet("/session/{id}/tools", SessionToolsAsync);
-        kyber.MapGet("/session/{id}/servers", SessionServersAsync);
-        kyber.MapGet("/session/{id}/skills", SessionSkillsAsync);
-        kyber.MapGet("/session/{id}/kw-skills", SessionKwSkillsAsync);
-        kyber.MapGet("/session/{id}/timeline", SessionTimelineAsync);
-        kyber.MapGet("/session/{id}/content", SessionContentAsync);
-        kyber.MapGet("/session/{id}/subagents", SessionSubagentsAsync);
-        kyber.MapGet("/session/{id}/turn/{index}", TurnFiguresAsync);
-        kyber.MapGet("/session/{id}/turn/{index}/content", TurnContentAsync);
-        kyber.MapGet("/span/{id}/attributes", SpanAttributesAsync);
-        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsInventoryAsync);
-        kyber.MapGet("/session/{sessionKey}/stored-fields/{table}", StoredFieldRowsAsync);
+        kyber.MapGet("/sessions", Sessions);
+        kyber.MapGet("/session", Sessions);
+        kyber.MapGet("/session/{id}/summary", SessionSummary);
+        kyber.MapGet("/session/{id}/charts", SessionCharts);
+        kyber.MapGet("/session/{id}/requests", SessionRequests);
+        kyber.MapGet("/session/{id}/reconciliation", SessionReconciliation);
+        kyber.MapGet("/session/{id}/problems", SessionProblems);
+        kyber.MapGet("/session/{id}/tools", SessionTools);
+        kyber.MapGet("/session/{id}/servers", SessionServers);
+        kyber.MapGet("/session/{id}/skills", SessionSkills);
+        kyber.MapGet("/session/{id}/kw-skills", SessionKwSkills);
+        kyber.MapGet("/session/{id}/timeline", SessionTimeline);
+        kyber.MapGet("/session/{id}/content", SessionContent);
+        kyber.MapGet("/session/{id}/subagents", SessionSubagents);
+        kyber.MapGet("/session/{id}/turn/{index}", TurnFigures);
+        kyber.MapGet("/session/{id}/turn/{index}/content", TurnContent);
+        kyber.MapGet("/span/{id}/attributes", SpanAttributes);
+        kyber.MapGet("/session/{sessionKey}/stored-fields", StoredFieldsInventory);
+        kyber.MapGet("/session/{sessionKey}/stored-fields/{table}", StoredFieldRows);
 
-        kyber.MapGet("/compare", CompareAsync);
-        kyber.MapGet("/compare/runs", CompareRunsAsync);
+        kyber.MapGet("/compare", Compare);
+        kyber.MapGet("/compare/runs", CompareRuns);
 
-        kyber.MapGet("/quarantine", QuarantineAsync);
-        kyber.MapGet("/quarantine/{spanId}", QuarantineDetailAsync);
-        kyber.MapGet("/problems", ProblemsAsync);
-        kyber.MapGet("/problem/{id}", ProblemDetailAsync);
+        kyber.MapGet("/quarantine", Quarantine);
+        kyber.MapGet("/quarantine/{spanId}", QuarantineDetail);
+        kyber.MapGet("/problems", Problems);
+        kyber.MapGet("/problem/{id}", ProblemDetail);
 
-        kyber.MapGet("/meta", MetaAsync);
-        kyber.MapGet("/version", VersionAsync);
-        kyber.MapGet("/coverage", CoverageAsync);
-        kyber.MapGet("/report", ReportAsync);
-        kyber.MapGet("/findings", FindingsAsync);
-        kyber.MapGet("/finding/{findingId}", FindingDetailAsync);
-        kyber.MapGet("/predictions", PredictionsAsync);
+        kyber.MapGet("/meta", Meta);
+        kyber.MapGet("/version", Version);
+        kyber.MapGet("/coverage", Coverage);
+        kyber.MapGet("/report", Report);
+        kyber.MapGet("/findings", Findings);
+        kyber.MapGet("/finding/{findingId}", FindingDetail);
+        kyber.MapGet("/predictions", Predictions);
         kyber.MapPost("/predictions", RecordPredictionAsync);
-        kyber.MapGet("/calibration", CalibrationAsync);
-        kyber.MapGet("/harnesses", HarnessesAsync);
-        kyber.MapGet("/harness/{id}", HarnessDetailAsync);
-        kyber.MapGet("/runs", RunsAsync);
-        kyber.MapGet("/run/{id}", RunDetailAsync);
-        kyber.MapGet("/timeline", TimelineAsync);
+        kyber.MapGet("/calibration", Calibration);
+        kyber.MapGet("/harnesses", Harnesses);
+        kyber.MapGet("/harness/{id}", HarnessDetail);
+        kyber.MapGet("/runs", Runs);
+        kyber.MapGet("/run/{id}", RunDetail);
+        kyber.MapGet("/timeline", Timeline);
 
         kyber.MapGet("/review/status", ReviewStatus);
-        kyber.MapPost("/review", ReviewAsync);
+        kyber.MapPost("/review", Review);
 
-        kyber.MapGet("/model-catalog", ModelCatalogAsync);
-        kyber.MapPost("/model-catalog/refresh", ModelCatalogRefreshAsync);
+        kyber.MapGet("/model-catalog", ModelCatalog);
+        kyber.MapPost("/model-catalog/refresh", ModelCatalogRefresh);
 
         kyber.MapGet("/capture", CaptureStatus);
         kyber.MapPost("/capture", CaptureConfigureAsync);
 
-        kyber.MapGet("/settings", SettingsAsync);
+        kyber.MapGet("/settings", Settings);
         kyber.MapPut("/settings", UpdateSettingsAsync);
 
         kyber.MapGet("/jobs", JobsStatus);
@@ -125,8 +125,8 @@ public static class DashEndpointMappings
         // and `/favicon.ico` then match no endpoint at all, so the SPA's own bundle 404s and the
         // browser never boots the app. The catch-all below carries the intent deliberately; it is
         // still a fallback (order int.MaxValue), so `/api/*` and `/healthz` answer first. A missing
-        // file or asset is a 404, as ServeSpaAsync enforces, not a rewritten app shell.
-        endpoints.MapFallback("/{*path}", ServeSpaAsync);
+        // file or asset is a 404, as ServeSpa enforces, not a rewritten app shell.
+        endpoints.MapFallback("/{*path}", ServeSpa);
     }
 
     private static async Task StreamEventsAsync(
@@ -191,7 +191,7 @@ public static class DashEndpointMappings
         }
     }
 
-    private static async Task<IResult> SessionsAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Sessions(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -202,12 +202,11 @@ public static class DashEndpointMappings
 
         string? harness = DashHttp.NormalizeFilter(DashHttp.OptionalQueryString(request.Query, "harness"));
         string? search = DashHttp.OptionalQueryString(request.Query, "q");
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSessionPage(page, limit, harness, search)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSessionPage(page, limit, harness, search));
     }
 
-    private static async Task<IResult> SessionSubagentsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionSubagents(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -216,9 +215,8 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSubagentPage(id, page, limit)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetSubagentPage(id, page, limit));
     }
 
     /// <summary>
@@ -287,15 +285,14 @@ public static class DashEndpointMappings
         DashHttp.OptionalNonNegativeInt(query, "offset") is not int rawOffset
         || rawOffset == (long)(page - 1) * limit;
 
-    private static async Task<IResult> SessionSummaryAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionSummary(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetSessionSummary(id), "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetSessionSummary(id), "Session not found");
     }
 
-    private static async Task<IResult> SessionChartsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionCharts(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -304,14 +301,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionCharts(id, page, limit, order) is { } charts
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionCharts(id, page, limit, order) is { } charts
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, charts)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionRequestsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionRequests(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -320,14 +316,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionRequests(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionRequests(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionReconciliationAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionReconciliation(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -336,14 +331,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionReconciliation(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionReconciliation(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionProblemsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionProblems(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -352,14 +346,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionProblems(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionProblems(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionToolsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionTools(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -368,14 +361,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionTools(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionTools(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionServersAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionServers(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -384,14 +376,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionServers(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionServers(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionSkillsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionSkills(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -400,14 +391,13 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionSkills(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionSkills(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionKwSkillsAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionKwSkills(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -416,11 +406,10 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetSessionKwSkills(id, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionKwSkills(id, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
     /// <summary>
@@ -429,7 +418,7 @@ public static class DashEndpointMappings
     /// container (<c>%28auxiliary%29</c>), so it is read through the query collection, which hands
     /// the decoded id to the service.
     /// </summary>
-    private static async Task<IResult> SessionTimelineAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionTimeline(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -439,14 +428,13 @@ public static class DashEndpointMappings
             return refusal;
 
         string? parent = DashHttp.OptionalQueryString(request.Query, "parent");
-        return await Task.Run<IResult>(
-            () => query.GetSessionTimeline(id, parent, page, limit, order) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetSessionTimeline(id, parent, page, limit, order) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session not found");
     }
 
-    private static async Task<IResult> SessionContentAsync(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SessionContent(HttpRequest request, string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -455,23 +443,21 @@ public static class DashEndpointMappings
         string? spanId = DashHttp.OptionalQueryString(request.Query, "span");
         string? part = DashHttp.OptionalQueryString(request.Query, "part");
         bool full = DashHttp.IsTruthy(DashHttp.OptionalQueryString(request.Query, "full"));
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetSessionContent(id, turn, spanId, part, full), "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetSessionContent(id, turn, spanId, part, full), "Session not found");
     }
 
-    private static async Task<IResult> TurnFiguresAsync(string id, string index, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult TurnFigures(string id, string index, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
         if (!int.TryParse(index, NumberStyles.None, CultureInfo.InvariantCulture, out int turnIndex))
             return DashHttp.Error(StatusCodes.Status400BadRequest, "Invalid turn index");
 
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetTurnFigures(id, turnIndex), "Turn not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetTurnFigures(id, turnIndex), "Turn not found");
     }
 
-    private static async Task<IResult> TurnContentAsync(
+    private static IResult TurnContent(
         HttpRequest request,
         string id,
         string index,
@@ -493,28 +479,25 @@ public static class DashEndpointMappings
 
         int budget = Math.Clamp(requestedBudget ?? DefaultSessionContentBudget, 1, DefaultSessionContentBudget);
         bool full = DashHttp.IsTruthy(DashHttp.OptionalQueryString(request.Query, "full"));
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetTurnContent(id, turnIndex, budget, full), "Turn not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetTurnContent(id, turnIndex, budget, full), "Turn not found");
     }
 
-    private static async Task<IResult> SpanAttributesAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult SpanAttributes(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetSpanAttributes(id), "Span not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetSpanAttributes(id), "Span not found");
     }
 
-    private static async Task<IResult> StoredFieldsInventoryAsync(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult StoredFieldsInventory(string sessionKey, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetStoredFieldsInventory(sessionKey), "Session not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetStoredFieldsInventory(sessionKey), "Session not found");
     }
 
-    private static async Task<IResult> StoredFieldRowsAsync(HttpRequest request, string sessionKey, string table, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult StoredFieldRows(HttpRequest request, string sessionKey, string table, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -523,22 +506,20 @@ public static class DashEndpointMappings
         if (refusal is not null)
             return refusal;
 
-        return await Task.Run<IResult>(
-            () => query.GetStoredFieldRows(sessionKey, table, page, limit) is { } payload
+        cancellationToken.ThrowIfCancellationRequested();
+        return query.GetStoredFieldRows(sessionKey, table, page, limit) is { } payload
                 ? DashHttp.NoStoreJson(StatusCodes.Status200OK, payload)
-                : DashHttp.Error(StatusCodes.Status404NotFound, "Session or table not found"),
-            cancellationToken).ConfigureAwait(false);
+                : DashHttp.Error(StatusCodes.Status404NotFound, "Session or table not found");
     }
 
-    private static async Task<IResult> CompareAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Compare(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetCompare()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetCompare());
     }
 
-    private static async Task<IResult> CompareRunsAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult CompareRuns(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -556,12 +537,11 @@ public static class DashEndpointMappings
                 "completedPairCount is not accepted: recommendation history is not caller-supplied (issue #190)");
         }
 
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetCompareRuns(runA, runB), "Run not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetCompareRuns(runA, runB), "Run not found");
     }
 
-    private static async Task<IResult> QuarantineAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Quarantine(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -571,20 +551,18 @@ public static class DashEndpointMappings
         if (invalidPaging)
             return DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage);
 
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetQuarantinePage(harness, limit, offset, page)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetQuarantinePage(harness, limit, offset, page));
     }
 
-    private static async Task<IResult> QuarantineDetailAsync(string spanId, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult QuarantineDetail(string spanId, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetQuarantineDetail(spanId), "Quarantine entry not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetQuarantineDetail(spanId), "Quarantine entry not found");
     }
 
-    private static async Task<IResult> ProblemsAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Problems(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -594,44 +572,39 @@ public static class DashEndpointMappings
         if (invalidPaging)
             return DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage);
 
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetProblemsPage(harness, limit, offset, page)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetProblemsPage(harness, limit, offset, page));
     }
 
-    private static async Task<IResult> ProblemDetailAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult ProblemDetail(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetProblemDetail(id), "Problem not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetProblemDetail(id), "Problem not found");
     }
 
-    private static async Task<IResult> MetaAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Meta(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetMeta()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetMeta());
     }
 
-    private static async Task<IResult> VersionAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Version(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetVersion()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetVersion());
     }
 
-    private static async Task<IResult> CoverageAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Coverage(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetCoverage()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetCoverage());
     }
 
-    private static async Task<IResult> ReportAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Report(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -650,12 +623,11 @@ public static class DashEndpointMappings
 
         int days = parsedDays ?? 7;
 
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit, days)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetReport(harness, sessionId, runId, limit, days));
     }
 
-    private static async Task<IResult> FindingsAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Findings(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -668,34 +640,28 @@ public static class DashEndpointMappings
         if (invalidPaging)
             return DashHttp.Error(StatusCodes.Status400BadRequest, PagingInvalidMessage);
 
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetFindings(runId, sessionId, detector, harness, limit, offset)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetFindings(runId, sessionId, detector, harness, limit, offset));
     }
 
-    private static async Task<IResult> FindingDetailAsync(string findingId, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult FindingDetail(string findingId, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () =>
-            {
-                Finding? finding = query.GetFindingById(findingId);
-                return finding is not null
-                    ? DashHttp.NoStoreJson(StatusCodes.Status200OK, finding)
-                    : DashHttp.Error(StatusCodes.Status404NotFound, "Finding not found");
-            },
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        Finding? finding = query.GetFindingById(findingId);
+        return finding is not null
+            ? DashHttp.NoStoreJson(StatusCodes.Status200OK, finding)
+            : DashHttp.Error(StatusCodes.Status404NotFound, "Finding not found");
     }
 
-    private static async Task<IResult> PredictionsAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Predictions(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
         string? runId = DashHttp.OptionalQueryString(request.Query, "runId");
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetPredictions(runId)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetPredictions(runId));
     }
 
     private static async Task<IResult> RecordPredictionAsync(
@@ -713,19 +679,15 @@ public static class DashEndpointMappings
         if (!ok)
             return JsonBodyFailure(failure);
 
-        return await Task.Run<IResult>(
-            () =>
-            {
-                if (!query.TryRecordPrediction(body, out PredictionRow? created, out string? error))
-                    return DashHttp.Error(StatusCodes.Status400BadRequest, error ?? "Invalid prediction");
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!query.TryRecordPrediction(body, out PredictionRow? created, out string? error))
+            return DashHttp.Error(StatusCodes.Status400BadRequest, error ?? "Invalid prediction");
 
-                // A successful record always carries a row; a query stub may return none, which the
-                // endpoint has always answered as a created response with a null body.
-                return created is { } row
-                    ? DashHttp.NoStoreJson(StatusCodes.Status201Created, row)
-                    : DashHttp.NoStoreJson(StatusCodes.Status201Created, JsonSerializer.SerializeToElement<object?>(null));
-            },
-            cancellationToken).ConfigureAwait(false);
+        // A successful record always carries a row; a query stub may return none, which the
+        // endpoint has always answered as a created response with a null body.
+        return created is { } row
+            ? DashHttp.NoStoreJson(StatusCodes.Status201Created, row)
+            : DashHttp.NoStoreJson(StatusCodes.Status201Created, JsonSerializer.SerializeToElement<object?>(null));
     }
 
     /// <summary>
@@ -735,58 +697,52 @@ public static class DashEndpointMappings
     private static IResult JsonBodyFailure(IResult? failure) =>
         failure ?? throw new InvalidOperationException("A failed JSON body read must carry an error response.");
 
-    private static async Task<IResult> CalibrationAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Calibration(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetCalibration()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetCalibration());
     }
 
-    private static async Task<IResult> HarnessesAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Harnesses(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetHarnesses()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetHarnesses());
     }
 
-    private static async Task<IResult> HarnessDetailAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult HarnessDetail(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetHarnessById(id), "Harness not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetHarnessById(id), "Harness not found");
     }
 
-    private static async Task<IResult> RunsAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Runs(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
         string? harness = DashHttp.OptionalQueryString(request.Query, "harness");
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetRuns(harness)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetRuns(harness));
     }
 
-    private static async Task<IResult> RunDetailAsync(string id, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult RunDetail(string id, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.FromNullableJson(query.GetRunById(id), "Run not found"),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.FromNullableJson(query.GetRunById(id), "Run not found");
     }
 
-    private static async Task<IResult> TimelineAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Timeline(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
 
         string? sessionId = DashHttp.OptionalQueryString(request.Query, "sessionId");
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetTimeline(sessionId)),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetTimeline(sessionId));
     }
 
     /// <summary>
@@ -796,7 +752,7 @@ public static class DashEndpointMappings
     private static IResult ReviewStatus() =>
         DashHttp.NoStoreJson(StatusCodes.Status200OK, new { state = "idle" });
 
-    private static async Task<IResult> ReviewAsync(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult Review(HttpRequest request, IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(query);
@@ -804,24 +760,19 @@ public static class DashEndpointMappings
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, MutationForbiddenMessage);
 
-        return await Task.Run<IResult>(
-            () =>
-            {
-                query.EnsureProjected();
-                return DashHttp.NoStoreJson(StatusCodes.Status200OK, new { state = "idle", ok = true });
-            },
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        query.EnsureProjected();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, new { state = "idle", ok = true });
     }
 
-    private static async Task<IResult> ModelCatalogAsync(IDashboardQueryService query, CancellationToken cancellationToken)
+    private static IResult ModelCatalog(IDashboardQueryService query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetModelCatalog()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, query.GetModelCatalog());
     }
 
-    private static async Task<IResult> ModelCatalogRefreshAsync(
+    private static IResult ModelCatalogRefresh(
         HttpRequest request,
         IDashboardQueryService query,
         CancellationToken cancellationToken)
@@ -830,7 +781,7 @@ public static class DashEndpointMappings
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, MutationForbiddenMessage);
 
-        return await ModelCatalogAsync(query, cancellationToken).ConfigureAwait(false);
+        return ModelCatalog(query, cancellationToken);
     }
 
     private static IResult CaptureStatus(ICaptureService capture, DashRuntimeSettings runtime)
@@ -874,12 +825,11 @@ public static class DashEndpointMappings
         return DashHttp.NoStoreJson(StatusCodes.Status200OK, new { ok = true, receiverHosted = updated.ReceiverHosted });
     }
 
-    private static async Task<IResult> SettingsAsync(ISettingsService settings, CancellationToken cancellationToken)
+    private static IResult Settings(ISettingsService settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        return await Task.Run<IResult>(
-            () => DashHttp.NoStoreJson(StatusCodes.Status200OK, settings.GetSettings()),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, settings.GetSettings());
     }
 
     private static async Task<IResult> UpdateSettingsAsync(
@@ -899,9 +849,8 @@ public static class DashEndpointMappings
 
         try
         {
-            return await Task.Run<IResult>(
-                () => DashHttp.NoStoreJson(StatusCodes.Status200OK, settings.UpdateSettings(patch)),
-                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+        return DashHttp.NoStoreJson(StatusCodes.Status200OK, settings.UpdateSettings(patch));
         }
         catch (DashValidationException ex)
         {
@@ -993,9 +942,8 @@ public static class DashEndpointMappings
         CleanScope scope = ParseCleanScope(body);
         try
         {
-            CleanReport report = await Task.Run(
-                () => clean.CleanDatabase(scope, collector.PauseIngestion, collector.ResumeIngestion),
-                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            CleanReport report = clean.CleanDatabase(scope, collector.PauseIngestion, collector.ResumeIngestion);
             return DashHttp.NoStoreJson(StatusCodes.Status200OK, report);
         }
         catch (ArgumentException ex)
@@ -1029,20 +977,18 @@ public static class DashEndpointMappings
         return new CleanScope(All: all, Harnesses: harnesses, ReingestWeeks: reingestWeeks);
     }
 
-    private static async Task<IResult> AnalyticsStatus(IAnalyticsService analytics, CancellationToken cancellationToken)
+    private static IResult AnalyticsStatus(IAnalyticsService analytics, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(analytics);
-        return await Task.Run<IResult>(
-            () => AnalyticsResult("status", analytics, request: null),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return AnalyticsResult("status", analytics, request: null);
     }
 
-    private static async Task<IResult> AnalyticsCatalog(IAnalyticsService analytics, CancellationToken cancellationToken)
+    private static IResult AnalyticsCatalog(IAnalyticsService analytics, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(analytics);
-        return await Task.Run<IResult>(
-            () => AnalyticsResult("catalog", analytics, request: null),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return AnalyticsResult("catalog", analytics, request: null);
     }
 
     private static async Task<IResult> AnalyticsPostAsync(
@@ -1068,9 +1014,8 @@ public static class DashEndpointMappings
             body = parsed;
         }
 
-        return await Task.Run<IResult>(
-            () => AnalyticsResult(operation, analytics, body),
-            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return AnalyticsResult(operation, analytics, body);
     }
 
     /// <summary>
@@ -1091,7 +1036,7 @@ public static class DashEndpointMappings
         }
     }
 
-    private static async Task<IResult> ServeSpaAsync(
+    private static IResult ServeSpa(
         HttpContext context,
         IWebAssetService assets,
         DashRuntimeSettings runtime,
@@ -1115,9 +1060,8 @@ public static class DashEndpointMappings
         WebAssetDocument? document;
         try
         {
-            document = await Task.Run(
-                () => assets.TryResolveAsset(path, runtime.DashboardDirectory),
-                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            document = assets.TryResolveAsset(path, runtime.DashboardDirectory);
 
             // A request for a file must be answered with that file or with 404: the asset service
             // answers an unknown key with index.html, and handing HTML to an import of
