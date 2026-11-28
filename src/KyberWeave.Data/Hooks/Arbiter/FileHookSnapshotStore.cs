@@ -36,7 +36,7 @@ public sealed class FileHookSnapshotStore(IWritableFileSystem files, TimeProvide
                 }
                 catch (IOException) when (time.GetElapsedTime(started) < LockWindow)
                 {
-                    Task.Delay(backoff, time).GetAwaiter().GetResult();
+                    Pause(time, backoff);
                     backoff = TimeSpan.FromMilliseconds(Math.Min(50, backoff.TotalMilliseconds * 2));
                     continue;
                 }
@@ -77,6 +77,17 @@ public sealed class FileHookSnapshotStore(IWritableFileSystem files, TimeProvide
             // Snapshot persistence is best-effort; on failure the fact stays absent so the
             // rule stops and asks instead of judging a diff the dispatch never appeared in.
         }
+    }
+
+    /// <summary>
+    ///     Blocks the calling thread for <paramref name="delay" /> on the store's clock. A synchronous caller waits on
+    ///     a timer rather than on a Task; the controlled test clock fires the timer as soon as it is created.
+    /// </summary>
+    private static void Pause(TimeProvider clock, TimeSpan delay)
+    {
+        using ManualResetEventSlim reached = new(false);
+        using ITimer timer = clock.CreateTimer(_ => reached.Set(), null, delay, Timeout.InfiniteTimeSpan);
+        reached.Wait(Timeout.InfiniteTimeSpan);
     }
 
     /// <inheritdoc/>

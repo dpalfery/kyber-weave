@@ -9,11 +9,12 @@ namespace KyberWeave.Contracts.Services;
 /// </summary>
 public interface IArbiterServeService
 {
-    /// <summary>Evaluates one event and returns the outcome the hook would return for it.</summary>
+    /// <summary>Evaluates one event and returns the outcome the hook would return for it, without blocking a thread.</summary>
     /// <param name="trigger">The trigger the event classifies as.</param>
     /// <param name="facts">The facts the caller asserts about the event.</param>
+    /// <param name="cancellationToken">Cancels the evaluation.</param>
     /// <returns>The provenance line, the outcome and, for a non-allow, the escalation envelope or note.</returns>
-    string Evaluate(string trigger, ArbiterFacts facts);
+    Task<string> EvaluateAsync(string trigger, ArbiterFacts facts, CancellationToken cancellationToken = default);
 
     /// <summary>Lists the effective rules.</summary>
     /// <param name="trigger">A trigger to list the rules of, or null for every trigger.</param>

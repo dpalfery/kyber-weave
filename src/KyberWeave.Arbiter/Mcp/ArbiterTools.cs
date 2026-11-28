@@ -18,12 +18,13 @@ public sealed class ArbiterTools(IArbiterServeService service)
     [Description("""
         Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refute.spawn refutations. Pass the trigger the event classifies as and the asserted facts: target, plan-file, task, prompt, the lens names as lens, the findings to be refuted as finding, the phase and the output. A lens call or a finding call needs no target: the tool routes both to review-lens and synthesizes the routing header block (KYBER-ARBITER, LENS, REFUTE) itself, exactly as the hook path would see it. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
         """)]
-    public string Evaluate(
+    public async Task<string> EvaluateAsync(
         [Description("The trigger the event classifies as, for example delegate, delegate.returned, lens.spawn, refute.spawn or investigate.")]
         string trigger,
         [Description("The asserted facts of the event.")]
-        ArbiterFacts facts)
-        => service.Evaluate(trigger, facts);
+        ArbiterFacts facts,
+        CancellationToken cancellationToken = default)
+        => await service.EvaluateAsync(trigger, facts, cancellationToken).ConfigureAwait(false);
 
     [McpServerTool(Name = "arbiter_list_effective_rules_by_trigger", ReadOnly = true, OpenWorld = false)]
     [Description("""

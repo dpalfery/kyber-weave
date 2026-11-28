@@ -824,8 +824,19 @@ internal sealed class HookGitFacts(
             }
 
             seen = next;
-            Task.Delay(PeekPause, clock).GetAwaiter().GetResult();
+            Pause(clock, PeekPause);
         }
+    }
+
+    /// <summary>
+    ///     Blocks the calling thread for <paramref name="delay" /> on the hook's clock. A synchronous caller waits on
+    ///     a timer rather than on a Task; the controlled test clock fires the timer as soon as it is created.
+    /// </summary>
+    private static void Pause(TimeProvider clock, TimeSpan delay)
+    {
+        using ManualResetEventSlim reached = new(false);
+        using ITimer timer = clock.CreateTimer(_ => reached.Set(), null, delay, Timeout.InfiniteTimeSpan);
+        reached.Wait(Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>

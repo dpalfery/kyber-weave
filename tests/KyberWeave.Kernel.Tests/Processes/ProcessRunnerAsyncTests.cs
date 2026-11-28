@@ -88,19 +88,15 @@ public sealed class ProcessRunnerAsyncTests
     }
 
     [Fact]
-    public async Task ReadToEndAsyncCapturesTheSameOutputAndExitCodeAsReadToEnd()
+    public async Task ReadToEndAsyncCapturesOutputAndExitCode()
     {
-        using Process syncProcess = Start(Probe(ProcessProbeProgram.Both));
-        using Process asyncProcess = Start(Probe(ProcessProbeProgram.Both));
+        using Process process = Start(Probe(ProcessProbeProgram.Both));
 
-        ProcessResult sync = ReadToEndSynchronously(syncProcess);
-        ProcessResult async = await ProcessRunner.ReadToEndAsync(asyncProcess);
+        ProcessResult result = await ProcessRunner.ReadToEndAsync(process);
 
-        Assert.Equal(sync.ExitCode, async.ExitCode);
-        Assert.Equal(sync.StandardOutput, async.StandardOutput);
-        Assert.Equal(sync.StandardError, async.StandardError);
-        Assert.Equal("out", async.StandardOutput);
-        Assert.Equal("err", async.StandardError);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("out", result.StandardOutput);
+        Assert.Equal("err", result.StandardError);
     }
 
     private static ProcessStartInfo Probe(params string[] arguments)
@@ -131,7 +127,4 @@ public sealed class ProcessRunnerAsyncTests
         long? maxOutputBytes = null,
         CancellationToken cancellationToken = default) =>
         ProcessRunner.Run(startInfo, standardInput, timeout, maxOutputBytes, cancellationToken);
-
-    private static ProcessResult ReadToEndSynchronously(Process process) =>
-        ProcessRunner.ReadToEnd(process);
 }
