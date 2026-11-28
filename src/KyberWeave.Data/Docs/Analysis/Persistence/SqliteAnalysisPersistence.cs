@@ -1,5 +1,6 @@
 using KyberWeave.Core.FileSystem;
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -25,6 +26,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private const double NormalizedVectorTolerance = 0.0001;
     private const int BusyAttempts = 3;
+    private const int BusyAttemptTimeoutSeconds = 1;
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
 
@@ -183,13 +185,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         string[] contextualHashes = keys.Select(k => k.ContextualHash).Distinct(StringComparer.Ordinal).ToArray();
         Dictionary<EmbeddingCacheKey, StoredEmbedding> loaded = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
 
-        const int batchSize = 500;
-        for (int i = 0; i < contextualHashes.Length; i += batchSize)
-        {
-            string[] chunk = contextualHashes.Skip(i).Take(batchSize).ToArray();
-            ExecuteSqlite(connection => ReadEmbeddingRows(connection, chunk, requested, loaded));
-        }
-
+        ExecuteSqlite(connection => ReadEmbeddingRows(connection, contextualHashes, requested, loaded));
         return loaded;
     }
 
@@ -199,15 +195,15 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         IReadOnlySet<EmbeddingCacheKey> requested,
         IDictionary<EmbeddingCacheKey, StoredEmbedding> loaded)
     {
-        foreach (string contextualHash in contextualHashes)
         {
+            // One statement for every requested hash: the hashes travel as one JSON array parameter, so the
+            // statement binds one variable however many there are. Keys are stored as UTF-8 BLOBs.
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText =
                 "SELECT contextual_hash, provider_fingerprint, model, dimensions, encoding, vector " +
-                "FROM analysis_embeddings WHERE contextual_hash = $contextual_hash;";
-            command.Parameters.AddWithValue(
-                "$contextual_hash",
-                Encoding.UTF8.GetBytes(contextualHash));
+                "FROM analysis_embeddings WHERE contextual_hash IN " +
+                "(SELECT CAST(value AS BLOB) FROM json_each($contextual_hashes));";
+            command.Parameters.AddWithValue("$contextual_hashes", JsonSerializer.Serialize(contextualHashes));
 
             using SqliteDataReader reader = command.ExecuteReader();
             int contextualHashOrdinal = reader.GetOrdinal("contextual_hash");
@@ -234,7 +230,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
                     loaded[key] = new StoredEmbedding(key, vector);
                 }
                 catch (Exception exception) when (
-                    exception is FormatException or ArgumentException or InvalidDataException)
+                    exception is FormatException or ArgumentException or InvalidDataException or InvalidCastException)
                 {
                     throw CorruptCache("An embedding row is invalid.", exception);
                 }
@@ -339,7 +335,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
                 using (SqliteCommand schemaVersion = connection.CreateCommand())
                 {
                     schemaVersion.Transaction = transaction;
-                    // Keep the pragma literal in step with SchemaVersion; CA2100 requires a constant command text.
+                    // The stamp repeats SchemaVersion: a pragma value cannot be a bound parameter, and the command text
+                    // stays a literal. Change both together; AnalysisPersistenceTests fails when they differ.
                     schemaVersion.CommandText = "PRAGMA user_version = 1;";
                     schemaVersion.ExecuteNonQuery();
                 }
@@ -415,15 +412,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         }
 
         Dictionary<string, T> loaded = new Dictionary<string, T>(StringComparer.Ordinal);
-        const int batchSize = 500;
         string[] distinctKeys = requestedKeys.Distinct(StringComparer.Ordinal).ToArray();
-
-        for (int i = 0; i < distinctKeys.Length; i += batchSize)
-        {
-            string[] chunk = distinctKeys.Skip(i).Take(batchSize).ToArray();
-            ExecuteSqlite(connection => ReadPayloadRowsBatch(connection, table, keyColumn, chunk, loaded));
-        }
-
+        ExecuteSqlite(connection => ReadPayloadRowsBatch(connection, table, keyColumn, distinctKeys, loaded));
         return loaded;
     }
 
@@ -434,26 +424,29 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         IReadOnlyList<string> requestedKeys,
         IDictionary<string, T> loaded)
     {
-        foreach (string requestedKey in requestedKeys)
         {
+            // One statement for every requested key, passed as one JSON array parameter (see ReadEmbeddingRows).
             using SqliteCommand command = connection.CreateCommand();
             if (table == "analysis_claims")
             {
                 command.CommandText =
-                    "SELECT id, payload FROM analysis_claims WHERE id = $key;";
+                    "SELECT id, payload FROM analysis_claims WHERE id IN " +
+                    "(SELECT CAST(value AS BLOB) FROM json_each($keys));";
             }
             else if (table == "analysis_candidates")
             {
                 command.CommandText =
-                    "SELECT candidate_id, payload FROM analysis_candidates WHERE candidate_id = $key;";
+                    "SELECT candidate_id, payload FROM analysis_candidates WHERE candidate_id IN " +
+                    "(SELECT CAST(value AS BLOB) FROM json_each($keys));";
             }
             else
             {
                 command.CommandText =
-                    "SELECT candidate_id, payload FROM analysis_verdicts WHERE candidate_id = $key;";
+                    "SELECT candidate_id, payload FROM analysis_verdicts WHERE candidate_id IN " +
+                    "(SELECT CAST(value AS BLOB) FROM json_each($keys));";
             }
 
-            command.Parameters.AddWithValue("$key", Encoding.UTF8.GetBytes(requestedKey));
+            command.Parameters.AddWithValue("$keys", JsonSerializer.Serialize(requestedKeys));
 
             using SqliteDataReader reader = command.ExecuteReader();
             int keyOrdinal = reader.GetOrdinal(keyColumn);
@@ -471,7 +464,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
                     loaded[key] = value;
                 }
                 catch (Exception exception) when (
-                    exception is FormatException or JsonException or NotSupportedException or ArgumentException)
+                    exception is FormatException or JsonException or NotSupportedException or ArgumentException
+                        or InvalidCastException)
                 {
                     throw CorruptCache($"Table '{table}' contains an invalid payload.", exception);
                 }
@@ -542,19 +536,15 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         SqliteConnectionStringBuilder builder = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            // Microsoft.Data.Sqlite retries a busy database for the command timeout, overriding any
+            // busy_timeout pragma, so this is the per-attempt bound: three attempts wait about 3 s in all.
+            DefaultTimeout = BusyAttemptTimeoutSeconds
         };
         SqliteConnection connection = new SqliteConnection(builder.ToString());
         try
         {
             connection.Open();
-            using (SqliteCommand busyTimeout = connection.CreateCommand())
-            {
-                // 250ms per attempt, matching the three bounded attempts below.
-                busyTimeout.CommandText = "PRAGMA busy_timeout = 250;";
-                busyTimeout.ExecuteNonQuery();
-            }
-
             using (SqliteCommand foreignKeys = connection.CreateCommand())
             {
                 foreignKeys.CommandText = "PRAGMA foreign_keys = ON;";
@@ -887,8 +877,8 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         string reason = exception.Message.Trim();
         return reason.Length == 0
-            ? $"sqlite3 exited with code {exception.SqliteErrorCode}."
-            : $"sqlite3 exited with code {exception.SqliteErrorCode}: {reason}";
+            ? $"SQLite error {exception.SqliteErrorCode} on the cache file; check that it and its folder are readable and writable."
+            : $"SQLite error {exception.SqliteErrorCode} on the cache file: {reason}";
     }
 
     private void EnsureAvailable()
@@ -896,7 +886,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable)
         {
             throw new InvalidOperationException(
-                "Analysis persistence is disabled until .kyber-weave/.gitignore contains the exact 'cache/' entry and sqlite3 is available.");
+                "Analysis persistence is disabled until .kyber-weave/.gitignore contains the exact 'cache/' entry and the SQLite library can load.");
         }
     }
 

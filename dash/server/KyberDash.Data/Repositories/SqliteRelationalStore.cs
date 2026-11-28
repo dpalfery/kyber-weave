@@ -887,10 +887,6 @@ public abstract class SqliteRelationalStoreWriteBase : SqliteRelationalStoreRead
         return text;
     }
 
-    /// <summary>Keeps the legacy guarded-text validation on the write path while returning the value to bind.</summary>
-    private protected static readonly Func<string, string, string?, string> GuardedTextExpr =
-        static (tableName, columnName, value) => GuardedText(tableName, columnName, value);
-
     private protected static string LongSql(long value) => value.ToString(CultureInfo.InvariantCulture);
 
     private protected static string BoolSql(bool value) => value ? "1" : "0";
