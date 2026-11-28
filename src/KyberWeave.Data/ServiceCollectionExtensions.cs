@@ -69,14 +69,16 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton(sp => new CodeGraphIndexStaleness(
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IProgramRunner>()));
+            // IProcessRunner: the staleness rule's async read needs it, and it is also the IProgramRunner view.
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
         services.TryAddSingleton(sp => new AnalysisCacheSafety(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>(),
-            sp.GetRequiredService<IBoundedProcessExecutor>()));
+            // IProcessRunner: the async safety check needs it, and it is also the IBoundedProcessExecutor view.
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<IAnalysisPersistenceFactory, SqliteAnalysisPersistenceFactory>();
         services.TryAddSingleton<IEmbeddingTransport, LoopbackEmbeddingTransport>();
         services.TryAddSingleton<IEmbeddingGeneratorFactory, OpenAiCompatibleEmbeddingGeneratorFactory>();
