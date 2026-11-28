@@ -25,6 +25,17 @@ public sealed partial class PlanTaskService(
             .Run(artifactPath, mode);
 
     /// <inheritdoc />
+    public Task<PlanTaskFileOutcome> RunAsync(
+        string repoRoot,
+        KyberWeaveConfig config,
+        string artifactPath,
+        PlanTaskFileMode mode,
+        IPlanTaskAgentPicker? picker = null,
+        CancellationToken cancellationToken = default) =>
+        new PlanTaskFileGenerator(paths.GetFullPath(repoRoot, environment.CurrentDirectory), config, files, picker)
+            .RunAsync(artifactPath, mode, cancellationToken);
+
+    /// <inheritdoc />
     public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config) =>
         Plans(repoRoot, config, PlanStatus.IsActive);
 

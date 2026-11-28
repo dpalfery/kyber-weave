@@ -77,6 +77,15 @@ public sealed class TaskPromptFileOverSeamTests
             PlanTaskFileMode mode,
             IPlanTaskAgentPicker? picker = null) =>
             throw new NotSupportedException();
+
+        public Task<PlanTaskFileOutcome> RunAsync(
+            string repoRoot,
+            KyberWeaveConfig config,
+            string artifactPath,
+            PlanTaskFileMode mode,
+            IPlanTaskAgentPicker? picker = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class UnusedHostFacts : IPacketHostFacts

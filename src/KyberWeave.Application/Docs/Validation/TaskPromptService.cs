@@ -156,13 +156,55 @@ public sealed class TaskPromptService(
         PlanTaskFileEntry? entry = null;
         if (taskId is not null)
         {
-            TaskPromptResult? entryRefusal = ResolveEntry(request, config, root, taskId, out entry);
-            if (entryRefusal is not null)
+            EntryResolution resolved = ResolveEntry(request, config, root, taskId);
+            if (resolved.Refusal is not null)
             {
-                return entryRefusal;
+                return resolved.Refusal;
             }
+
+            entry = resolved.Entry;
         }
 
+        return BuildFor(request, config, root, taskId, entry);
+    }
+
+    /// <inheritdoc />
+    public async Task<TaskPromptResult> BuildAsync(
+        TaskPromptRequest request,
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.RepoRoot);
+
+        string root = Path.GetFullPath(request.RepoRoot, environment.CurrentDirectory);
+        string? taskId = Clean(request.TaskId);
+
+        PlanTaskFileEntry? entry = null;
+        if (taskId is not null)
+        {
+            EntryResolution resolved = await ResolveEntryAsync(request, config, root, taskId, cancellationToken)
+                .ConfigureAwait(false);
+            if (resolved.Refusal is not null)
+            {
+                return resolved.Refusal;
+            }
+
+            entry = resolved.Entry;
+        }
+
+        return BuildFor(request, config, root, taskId, entry);
+    }
+
+    /// <summary>The prompt once the request's task, if it names one, has been resolved to its checked task-file entry.</summary>
+    private TaskPromptResult BuildFor(
+        TaskPromptRequest request,
+        KyberWeaveConfig config,
+        string root,
+        string? taskId,
+        PlanTaskFileEntry? entry)
+    {
         string? technology = Clean(entry?.Technology) ?? Clean(request.Technology);
         // The retry's failure report is delivered in the same dispatch, after this prompt, so the budget reserves
         // room for it: cutting the prompt to the budget alone would overshoot by the report's length.
@@ -232,23 +274,19 @@ public sealed class TaskPromptService(
     /// Resolves the request's task id to the checked task file's entry, or a refusal when the plan cannot be
     /// singled out, the task file is missing or stale, or the id names no task.
     /// </summary>
-    private TaskPromptResult? ResolveEntry(
+    private EntryResolution ResolveEntry(
         TaskPromptRequest request,
         KyberWeaveConfig config,
         string root,
-        string taskId,
-        out PlanTaskFileEntry? entry)
+        string taskId)
     {
-        entry = null;
         string? plan = Clean(request.Plan);
         if (plan is null)
         {
             IReadOnlyList<string> active = tasks.ActivePlans(root, config);
             if (active.Count != 1)
             {
-                return TaskPromptResult.NotBuilt(active.Count == 0
-                    ? $"No prompt: no plan is {PlanStatus.ActiveWords} in this checkout. Approve a plan, or name the plan."
-                    : $"No prompt: {active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)}). Name one plan.");
+                return new EntryResolution(null, NoSingleActivePlan(active));
             }
 
             plan = active[0];
@@ -258,29 +296,69 @@ public sealed class TaskPromptService(
         // becomes half a prompt. The refusal names the path it tried, because a conductor run reads the plan
         // from its worktree and a reader needs to see which one was checked.
         PlanTaskFileOutcome outcome = tasks.Run(root, config, plan, PlanTaskFileMode.Check);
+        return EntryFrom(outcome, root, plan, taskId);
+    }
+
+    /// <summary>The same resolution, checking the task file without blocking a thread.</summary>
+    private async Task<EntryResolution> ResolveEntryAsync(
+        TaskPromptRequest request,
+        KyberWeaveConfig config,
+        string root,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        string? plan = Clean(request.Plan);
+        if (plan is null)
+        {
+            IReadOnlyList<string> active = tasks.ActivePlans(root, config);
+            if (active.Count != 1)
+            {
+                return new EntryResolution(null, NoSingleActivePlan(active));
+            }
+
+            plan = active[0];
+        }
+
+        PlanTaskFileOutcome outcome = await tasks.RunAsync(root, config, plan, PlanTaskFileMode.Check, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        return EntryFrom(outcome, root, plan, taskId);
+    }
+
+    /// <summary>What one active plan must be, when the checkout has none or several.</summary>
+    private static TaskPromptResult NoSingleActivePlan(IReadOnlyList<string> active) =>
+        TaskPromptResult.NotBuilt(active.Count == 0
+            ? $"No prompt: no plan is {PlanStatus.ActiveWords} in this checkout. Approve a plan, or name the plan."
+            : $"No prompt: {active.Count} plans are {PlanStatus.ActiveWords} ({string.Join(", ", active)}). Name one plan.");
+
+    /// <summary>The checked task file's entry for <paramref name="taskId"/>, or the refusal that stops the prompt.</summary>
+    private static EntryResolution EntryFrom(PlanTaskFileOutcome outcome, string root, string plan, string taskId)
+    {
         if (outcome.File is null || outcome.Report.HasErrors)
         {
             string taskFile = Path.Combine(
                 root,
                 PlanTaskFileRules.TaskFilePathFor(plan, PlanTaskFileRules.IsSpecTaskListPath(plan))
                     .Replace('/', Path.DirectorySeparatorChar));
-            return TaskPromptResult.NotBuilt(
+            return new EntryResolution(null, TaskPromptResult.NotBuilt(
                 $"No prompt: the task file for {plan} is missing or does not match the plan; tried '{taskFile}'. Run " +
-                $"'kyber-weave docs tasks {plan} --write', then build the prompt again.");
+                $"'kyber-weave docs tasks {plan} --write', then build the prompt again."));
         }
 
-        entry = PlanTaskPacket.FindTask(outcome.File, taskId);
+        PlanTaskFileEntry? entry = PlanTaskPacket.FindTask(outcome.File, taskId);
         if (entry is null)
         {
             string ids = string.Join(", ", (outcome.File.Tasks ?? []).Select(task => task.Id));
-            return TaskPromptResult.NotBuilt(
-                $"No prompt: '{taskId}' names no one task in {plan} ('{outcome.TaskFilePath}'). Its tasks are: {ids}.");
+            return new EntryResolution(null, TaskPromptResult.NotBuilt(
+                $"No prompt: '{taskId}' names no one task in {plan} ('{outcome.TaskFilePath}'). Its tasks are: {ids}."));
         }
 
         // There is one roster, so the file's recorded value selects nothing here: the validator reports a
         // value that is not `tiered` and reads the file as tiered, and this service does the same.
-        return null;
+        return new EntryResolution(entry, null);
     }
+
+    /// <summary>The task's entry, or the refusal that stopped the prompt naming one.</summary>
+    private sealed record EntryResolution(PlanTaskFileEntry? Entry, TaskPromptResult? Refusal);
 
     /// <summary>
     /// Reads the prior-results file a retry names, refusing a path outside the run's scratch area or a read that

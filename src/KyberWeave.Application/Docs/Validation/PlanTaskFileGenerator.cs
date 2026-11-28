@@ -104,7 +104,56 @@ public sealed partial class PlanTaskFileGenerator
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
         }
 
-        file = WithAgents(file, taskFile, mode, markdown, artifact, report, out IReadOnlyList<string> difficultyChecks);
+        AgentPicks picked = WithAgents(file, taskFile, mode, markdown, artifact, report);
+        return Finish(picked.File, taskFile, mode, artifact, report, picked.DifficultyChecks);
+    }
+
+    /// <summary>
+    /// Derives the task file for one plan or specification task list and writes, checks or previews it, asking the
+    /// decision model for each unassigned task's agent without blocking a thread.
+    /// </summary>
+    /// <param name="artifactPath">The plan, or a specification's <c>tasks.md</c>, repository-relative.</param>
+    /// <param name="mode">What to do with the derived file.</param>
+    /// <param name="cancellationToken">Cancels the model calls a write makes.</param>
+    public async Task<PlanTaskFileOutcome> RunAsync(
+        string artifactPath,
+        PlanTaskFileMode mode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactPath);
+
+        string artifact = artifactPath.Replace('\\', '/').Trim('/');
+        string taskFile = TaskFilePathOf(artifact);
+        DiagnosticReport report = new();
+
+        string? markdown = ReadArtifact(artifact, report);
+        if (markdown is null)
+        {
+            return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
+        }
+
+        IReadOnlyList<string> planningDirectories = PlanTaskFileRules.PlanningDirectories(
+            _config.ConfigReg.Resolve(_config.Ontology));
+        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _config.WorkerRoster);
+        if (file is null)
+        {
+            return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
+        }
+
+        AgentPicks picked = await WithAgentsAsync(file, taskFile, mode, markdown, artifact, report, cancellationToken)
+            .ConfigureAwait(false);
+        return Finish(picked.File, taskFile, mode, artifact, report, picked.DifficultyChecks);
+    }
+
+    /// <summary>Serializes the task file, carries out the mode, and reports the outcome.</summary>
+    private PlanTaskFileOutcome Finish(
+        PlanTaskFile file,
+        string taskFile,
+        PlanTaskFileMode mode,
+        string artifact,
+        DiagnosticReport report,
+        IReadOnlyList<string> difficultyChecks)
+    {
         string yaml = PlanTaskFileFormat.Serialize(file);
         int count = file.Tasks?.Count ?? 0;
         bool wrote = false;
@@ -558,21 +607,19 @@ public sealed partial class PlanTaskFileGenerator
     /// <remarks>
     /// A confident answer that the architect's rating does not fit the rubric raises
     /// <see cref="PlanTaskFileRules.DifficultyDisagreed"/>, unless the plan's Decisions table already carries a row
-    /// answering that task's rating, and never changes the rating itself. <paramref name="difficultyChecks"/> holds
-    /// one line per task for the command's output.
+    /// answering that task's rating, and never changes the rating itself. The result holds one line per task for the
+    /// command's output.
     /// </remarks>
-    private PlanTaskFile WithAgents(
+    private AgentPicks WithAgents(
         PlanTaskFile file,
         string taskFile,
         PlanTaskFileMode mode,
         string markdown,
         string artifact,
-        DiagnosticReport report,
-        out IReadOnlyList<string> difficultyChecks)
+        DiagnosticReport report)
     {
-        difficultyChecks = [];
         if (file.Tasks is not { Count: > 0 } tasks)
-            return file;
+            return new AgentPicks(file, []);
 
         Dictionary<string, PlanTaskFileEntry> onDisk = ReadExistingEntries(taskFile);
         List<PlanTaskFileEntry> entries = new(tasks.Count);
@@ -583,15 +630,59 @@ public sealed partial class PlanTaskFileGenerator
 
         Dictionary<string, PlanTaskAgentChoice> picks = ApplyPicks(entries, mode);
 
-        if (mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert)
-        {
-            difficultyChecks = Checks(entries, picks, PlanPacketContext.Parse(markdown), artifact, report);
-        }
+        IReadOnlyList<string> difficultyChecks = mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert
+            ? Checks(entries, picks, PlanPacketContext.Parse(markdown), artifact, report)
+            : [];
 
         ApplyDeveloperTiers(entries);
 
-        return file with { Tasks = entries };
+        return new AgentPicks(file with { Tasks = entries }, difficultyChecks);
     }
+
+    /// <summary>
+    /// The same picks and difficulty checks, asked of the decision model without blocking a thread. Only a write or a
+    /// convert asks the model, and only for the tasks still without an agent.
+    /// </summary>
+    /// <param name="file">The file derived from the plan.</param>
+    /// <param name="taskFile">The task file's repository-relative path.</param>
+    /// <param name="mode">What the run does with the file.</param>
+    /// <param name="markdown">The plan, for its Decisions table.</param>
+    /// <param name="artifact">The plan's repository-relative path, recorded in each finding.</param>
+    /// <param name="report">Receives the disagreement finding.</param>
+    /// <param name="cancellationToken">Cancels the model calls.</param>
+    private async Task<AgentPicks> WithAgentsAsync(
+        PlanTaskFile file,
+        string taskFile,
+        PlanTaskFileMode mode,
+        string markdown,
+        string artifact,
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
+    {
+        if (file.Tasks is not { Count: > 0 } tasks)
+            return new AgentPicks(file, []);
+
+        Dictionary<string, PlanTaskFileEntry> onDisk = ReadExistingEntries(taskFile);
+        List<PlanTaskFileEntry> entries = new(tasks.Count);
+        foreach (PlanTaskFileEntry task in tasks)
+        {
+            entries.Add(KeepStoredPick(task, onDisk));
+        }
+
+        Dictionary<string, PlanTaskAgentChoice> picks =
+            await ApplyPicksAsync(entries, mode, cancellationToken).ConfigureAwait(false);
+
+        IReadOnlyList<string> difficultyChecks = mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert
+            ? Checks(entries, picks, PlanPacketContext.Parse(markdown), artifact, report)
+            : [];
+
+        ApplyDeveloperTiers(entries);
+
+        return new AgentPicks(file with { Tasks = entries }, difficultyChecks);
+    }
+
+    /// <summary>What the picks left the file as, and the one line per task the command prints.</summary>
+    private sealed record AgentPicks(PlanTaskFile File, IReadOnlyList<string> DifficultyChecks);
 
     /// <summary>
     /// A pick the file on disk recorded for a task whose role, capabilities and prompt are
@@ -628,29 +719,66 @@ public sealed partial class PlanTaskFileGenerator
             List<PlanTaskFileEntry> open = [.. entries.Where(entry => entry.Role is null && entry.Agent is null)];
             if (open.Count > 0)
             {
-                foreach (KeyValuePair<string, PlanTaskAgentChoice> pick in _picker.Pick(open))
-                {
-                    picks[pick.Key] = pick.Value;
-                }
-
-                for (int index = 0; index < entries.Count; index++)
-                {
-                    PlanTaskFileEntry entry = entries[index];
-                    if (entry.Role is null && entry.Agent is null && entry.Id is not null
-                        && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice)
-                        && choice.Agent is { } agent)
-                    {
-                        entries[index] = entry with
-                        {
-                            Agent = agent,
-                            AgentConfidence = choice.Confidence,
-                        };
-                    }
-                }
+                RecordPicks(entries, _picker.Pick(open), picks);
             }
         }
 
         return picks;
+    }
+
+    /// <summary>
+    /// The same picks, asked of the decision model without blocking a thread: only the tasks still without an agent
+    /// are asked about, and only on a write or a convert.
+    /// </summary>
+    /// <param name="entries">The file's tasks, updated in place with the picks.</param>
+    /// <param name="mode">What the run does with the file.</param>
+    /// <param name="cancellationToken">Cancels the model calls.</param>
+    private async Task<Dictionary<string, PlanTaskAgentChoice>> ApplyPicksAsync(
+        List<PlanTaskFileEntry> entries,
+        PlanTaskFileMode mode,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, PlanTaskAgentChoice> picks = new(StringComparer.Ordinal);
+        if ((mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert) && _picker is not null)
+        {
+            List<PlanTaskFileEntry> open = [.. entries.Where(entry => entry.Role is null && entry.Agent is null)];
+            if (open.Count > 0)
+            {
+                RecordPicks(
+                    entries,
+                    await _picker.PickAsync(open, cancellationToken).ConfigureAwait(false),
+                    picks);
+            }
+        }
+
+        return picks;
+    }
+
+    /// <summary>Writes each answer onto its task, and keeps the answers under the task ids they belong to.</summary>
+    private static void RecordPicks(
+        List<PlanTaskFileEntry> entries,
+        IReadOnlyDictionary<string, PlanTaskAgentChoice> answers,
+        Dictionary<string, PlanTaskAgentChoice> picks)
+    {
+        foreach (KeyValuePair<string, PlanTaskAgentChoice> pick in answers)
+        {
+            picks[pick.Key] = pick.Value;
+        }
+
+        for (int index = 0; index < entries.Count; index++)
+        {
+            PlanTaskFileEntry entry = entries[index];
+            if (entry.Role is null && entry.Agent is null && entry.Id is not null
+                && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice)
+                && choice.Agent is { } agent)
+            {
+                entries[index] = entry with
+                {
+                    Agent = agent,
+                    AgentConfidence = choice.Confidence,
+                };
+            }
+        }
     }
 
     /// <summary>

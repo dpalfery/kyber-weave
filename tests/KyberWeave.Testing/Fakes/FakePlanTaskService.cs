@@ -44,6 +44,16 @@ internal sealed class FakePlanTaskService : IPlanTaskService
     }
 
     /// <inheritdoc />
+    public Task<PlanTaskFileOutcome> RunAsync(
+        string repoRoot,
+        KyberWeaveConfig config,
+        string artifactPath,
+        PlanTaskFileMode mode,
+        IPlanTaskAgentPicker? picker = null,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Run(repoRoot, config, artifactPath, mode, picker));
+
+    /// <inheritdoc />
     public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);

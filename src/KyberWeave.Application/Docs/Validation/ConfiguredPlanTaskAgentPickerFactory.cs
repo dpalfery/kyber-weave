@@ -32,4 +32,20 @@ public sealed class ConfiguredPlanTaskAgentPickerFactory(
             ? null
             : new PlanTaskAgentPick(provider, PlanTaskAgentPick.ImplementationAgents(config.WorkerRoster), resources);
     }
+
+    /// <inheritdoc />
+    public async Task<IPlanTaskAgentPicker?> ForConfigAsync(
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        string home = environment.HomeDirectory;
+        if (string.IsNullOrWhiteSpace(home))
+            return null;
+        IArbiterProvider? provider = await providers.TryCreateAsync(config.Arbiter.Provider, home, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        return provider is null
+            ? null
+            : new PlanTaskAgentPick(provider, PlanTaskAgentPick.ImplementationAgents(config.WorkerRoster), resources);
+    }
 }

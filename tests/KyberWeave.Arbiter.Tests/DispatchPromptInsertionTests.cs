@@ -65,6 +65,12 @@ public sealed class DispatchPromptInsertionTests
             return this;
         }
 
+        public Task<ITaskPromptService> ForRepositoryAsync(
+            string repositoryRoot,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(ForRepository(repositoryRoot, config));
+
         public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
         {
             Requests.Add(request);
@@ -72,12 +78,24 @@ public sealed class DispatchPromptInsertionTests
                 ? new TaskPromptResult(true, Prompt, "csharp-dev", "medium", "plan", request.Technology, [], null)
                 : TaskPromptResult.NotBuilt(Refusal, RefusalKind);
         }
+
+        public Task<TaskPromptResult> BuildAsync(
+            TaskPromptRequest request,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Build(request, config));
     }
 
     /// <summary>A prompt service that renders the real host facts from the configuration it is handed.</summary>
     private sealed class HostFactsPrompts(IFileSystem files) : ITaskPromptServiceFactory, ITaskPromptService
     {
         public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
+
+        public Task<ITaskPromptService> ForRepositoryAsync(
+            string repositoryRoot,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<ITaskPromptService>(this);
 
         public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
         {
@@ -89,6 +107,12 @@ public sealed class DispatchPromptInsertionTests
                 technology: request.Technology);
             return new TaskPromptResult(true, prompt, "dev-easy", "easy", "plan", request.Technology, [], null);
         }
+
+        public Task<TaskPromptResult> BuildAsync(
+            TaskPromptRequest request,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Build(request, config));
     }
 
     /// <summary>The decision engine every adapter is built over; it allows and records the prompt it judged.</summary>

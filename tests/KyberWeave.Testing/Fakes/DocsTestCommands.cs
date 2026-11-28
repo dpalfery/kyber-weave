@@ -27,12 +27,18 @@ internal static class DocsTestCommands
     internal sealed class NoPickerFactory : IPlanTaskAgentPickerFactory
     {
         public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config) => null;
+
+        public Task<IPlanTaskAgentPicker?> ForConfigAsync(KyberWeaveConfig config, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IPlanTaskAgentPicker?>(null);
     }
 
     /// <summary>A picker factory that always returns <paramref name="picker"/>.</summary>
     internal sealed class FixedPickerFactory(Func<IPlanTaskAgentPicker> picker) : IPlanTaskAgentPickerFactory
     {
         public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config) => picker();
+
+        public Task<IPlanTaskAgentPicker?> ForConfigAsync(KyberWeaveConfig config, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IPlanTaskAgentPicker?>(picker());
     }
 
     /// <summary>The container, with <paramref name="configure"/> applied before the application's own registrations.</summary>
