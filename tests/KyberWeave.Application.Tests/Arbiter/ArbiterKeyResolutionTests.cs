@@ -43,6 +43,20 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public async Task ResolveAsyncReadsTheStoreForAForeignOrigin()
+    {
+        FakeCredentialStore store = new() { DefaultKey = "store-key" };
+
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(
+            "https://other.example.com/v1",
+            store,
+            EnvReader(SentinelKey));
+
+        Assert.Equal("store-key", resolved);
+        Assert.Equal(ForeignOrigin, store.Reads);
+    }
+
+    [Fact]
     public void EnvKeyIgnoredForForeignOrigin()
     {
         FakeCredentialStore store = new() { DefaultKey = "store-key" };

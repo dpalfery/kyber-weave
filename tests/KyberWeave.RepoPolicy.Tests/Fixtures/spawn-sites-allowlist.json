@@ -850,14 +850,14 @@
     {
       "file": "src/KyberWeave.Data/Arbiter/Credentials/MacKeychainCredentialStore.cs",
       "text": "ProcessStartInfo startInfo = new(\"security\")",
-      "count": 3,
-      "bound": "Started by ProcessRunner.Run in the store with its timeout; the security command self-exits."
+      "count": 6,
+      "bound": "Started by ProcessRunner.Run or ProcessRunner.RunAsync in the store with its timeout; the security command self-exits."
     },
     {
       "file": "src/KyberWeave.Data/Arbiter/Credentials/SecretServiceCredentialStore.cs",
       "text": "ProcessStartInfo startInfo = new(\"secret-tool\")",
-      "count": 3,
-      "bound": "Started by ProcessRunner.Run in the store with its timeout; secret-tool self-exits."
+      "count": 6,
+      "bound": "Started by ProcessRunner.Run or ProcessRunner.RunAsync in the store with its timeout; secret-tool self-exits."
     },
     {
       "file": "src/KyberWeave.Application/Doctor/PostCheckoutHookInstaller.cs",

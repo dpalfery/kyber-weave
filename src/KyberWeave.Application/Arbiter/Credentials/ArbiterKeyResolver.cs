@@ -64,6 +64,52 @@ public static class ArbiterKeyResolver
         return string.IsNullOrWhiteSpace(stored) ? null : stored;
     }
 
+    /// <summary>
+    /// Resolves the key for <paramref name="endpoint"/> without blocking, reading the environment through
+    /// <paramref name="environment"/> for testability.
+    /// </summary>
+    /// <param name="endpoint">The provider endpoint URL.</param>
+    /// <param name="store">The OS credential store, or null when unavailable.</param>
+    /// <param name="environment">Maps variable names to values.</param>
+    /// <param name="userOverrideEndpoint">
+    /// The user override's <c>provider.endpoint</c>, when one names a non-TypeSafe origin
+    /// the environment key may serve.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the credential-store lookup.</param>
+    /// <returns>The key, or null when none resolves or the endpoint is loopback.</returns>
+    public static async Task<string?> ResolveAsync(
+        string endpoint,
+        ICredentialStore? store,
+        Func<string, string?> environment,
+        string? userOverrideEndpoint = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        if (IsLoopbackEndpoint(endpoint))
+        {
+            return null;
+        }
+
+        string? origin = GetOrigin(endpoint);
+        if (origin is null)
+        {
+            return null;
+        }
+
+        string? envKey = environment(EnvVarName);
+        if (!string.IsNullOrWhiteSpace(envKey) && IsEnvOrigin(origin, userOverrideEndpoint))
+        {
+            return envKey;
+        }
+
+        string? stored = store is null
+            ? null
+            : await store.ReadAsync(origin, cancellationToken).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(stored) ? null : stored;
+    }
+
     /// <summary>Derives the <c>scheme://host[:port]</c> origin of an endpoint URL.</summary>
     /// <returns>The origin, or null when the endpoint is not an absolute http(s) URL.</returns>
     public static string? GetOrigin(string endpoint)

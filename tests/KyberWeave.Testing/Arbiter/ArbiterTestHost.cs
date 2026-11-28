@@ -87,4 +87,16 @@ internal sealed class ForwardingCredentialStore(Func<ICredentialStore> current) 
 
     /// <inheritdoc />
     public void Delete(string origin) => current().Delete(origin);
+
+    /// <inheritdoc />
+    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default) =>
+        current().ReadAsync(origin, cancellationToken);
+
+    /// <inheritdoc />
+    public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default) =>
+        current().WriteAsync(origin, key, cancellationToken);
+
+    /// <inheritdoc />
+    public ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default) =>
+        current().DeleteAsync(origin, cancellationToken);
 }

@@ -78,5 +78,16 @@ public sealed class ArbiterSecretToolMissingTests
             ArgumentNullException.ThrowIfNull(standardInput);
             return next;
         }
+
+        public Task<ProcessResult> RunAsync(
+            ProcessStartInfo startInfo,
+            string standardInput,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(startInfo);
+            ArgumentNullException.ThrowIfNull(standardInput);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(next);
+        }
     }
 }
