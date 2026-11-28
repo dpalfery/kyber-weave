@@ -218,10 +218,14 @@ public class McpPackagingTests
     {
         MethodInfo tool = McpToolMethod("docs_get_coding_standard_for_technology");
 
-        Assert.Equal(typeof(string), tool.ReturnType);
+        // The tool is async (KW-STD-CS-013); the MCP host awaits it, so a client still receives a string result.
+        Assert.Equal(typeof(Task<string>), tool.ReturnType);
+        // The host binds a CancellationToken itself; it is not part of the contract a client sends.
         Assert.Equal(
             ["technology", "topic", "charBudget", "projectPath"],
-            tool.GetParameters().Select(parameter => parameter.Name));
+            tool.GetParameters()
+                .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
+                .Select(parameter => parameter.Name));
         Assert.Equal(12_000, tool.GetParameters()[2].DefaultValue);
     }
 

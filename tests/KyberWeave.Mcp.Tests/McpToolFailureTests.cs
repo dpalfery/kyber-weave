@@ -58,7 +58,7 @@ public sealed class McpToolFailureTests
     [Fact]
     public async Task DocsToolsReportToolFailureWithReasonAndFixUnderTheDefaultStopRule()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
         DocsTools tools = Tools(out CodeGraphFreshness freshness);
@@ -84,7 +84,7 @@ public sealed class McpToolFailureTests
     [Fact]
     public async Task DocsToolsWarnInsteadOfFailingWhenTheRepositoryOptsOutOfTheStopRule()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
         string configPath = _host.InRepo(".kyber-weave/kyber-weave.yml");
         _host.Files.WriteAllText(
@@ -114,7 +114,7 @@ public sealed class McpToolFailureTests
     [Fact]
     public async Task TheRevisionToolStillAnswersWhileTheOtherDocsToolsReportToolFailure()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
         DocsTools tools = Tools(out CodeGraphFreshness freshness);
         using (freshness)

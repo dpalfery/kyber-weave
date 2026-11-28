@@ -65,7 +65,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     [Fact]
     public async Task ATechnologyOnlyDispatchOnAFallbackHarnessWritesItsPromptFile()
     {
-        TaskPromptResult result = DocsTaskPromptFixture.Service(_fixture).Build(
+        TaskPromptResult result = await DocsTaskPromptFixture.Service(_fixture).BuildAsync(
             new TaskPromptRequest(_fixture.Root, TaskId: null, Technology: "csharp", Harness: "warp"),
             Config);
 

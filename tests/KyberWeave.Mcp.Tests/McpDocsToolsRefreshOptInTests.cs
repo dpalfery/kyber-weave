@@ -57,7 +57,7 @@ public sealed class McpDocsToolsRefreshOptInTests
     [Fact]
     public async Task DocsToolsBuiltWithoutARefreshScheduleAnswerFromTheDocumentsOnDisk()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
         string response = await ToolsWithoutARefreshSchedule(_host.Repo).ExploreAsync(ScaffoldedDocumentId);

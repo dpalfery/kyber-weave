@@ -204,7 +204,7 @@ public sealed class McpCodeGraphRefreshRealLockTests : IDisposable
         string lockPath = LockPath(Root);
         RemoveStaleLock(lockPath);
 
-        DocsTestCommands.Scaffolding.Scaffold(Root);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(Root);
         if (!stopsOnToolFailure)
         {
             await File.AppendAllTextAsync(

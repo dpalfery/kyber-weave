@@ -61,7 +61,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     [Fact]
     public async Task ProvenanceLineNamesTheBranchAndTheRepositoryGitDirectory()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(_root.Path);
 
         string line = await Status(_root.Path);
 
@@ -81,7 +81,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     public async Task ProvenanceBranchAndRepoCarryTheCheckoutValues()
     {
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_root.Path);
-        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(_root.Path);
 
         string branch = BranchFromHead(_root.Path);
         string line = await Status(_root.Path);
@@ -106,7 +106,7 @@ public sealed class CorpusProvenanceTests : IDisposable
         string spacedRoot = Path.Combine(_root.Path, "repo with spaces");
         Directory.CreateDirectory(spacedRoot);
         TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(spacedRoot);
-        DocsTestCommands.Scaffolding.Scaffold(spacedRoot);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(spacedRoot);
 
         string line = await Status(spacedRoot);
         string servedRepo = FieldValue(RepoField, line);
@@ -124,7 +124,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     {
         string corruptRoot = Path.Combine(_root.Path, "corrupt-dot-git");
         Directory.CreateDirectory(corruptRoot);
-        DocsTestCommands.Scaffolding.Scaffold(corruptRoot);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(corruptRoot);
         await File.WriteAllTextAsync(Path.Combine(corruptRoot, ".git"), "gitdir: \0illegal\0path");
 
         string line = await Status(corruptRoot);
@@ -156,7 +156,7 @@ public sealed class CorpusProvenanceTests : IDisposable
     {
         string corruptRoot = Path.Combine(_root.Path, "corrupt-commondir");
         Directory.CreateDirectory(corruptRoot);
-        DocsTestCommands.Scaffolding.Scaffold(corruptRoot);
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(corruptRoot);
         string dotGit = Path.Combine(corruptRoot, ".git");
         Directory.CreateDirectory(dotGit);
         await File.WriteAllTextAsync(Path.Combine(dotGit, "commondir"), "\0illegal\0path");

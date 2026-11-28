@@ -43,7 +43,7 @@ public sealed class McpCompositionRootTests
     [Fact]
     public async Task EveryDocsToolTypeResolvesFromTheServerContainer()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
 
         ServiceCollection services = new();
         _host.Register(services);
@@ -61,7 +61,7 @@ public sealed class McpCompositionRootTests
     [Fact]
     public async Task TheBoundContainerAnswersFromItsOwnRoot()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
 
         ServiceCollection services = new();
         _host.Register(services);
@@ -110,7 +110,7 @@ public sealed class McpCompositionRootTests
     [Fact]
     public async Task TheAnyRepoContainerAnswersForTheRepositoryAProjectPathNames()
     {
-        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        _ = await _host.Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(_host.Repo);
         using ServiceProvider provider = AnyRepoContainer();
 
         DocsTools tools = ActivatorUtilities.CreateInstance<DocsTools>(provider);

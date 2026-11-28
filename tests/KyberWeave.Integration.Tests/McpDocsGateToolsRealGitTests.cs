@@ -25,7 +25,7 @@ public sealed class McpDocsGateToolsRealGitTests
     public async Task DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
     {
         using CloseoutGitRepo repo = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
@@ -38,7 +38,7 @@ public sealed class McpDocsGateToolsRealGitTests
     public async Task DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
     {
         using CloseoutGitRepo repo = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
@@ -56,7 +56,7 @@ public sealed class McpDocsGateToolsRealGitTests
 
         using CloseoutGitRepo repo = new();
         using TempDirectory outside = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
+        _ = await DocsTestCommands.Scaffolding.ScaffoldAsync(repo.Root, owner: "gate-fixture");
         repo.Commit("initial");
 
         string target = Path.Combine(outside.Path, "target.md");

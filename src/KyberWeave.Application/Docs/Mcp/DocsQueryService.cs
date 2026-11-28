@@ -262,7 +262,7 @@ public sealed partial class DocsQueryService : IDocsQueryService
         DocumentationAnalysisResult result;
         try
         {
-            result = _analysisReader.Analyze(cancellationToken);
+            result = await _analysisReader.AnalyzeAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (DocsToolSupport.IsExpectedReadFailure(exception))
         {

@@ -442,7 +442,7 @@ public sealed partial class DocsTools
                    + "\nprompt: none\nreason: this checkout's configuration could not be loaded. Run 'kyber-weave docs validate .' in it.";
         }
 
-        TaskPromptResult prompt = Bound.Prompts.Build(
+        TaskPromptResult prompt = await Bound.Prompts.BuildAsync(
             new TaskPromptRequest(
                 Bound.RepositoryRoot,
                 taskId,
@@ -453,7 +453,8 @@ public sealed partial class DocsTools
                 // A client no probe, log or source has verified is built for no rewriting harness, so the prompt goes to the file
                 // the reply names instead of being read as a dispatch some hook already carries.
                 Harness: harness ?? McpClientHarness.UnverifiedToken),
-            config);
+            config,
+            cancellationToken).ConfigureAwait(false);
 
         return await FormatTaskPromptAsync(prompt, clientName, harness, cancellationToken).ConfigureAwait(false);
     }
