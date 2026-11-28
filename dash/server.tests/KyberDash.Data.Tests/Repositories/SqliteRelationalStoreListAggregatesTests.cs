@@ -16,7 +16,7 @@ namespace KyberDash.Data.Tests.Repositories;
 /// <see cref="SqliteRelationalStore.SessionListFigures"/> must batch its per-session reads:
 /// one <c>sqlite3</c> batch for sessions, one for the content-free record scalars, one for all
 /// projections, and at most one fallback batch for turns of sessions without a projection,
-/// regardless of session count.
+/// regardless of session count: the query count for many sessions equals the count for few.
 /// </summary>
 public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
 {
@@ -52,7 +52,7 @@ public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
         Assert.Equal(
             ["sess-agg-0", "sess-agg-1", "sess-agg-2", "sess-agg-3", "sess-agg-4"],
             figures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
-        Assert.True(batches <= 25, $"Expected at most 25 sqlite3 batches, observed {batches}.");
+        Assert.Equal(BatchesFor(40), batches);
 
         foreach (SessionListFigure figure in figures)
         {
@@ -77,12 +77,30 @@ public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
         Assert.Equal(1, figures.Single(static figure => figure.SessionKey == "sess-agg-2").TurnCount);
     }
 
-    private static void SeedSessions(SqliteRelationalStore store)
+    /// <summary>
+    /// Verifies the list read issues the same number of queries for many sessions as for few: a
+    /// per-session query would make the count grow with the session count.
+    /// </summary>
+    [Fact]
+    public void SessionListFigures_IssueTheSameQueryCountWhateverTheSessionCount() =>
+        Assert.Equal(BatchesFor(5), BatchesFor(60));
+
+    private int BatchesFor(int sessionCount)
+    {
+        string dbPath = Path.Combine(directory.Path, $"list-figures-{sessionCount}", "canon.db");
+        CountingSqliteRelationalStore store = new(dbPath, new SqliteCircuitBreaker());
+        SeedSessions(store, sessionCount);
+        store.ResetCount();
+        Assert.Equal(sessionCount, store.SessionListFigures(HarnessId).Count);
+        return store.QueryRowsCount;
+    }
+
+    private static void SeedSessions(SqliteRelationalStore store, int sessionCount = 5)
     {
         DateTimeOffset t0 = new(2026, 11, 19, 10, 0, 0, TimeSpan.Zero);
         List<CollectedSession> sessions = [];
         List<CollectedRecord> records = [];
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < sessionCount; i++)
         {
             string sessionKey = $"sess-agg-{i}";
             sessions.Add(new CollectedSession(sessionKey, HarnessId, $"native-{i}", null, null, []));
