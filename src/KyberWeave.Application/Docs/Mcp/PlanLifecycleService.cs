@@ -63,7 +63,9 @@ public sealed class PlanLifecycleService(
                 $"approvalMode '{approvalMode}' is not 'autonomous' or 'supervised'. Nothing was changed.");
         }
 
-        PlanFinalizeOutcome outcome = finalize.Run(_repositoryRoot, config, plan, mode, approval, Today());
+        PlanFinalizeOutcome outcome = await finalize
+            .RunAsync(_repositoryRoot, config, plan, mode, approval, Today(), cancellationToken)
+            .ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         if (outcome.Finalized)
             return LifecycleResponse(provenance, "finalized", report, ReadyNext(outcome));
@@ -84,7 +86,9 @@ public sealed class PlanLifecycleService(
         if (!TryResolveLifecyclePlan(planFile, report, out KyberWeaveConfig config, out string plan))
             return LifecycleResponse(provenance, "refused", report, null);
 
-        PlanCloseoutOutcome outcome = closeout.Run(_repositoryRoot, config, plan, Today(), archive: true);
+        PlanCloseoutOutcome outcome = await closeout
+            .RunAsync(_repositoryRoot, config, plan, Today(), archive: true, cancellationToken)
+            .ConfigureAwait(false);
         report.AddRange(outcome.Report.Items);
         return outcome.Archived
             ? LifecycleResponse(provenance, "archived", report,

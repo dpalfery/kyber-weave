@@ -21,6 +21,7 @@ internal sealed class ActivePlanFiles
     private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
     private readonly IBoundedProcessExecutor _process;
+    private readonly IProcessRunner? _processAsync;
 
     internal ActivePlanFiles(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
     {
@@ -28,6 +29,7 @@ internal sealed class ActivePlanFiles
         _config = config;
         _files = files;
         _process = process;
+        _processAsync = process as IProcessRunner;
     }
 
     /// <summary>The plan index's repository-relative path, or null when the configuration registers none.</summary>
@@ -81,11 +83,27 @@ internal sealed class ActivePlanFiles
     /// <summary>The staged paths that are not one of <paramref name="paths"/>; null when git could not say.</summary>
     internal IReadOnlyList<string>? StagedOutside(IEnumerable<string> paths)
     {
-        HashSet<string> own = new(paths.Select(path => path.Replace('\\', '/')), StringComparer.Ordinal);
         ProcessResult result = Git(["diff", "--cached", "--name-only", "-z"]);
-        return result.ExitCode == 0
-            ? [.. result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries).Where(path => !own.Contains(path))]
-            : null;
+        return ParseStagedOutside(paths, result);
+    }
+
+    /// <summary>The staged paths that are not one of <paramref name="paths"/>, read without blocking a thread; null when git could not say.</summary>
+    internal async Task<IReadOnlyList<string>?> StagedOutsideAsync(
+        IEnumerable<string> paths,
+        CancellationToken cancellationToken = default)
+    {
+        ProcessResult result = await GitAsync(["diff", "--cached", "--name-only", "-z"], cancellationToken)
+            .ConfigureAwait(false);
+        return ParseStagedOutside(paths, result);
+    }
+
+    private static IReadOnlyList<string>? ParseStagedOutside(IEnumerable<string> paths, ProcessResult result)
+    {
+        if (result.ExitCode != 0)
+            return null;
+
+        HashSet<string> own = new(paths.Select(path => path.Replace('\\', '/')), StringComparer.Ordinal);
+        return [.. result.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries).Where(path => !own.Contains(path))];
     }
 
     /// <summary>Stages the paths a command touched, so a commit that only takes tracked files cannot leave a new one behind.</summary>
@@ -95,10 +113,28 @@ internal sealed class ActivePlanFiles
             return;
 
         ProcessResult result = Git([.. StageArguments, .. paths]);
+        RecordStageResult(result, report, plan, stepCode);
+    }
+
+    /// <summary>Stages the paths a command touched without blocking a thread, so a commit that only takes tracked files cannot leave a new one behind.</summary>
+    internal async Task StageAsync(
+        IEnumerable<string> paths,
+        DiagnosticReport report,
+        string plan,
+        string stepCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsGitCheckout())
+            return;
+
+        ProcessResult result = await GitAsync([.. StageArguments, .. paths], cancellationToken).ConfigureAwait(false);
+        RecordStageResult(result, report, plan, stepCode);
+    }
+
+    private static void RecordStageResult(ProcessResult result, DiagnosticReport report, string plan, string stepCode) =>
         report.Add(result.ExitCode == 0
             ? new Diagnostic(stepCode, Severity.Info, "Staged the moved and edited files.", plan, plan)
             : new Diagnostic(stepCode, Severity.Warning, $"git add failed ({result.StandardError.Trim()}); stage the files before committing.", plan, plan));
-    }
 
     /// <summary>
     /// Commits exactly <paramref name="paths"/> on the current branch, never pushing. Does nothing when they hold no
@@ -110,23 +146,62 @@ internal sealed class ActivePlanFiles
             return;
 
         ProcessResult pending = Git(["status", "--porcelain", "--", .. paths]);
-        if (pending.ExitCode != 0)
-        {
-            report.Add(new Diagnostic(stepCode, Severity.Warning, $"git status failed ({pending.StandardError.Trim()}); nothing was committed.", plan, plan));
-            return;
-        }
-
-        if (pending.StandardOutput.Trim().Length == 0)
+        if (!HasPendingChanges(pending, report, plan, stepCode))
             return;
 
         ProcessResult commit = Git(["commit", "-m", message, "--", .. paths]);
+        RecordCommitResult(commit, paths, message, report, plan, stepCode);
+    }
+
+    /// <summary>
+    /// Commits exactly <paramref name="paths"/> on the current branch without blocking a thread, never pushing. Does
+    /// nothing when they hold no change; reports a warning and leaves them staged when git refuses.
+    /// </summary>
+    internal async Task CommitOnlyAsync(
+        IReadOnlyList<string> paths,
+        string message,
+        DiagnosticReport report,
+        string plan,
+        string stepCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsGitCheckout())
+            return;
+
+        ProcessResult pending = await GitAsync(["status", "--porcelain", "--", .. paths], cancellationToken)
+            .ConfigureAwait(false);
+        if (!HasPendingChanges(pending, report, plan, stepCode))
+            return;
+
+        ProcessResult commit = await GitAsync(["commit", "-m", message, "--", .. paths], cancellationToken)
+            .ConfigureAwait(false);
+        RecordCommitResult(commit, paths, message, report, plan, stepCode);
+    }
+
+    private static bool HasPendingChanges(ProcessResult pending, DiagnosticReport report, string plan, string stepCode)
+    {
+        if (pending.ExitCode != 0)
+        {
+            report.Add(new Diagnostic(stepCode, Severity.Warning, $"git status failed ({pending.StandardError.Trim()}); nothing was committed.", plan, plan));
+            return false;
+        }
+
+        return pending.StandardOutput.Trim().Length > 0;
+    }
+
+    private static void RecordCommitResult(
+        ProcessResult commit,
+        IReadOnlyList<string> paths,
+        string message,
+        DiagnosticReport report,
+        string plan,
+        string stepCode) =>
         report.Add(commit.ExitCode == 0
             ? new Diagnostic(stepCode, Severity.Info, $"Committed {string.Join(", ", paths)} on the current branch: {message}", plan, plan)
             : new Diagnostic(stepCode, Severity.Warning,
                 $"git commit failed ({(commit.StandardError + commit.StandardOutput).Trim()}); the files are staged but not committed.", plan, plan));
-    }
 
-    private ProcessResult Git(IEnumerable<string> arguments)
+    private ProcessStartInfo GitStartInfo(IEnumerable<string> arguments)
     {
         ProcessStartInfo startInfo = new("git")
         {
@@ -139,10 +214,32 @@ internal sealed class ActivePlanFiles
         };
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
+        return startInfo;
+    }
 
+    private ProcessResult Git(IEnumerable<string> arguments)
+    {
+        ProcessStartInfo startInfo = GitStartInfo(arguments);
         try
         {
             return _process.Run(startInfo, string.Empty, GitTimeout);
+        }
+        catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)
+        {
+            return new ProcessResult(-1, string.Empty, $"git could not be run: {ex.Message}");
+        }
+    }
+
+    private async Task<ProcessResult> GitAsync(IEnumerable<string> arguments, CancellationToken cancellationToken)
+    {
+        if (_processAsync is not { } processAsync)
+            return new ProcessResult(-1, string.Empty, "git could not be run: an async process runner is required.");
+
+        ProcessStartInfo startInfo = GitStartInfo(arguments);
+        try
+        {
+            return await processAsync.RunAsync(startInfo, string.Empty, GitTimeout, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is Win32Exception or TimeoutException or InvalidOperationException)
         {

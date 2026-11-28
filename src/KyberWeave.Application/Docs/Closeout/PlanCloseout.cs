@@ -107,7 +107,47 @@ public sealed partial class PlanCloseout
         ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
 
         DiagnosticReport report = new();
-        string plan = planPath.Replace('\\', '/');
+        if (TryMoveToArchive(planPath, date, archive, report, out string plan, out List<string> touched) is { } early)
+            return early;
+
+        _files.Stage(touched, report, plan, Step);
+        Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
+        return new PlanCloseoutOutcome(report, true);
+    }
+
+    /// <summary>Checks the plan's closeout evidence and, with <paramref name="archive"/>, archives it without blocking a thread.</summary>
+    /// <param name="planPath">The plan, relative to the repository root.</param>
+    /// <param name="date">The archive date.</param>
+    /// <param name="archive">True to move the plan; false to check and report what would happen.</param>
+    /// <param name="cancellationToken">Cancels the git staging command.</param>
+    public async Task<PlanCloseoutOutcome> RunAsync(
+        string planPath,
+        DateOnly date,
+        bool archive,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        DiagnosticReport report = new();
+        if (TryMoveToArchive(planPath, date, archive, report, out string plan, out List<string> touched) is { } early)
+            return early;
+
+        await _files.StageAsync(touched, report, plan, Step, cancellationToken).ConfigureAwait(false);
+        Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
+        return new PlanCloseoutOutcome(report, true);
+    }
+
+    private PlanCloseoutOutcome? TryMoveToArchive(
+        string planPath,
+        DateOnly date,
+        bool archive,
+        DiagnosticReport report,
+        out string plan,
+        out List<string> touched)
+    {
+        plan = planPath.Replace('\\', '/');
+        touched = [];
         string name = Path.GetFileName(plan);
 
         if (_files.CheckActivePlan(plan) is { } notActive)
@@ -220,7 +260,7 @@ public sealed partial class PlanCloseout
                 _store.DeleteDirectory(createdDirectory, recursive: true);
         }
 
-        List<string> touched = [plan, target, inventory, planIndex];
+        touched = [plan, target, inventory, planIndex];
         if (hasTaskFile)
             touched.Add(taskFile);
 
@@ -262,10 +302,7 @@ public sealed partial class PlanCloseout
         Say(report, plan, planRowRemoved ? $"Took its row out of {planIndex}." : $"{planIndex} had no row for it.");
         _store.WriteAllText(_files.Absolute(inventory), newInventory);
         Say(report, plan, $"Done: {inventoryAction} {inventory} with its row.");
-
-        _files.Stage(touched, report, plan, Step);
-        Say(report, plan, "Run 'docs validate . --merge-ready' and 'docs drift .' next.");
-        return new PlanCloseoutOutcome(report, true);
+        return null;
     }
 
     private string PlanIndex() =>
