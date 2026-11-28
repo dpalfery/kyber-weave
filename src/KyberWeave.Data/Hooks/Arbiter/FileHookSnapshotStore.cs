@@ -79,6 +79,68 @@ public sealed class FileHookSnapshotStore(IWritableFileSystem files, TimeProvide
         }
     }
 
+    /// <inheritdoc/>
+    public async Task UpdateAsync(string directory, string fileName, Func<string, string?> mutate, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(mutate);
+        try
+        {
+            files.CreateDirectory(directory);
+            string lockPath = Path.Combine(directory, SnapshotLockFileName);
+            long started = time.GetTimestamp();
+            TimeSpan backoff = TimeSpan.FromMilliseconds(5);
+            while (true)
+            {
+                Stream? lockFile = null;
+                try
+                {
+                    lockFile = files.OpenExclusive(lockPath);
+                }
+                catch (IOException) when (time.GetElapsedTime(started) < LockWindow)
+                {
+                    await Task.Delay(backoff, time, cancellationToken).ConfigureAwait(false);
+                    backoff = TimeSpan.FromMilliseconds(Math.Min(50, backoff.TotalMilliseconds * 2));
+                    continue;
+                }
+
+                using (lockFile)
+                {
+                    string filePath = Path.Combine(directory, fileName);
+                    SweepTempFiles(directory);
+                    string? json = mutate(ReadStoreText(filePath));
+                    if (json is not null)
+                    {
+                        // Write aside and move into place: a crash mid-write leaves the previous
+                        // whole document behind, never a truncated one that reads back as [].
+                        string tempPath = Path.Combine(directory, ".snapshots." + ids.NewGuid().ToString("N") + ".tmp");
+                        try
+                        {
+                            files.WriteAllText(tempPath, json);
+                            files.MoveFile(tempPath, filePath, overwrite: true);
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                files.DeleteFile(tempPath);
+                            }
+                            catch (Exception ex) when (FileFailure.Is(ex))
+                            {
+                            }
+                        }
+                    }
+
+                    return;
+                }
+            }
+        }
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
+        {
+            // Snapshot persistence is best-effort; on failure the fact stays absent so the
+            // rule stops and asks instead of judging a diff the dispatch never appeared in.
+        }
+    }
+
     private string ReadStoreText(string filePath)
     {
         try

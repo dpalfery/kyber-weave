@@ -104,6 +104,25 @@ public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvid
         return true;
     }
 
+    /// <inheritdoc/>
+    public async Task<bool> WaitForClaimAsync(string projectRoot, DispatchClaimKey key, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        string path = ClaimPath(projectRoot, key);
+        long started = time.GetTimestamp();
+        while (!files.FileExists(path))
+        {
+            if (time.GetElapsedTime(started) >= WaitWindow)
+            {
+                return false;
+            }
+
+            await Task.Delay(PollInterval, time, cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
     internal static string ClaimPath(string projectRoot, DispatchClaimKey key)
     {
         string id = key.ToolUseId.Length <= MaxSafeIdLength && SafeIdPattern.IsMatch(key.ToolUseId)

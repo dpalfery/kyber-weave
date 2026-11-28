@@ -82,29 +82,31 @@ public sealed class FileDispatchClaimStoreTests : IDisposable
     }
 
     [Fact]
-    public void ADispatchWithoutAClaimStopsWaitingAfterTheWaitWindow()
+    public async Task ADispatchWithoutAClaimStopsWaitingAfterTheWaitWindow()
     {
         DispatchClaimKey key = new("toolu_1", "pre");
 
-        bool claimed = RunWaitAdvancingTime(key, beforeClaim: null);
+        bool claimed = await RunWaitAdvancingTimeAsync(key, beforeClaim: null);
 
         Assert.False(claimed);
     }
 
     [Fact]
-    public void AClaimMadeWhileWaitingEndsTheWaitWithTrue()
+    public async Task AClaimMadeWhileWaitingEndsTheWaitWithTrue()
     {
         DispatchClaimKey key = new("toolu_1", "pre");
         FileDispatchClaimStore other = new(_files, _time, new FakeIdGenerator(100));
 
-        bool claimed = RunWaitAdvancingTime(key, beforeClaim: () => other.TryClaim(Project, key, "project-hook"));
+        bool claimed = await RunWaitAdvancingTimeAsync(
+            key,
+            beforeClaim: () => other.TryClaim(Project, key, "project-hook"));
 
         Assert.True(claimed);
     }
 
-    private bool RunWaitAdvancingTime(DispatchClaimKey key, Func<bool>? beforeClaim) =>
-        _time.RunAdvancingOnParks(
-            () => _store.WaitForClaim(Project, key),
+    private Task<bool> RunWaitAdvancingTimeAsync(DispatchClaimKey key, Func<bool>? beforeClaim) =>
+        _time.RunAdvancingOnParksAsync(
+            () => _store.WaitForClaimAsync(Project, key, CancellationToken.None),
             TimeSpan.FromMilliseconds(50),
             parkNumber: 3,
             atPark: beforeClaim is null ? null : () => _ = beforeClaim());

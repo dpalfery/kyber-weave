@@ -19,4 +19,11 @@ public interface IHookSnapshotStore
     /// <param name="fileName">The document's file name.</param>
     /// <param name="mutate">Takes the document's current text and returns the new text, or null to leave the document alone.</param>
     void Update(string directory, string fileName, Func<string, string?> mutate);
+
+    /// <summary>Rewrites the document under the store's lock, waiting asynchronously for the lock. Persistence is best effort: a failure leaves the document as it was.</summary>
+    /// <param name="directory">The arbiter directory.</param>
+    /// <param name="fileName">The document's file name.</param>
+    /// <param name="mutate">Takes the document's current text and returns the new text, or null to leave the document alone.</param>
+    /// <param name="cancellationToken">Cancels the lock wait.</param>
+    Task UpdateAsync(string directory, string fileName, Func<string, string?> mutate, CancellationToken cancellationToken);
 }
