@@ -39,21 +39,21 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void AGatesDurationIsTheTimeTheClockAdvancedWhileItRan()
+    public async Task AGatesDurationIsTheTimeTheClockAdvancedWhileItRan()
     {
         _programs.Takes("build", TimeSpan.FromMilliseconds(1500));
 
-        GateReport report = _service.Run(Config(Gate("build")), Root);
+        GateReport report = await _service.RunAsync(Config(Gate("build")), Root);
 
         Assert.Equal(1500, Assert.Single(report.Gates).DurationMilliseconds);
     }
 
     [Fact]
-    public void AGateTheDeadlinePassedBeforeItStartsIsReportedWithoutRunningIt()
+    public async Task AGateTheDeadlinePassedBeforeItStartsIsReportedWithoutRunningIt()
     {
         _programs.Takes("first", TimeSpan.FromSeconds(6));
 
-        GateReport report = _service.Run(Config(Gate("first"), Gate("second")), Root, deadline: TimeSpan.FromSeconds(5));
+        GateReport report = await _service.RunAsync(Config(Gate("first"), Gate("second")), Root, deadline: TimeSpan.FromSeconds(5));
 
         Assert.Equal(GateOutcome.Completed, report.Gates[0].Outcome);
         Assert.Equal(GateOutcome.DeadlinePassed, report.Gates[1].Outcome);
@@ -61,22 +61,22 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void EachGateRunsForTheShorterOfItsOwnTimeoutAndTheTimeLeft()
+    public async Task EachGateRunsForTheShorterOfItsOwnTimeoutAndTheTimeLeft()
     {
         _programs.Takes("first", TimeSpan.FromSeconds(4));
         _programs.Takes("second", TimeSpan.FromSeconds(1));
 
-        _ = _service.Run(Config(Gate("first", timeoutSeconds: 60), Gate("second", timeoutSeconds: 3)), Root, deadline: TimeSpan.FromSeconds(10));
+        _ = await _service.RunAsync(Config(Gate("first", timeoutSeconds: 60), Gate("second", timeoutSeconds: 3)), Root, deadline: TimeSpan.FromSeconds(10));
 
         Assert.Equal([TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(3)], _programs.Timeouts);
     }
 
     [Fact]
-    public void AGateCutAtTheDeadlineIsReportedAsDeadlinePassedWithTheTimeItRan()
+    public async Task AGateCutAtTheDeadlineIsReportedAsDeadlinePassedWithTheTimeItRan()
     {
         _programs.TimesOut("slow", TimeSpan.FromSeconds(2));
 
-        GateReport report = _service.Run(Config(Gate("slow", timeoutSeconds: 60)), Root, deadline: TimeSpan.FromSeconds(2));
+        GateReport report = await _service.RunAsync(Config(Gate("slow", timeoutSeconds: 60)), Root, deadline: TimeSpan.FromSeconds(2));
 
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.DeadlinePassed, result.Outcome);
@@ -84,11 +84,11 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void AGateOverItsOwnTimeoutIsReportedAsTimedOut()
+    public async Task AGateOverItsOwnTimeoutIsReportedAsTimedOut()
     {
         _programs.TimesOut("slow", TimeSpan.FromSeconds(3));
 
-        GateReport report = _service.Run(Config(Gate("slow", timeoutSeconds: 3)), Root);
+        GateReport report = await _service.RunAsync(Config(Gate("slow", timeoutSeconds: 3)), Root);
 
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);
@@ -97,7 +97,7 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void AGateItsOwnTimeoutStoppedWhileTheMachineSleptRecordsThatLimitAndTheWholeTimeItTook()
+    public async Task AGateItsOwnTimeoutStoppedWhileTheMachineSleptRecordsThatLimitAndTheWholeTimeItTook()
     {
         // run-06: dotnet-build's 300-second limit fired during a 272-second clamshell sleep. The process
         // timeout counts continuous time and fired; the monotonic clock the duration was read from paused,
@@ -107,7 +107,8 @@ public sealed class GateRunServiceTests
             awake: TimeSpan.FromMilliseconds(46_915),
             asleep: TimeSpan.FromMilliseconds(253_085));
 
-        GateResult result = Assert.Single(_service.Run(Config(Gate("build", timeoutSeconds: 300)), Root).Gates);
+        GateReport report = await _service.RunAsync(Config(Gate("build", timeoutSeconds: 300)), Root);
+        GateResult result = Assert.Single(report.Gates);
 
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);
         Assert.Equal(300, result.TimeoutSeconds);
@@ -115,11 +116,11 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void TheCouncilDeadlineCountsTheTimeTheMachineSpentAsleep()
+    public async Task TheCouncilDeadlineCountsTheTimeTheMachineSpentAsleep()
     {
         _programs.Takes("first", TimeSpan.FromSeconds(10), asleep: TimeSpan.FromSeconds(600));
 
-        GateReport report = _service.Run(
+        GateReport report = await _service.RunAsync(
             Config(Gate("first"), Gate("second")), Root, deadline: TimeSpan.FromSeconds(300));
 
         Assert.Equal(GateOutcome.Completed, report.Gates[0].Outcome);
@@ -127,24 +128,24 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void ARequiredPathIsResolvedAgainstTheRepositoryRoot()
+    public async Task ARequiredPathIsResolvedAgainstTheRepositoryRoot()
     {
         ReviewGate gate = new("web", ["web"]) { RequiresPaths = ["dash/node_modules"] };
 
-        GateReport missing = _service.Run(Config(gate), Root);
+        GateReport missing = await _service.RunAsync(Config(gate), Root);
         _files.CreateDirectory("/repo/dash/node_modules");
-        GateReport present = _service.Run(Config(gate), Root);
+        GateReport present = await _service.RunAsync(Config(gate), Root);
 
         Assert.Equal(GateOutcome.NotStarted, Assert.Single(missing.Gates).Outcome);
         Assert.Equal(GateOutcome.Completed, Assert.Single(present.Gates).Outcome);
     }
 
     [Fact]
-    public void AGatesWorkingDirectoryIsResolvedAgainstTheRepositoryRoot()
+    public async Task AGatesWorkingDirectoryIsResolvedAgainstTheRepositoryRoot()
     {
         _files.CreateDirectory("/repo/dash");
 
-        _ = _service.RunTaskGates(
+        _ = await _service.RunTaskGatesAsync(
             [new PlannedTaskGate("lint", true, 30, [], ["lint"], "dash")],
             Root,
             fix: false);
@@ -153,11 +154,11 @@ public sealed class GateRunServiceTests
     }
 
     [Fact]
-    public void ARelativeRepositoryRootIsResolvedAgainstTheProcessWorkingDirectory()
+    public async Task ARelativeRepositoryRootIsResolvedAgainstTheProcessWorkingDirectory()
     {
         _files.CreateDirectory("/repo/dash");
 
-        _ = _service.RunTaskGates(
+        _ = await _service.RunTaskGatesAsync(
             [new PlannedTaskGate("lint", true, 30, [], ["lint"], "dash")],
             ".",
             fix: false);

@@ -101,28 +101,13 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
-    public void TheSeatsCommandLoadsTheConfigurationForTheRootARelativePathResolvesTo()
-    {
-        RecordingConfigs configs = new();
-
-        ReviewCommandResult result = Seats(configs).Prepare(
-            new ReviewSeatsRequest("repo", null, null, null, false, false, false),
-            (_, _) => throw new InvalidOperationException("unexpected call"),
-            new FakeProcessExecutor(),
-            TextWriter.Null);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal("/work/repo", configs.Root);
-    }
-
-    [Fact]
     public async Task TheSeatsCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
     {
         RecordingConfigs configs = new();
 
         ReviewCommandResult result = await Seats(configs).PrepareAsync(
             new ReviewSeatsRequest("repo", null, null, null, false, false, false),
-            (_, _) => throw new InvalidOperationException("unexpected call"),
+            (_, _, _) => throw new InvalidOperationException("unexpected call"),
             new ScriptedProcessRunner(),
             TextWriter.Null,
             CancellationToken.None);
@@ -200,52 +185,25 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
-    public void ATaskInAnotherWorktreeIsFoundWhenTheWorktreeIsSpelledRelativeToTheWorkingDirectory()
-    {
-        _files.CreateDirectory("/work/wt");
-        PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
-
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
-
-        Assert.NotNull(match);
-        Assert.Null(reason);
-        Assert.Equal("docs/plan.md", match.Plan);
-    }
-
-    [Fact]
-    public void AWorktreeThatIsNotADirectoryIsNotSearched()
+    public async Task AWorktreeThatIsNotADirectoryIsNotSearched()
     {
         PlanTaskTargetService service = Targets(worktrees: ["wt"], activeIn: "/work/wt");
 
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
 
-        Assert.Null(match);
-        Assert.NotNull(reason);
+        Assert.Null(lookup.Match);
+        Assert.NotNull(lookup.Reason);
     }
 
     [Fact]
-    public void TheCheckoutsOwnWorktreeEntryIsNotSearchedAgainWhateverItsSpelling()
+    public async Task TheCheckoutsOwnWorktreeEntryIsNotSearchedAgainWhateverItsSpelling()
     {
         _files.CreateDirectory("/work/repo");
         PlanTaskTargetService service = Targets(worktrees: ["repo/"], activeIn: "/work/repo");
 
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out _);
+        PlanTaskTargetLookup lookup = await service.FindAsync("repo", Config(), "T1", CancellationToken.None);
 
-        Assert.Null(match);
-    }
-
-    [Fact]
-    public void ATaskIsStillFoundInThisCheckoutsPlanThatHasMovedIntoReview()
-    {
-        _files.CreateDirectory("/work/repo");
-        PlanTaskTargetService service = Targets(worktrees: [], activeIn: null, reviewPlans: ["docs/plan.md"]);
-
-        PlanTaskTargetMatch? match = service.Find("repo", Config(), "T1", out string? reason);
-
-        Assert.Null(reason);
-        Assert.NotNull(match);
-        Assert.Equal("docs/plan.md", match.Plan);
-        Assert.Equal("T1", match.Entry.Id);
+        Assert.Null(lookup.Match);
     }
 
     [Fact]

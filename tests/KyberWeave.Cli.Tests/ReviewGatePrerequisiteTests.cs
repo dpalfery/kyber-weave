@@ -199,14 +199,14 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
     }
 
     [Fact]
-    public void AGateWithMalformedRequiresPathSafelyReportsNotStarted()
+    public async Task AGateWithMalformedRequiresPathSafelyReportsNotStarted()
     {
         ReviewGate gate = new("dash-typecheck", ["git", "status"], true, 900)
         {
             RequiresPaths = ["invalid\0path"]
         };
 
-        GateReport report = _services.Gates.Run(new ReviewConfig { Gates = [gate] }, _repo);
+        GateReport report = await _services.Gates.RunAsync(new ReviewConfig { Gates = [gate] }, _repo);
         GateResult result = Assert.Single(report.Gates);
         Assert.Equal(GateOutcome.NotStarted, result.Outcome);
         Assert.False(result.Passed);

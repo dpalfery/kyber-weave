@@ -26,11 +26,11 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     }
 
     [Fact]
-    public void AGateWhoseProgramIsMissingIsNotStarted()
+    public async Task AGateWhoseProgramIsMissingIsNotStarted()
     {
         PlannedTaskGate gate = new("missing-tool", true, 30, [], [MissingProgram, "--check"]);
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.NotStarted, result.Outcome);
@@ -39,14 +39,14 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     }
 
     [Fact]
-    public void AGateThatRunsPastItsLimitIsTimedOut()
+    public async Task AGateThatRunsPastItsLimitIsTimedOut()
     {
         string[] sleep = OperatingSystem.IsWindows()
             ? ["ping", "-n", "30", "127.0.0.1"]
             : ["sleep", "30"];
         PlannedTaskGate gate = new("slow-gate", true, 1, [], sleep);
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);
@@ -55,12 +55,12 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     }
 
     [Fact]
-    public void AGateThatRunsToTheEndIsCompletedWhetherOrNotItPasses()
+    public async Task AGateThatRunsToTheEndIsCompletedWhetherOrNotItPasses()
     {
         PlannedTaskGate passing = new("git-version", true, 30, [], ["git", "--version"]);
         PlannedTaskGate failing = new("git-no-such-command", true, 30, [], ["git", "kw-no-such-subcommand"]);
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([passing, failing], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([passing, failing], _root.Path, fix: false);
 
         Assert.Equal(2, run.Report.Gates.Count);
         Assert.All(run.Report.Gates, result => Assert.Equal(GateOutcome.Completed, result.Outcome));
@@ -73,11 +73,11 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     /// A gate declared <c>fail-on-output</c> must fail on that output, or it can never fail at all.
     /// </summary>
     [Fact]
-    public void AFailOnOutputGateFailsWhenACommandExitsZeroButPrintsSomething()
+    public async Task AFailOnOutputGateFailsWhenACommandExitsZeroButPrintsSomething()
     {
         PlannedTaskGate gate = new("prints", true, 30, [], ["git", "--version"]) { FailOnOutput = true };
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.False(result.Passed);
@@ -86,51 +86,51 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     }
 
     [Fact]
-    public void AFailOnOutputGatePassesWhenACommandExitsZeroAndPrintsNothing()
+    public async Task AFailOnOutputGatePassesWhenACommandExitsZeroAndPrintsNothing()
     {
         RunGit(_root.Path, "init", "-q");
         PlannedTaskGate gate = new("silent", true, 30, [], ["git", "status", "--porcelain"]) { FailOnOutput = true };
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         Assert.True(Assert.Single(run.Report.Gates).Passed);
     }
 
     /// <summary><c>git rev-parse --show-prefix</c> at the root prints one empty line: output, but nothing to report.</summary>
     [Fact]
-    public void AFailOnOutputGatePassesWhenTheOnlyOutputIsWhitespace()
+    public async Task AFailOnOutputGatePassesWhenTheOnlyOutputIsWhitespace()
     {
         RunGit(_root.Path, "init", "-q");
         PlannedTaskGate gate = new("blank", true, 30, [], ["git", "rev-parse", "--show-prefix"]) { FailOnOutput = true };
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         Assert.True(Assert.Single(run.Report.Gates).Passed);
     }
 
     [Fact]
-    public void AFailOnOutputGateStillFailsOnANonZeroExit()
+    public async Task AFailOnOutputGateStillFailsOnANonZeroExit()
     {
         PlannedTaskGate gate = new("broken", true, 30, [], ["git", "kw-no-such-subcommand"]) { FailOnOutput = true };
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         Assert.False(Assert.Single(run.Report.Gates).Passed);
     }
 
     /// <summary>Without the key, output on a zero exit is ignored: exit code stays the only judge.</summary>
     [Fact]
-    public void AGateWithoutFailOnOutputIgnoresOutputOnAZeroExit()
+    public async Task AGateWithoutFailOnOutputIgnoresOutputOnAZeroExit()
     {
         PlannedTaskGate gate = new("prints", true, 30, [], ["git", "--version"]);
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([gate], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([gate], _root.Path, fix: false);
 
         Assert.True(Assert.Single(run.Report.Gates).Passed);
     }
 
     [Fact]
-    public void ACouncilGateHonoursFailOnOutput()
+    public async Task ACouncilGateHonoursFailOnOutput()
     {
         ReviewConfig config = new()
         {
@@ -141,7 +141,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
             ]
         };
 
-        GateReport report = ReviewTestServices.Gates.Run(config, _root.Path);
+        GateReport report = await ReviewTestServices.Gates.RunAsync(config, _root.Path);
 
         Assert.False(report.Gates[0].Passed);
         Assert.True(report.Gates[1].Passed);
@@ -153,11 +153,11 @@ public sealed class GateRunnerOutcomeTests : IDisposable
     /// proves where the process started.
     /// </summary>
     [Fact]
-    public void AGateWithAWorkingDirectoryStartsInThatDirectory()
+    public async Task AGateWithAWorkingDirectoryStartsInThatDirectory()
     {
         string web = Path.Combine(_root.Path, "web");
         Directory.CreateDirectory(web);
-        File.WriteAllText(Path.Combine(web, "marker.txt"), "marker");
+        await File.WriteAllTextAsync(Path.Combine(web, "marker.txt"), "marker");
         RunGit(_root.Path, "init", "-q");
         RunGit(_root.Path, "add", "web/marker.txt");
 
@@ -165,7 +165,7 @@ public sealed class GateRunnerOutcomeTests : IDisposable
         PlannedTaskGate inWeb = new("probe-in-web", true, 30, [], probe, WorkingDirectory: "web");
         PlannedTaskGate atRoot = new("probe-at-root", true, 30, [], probe);
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([inWeb, atRoot], _root.Path, fix: false);
+        TaskGateRun run = await ReviewTestServices.Gates.RunTaskGatesAsync([inWeb, atRoot], _root.Path, fix: false);
 
         Assert.True(run.Report.Gates[0].Passed, run.Report.Gates[0].Summary);
         Assert.False(run.Report.Gates[1].Passed, "The same probe at the repository root must not find web/marker.txt.");

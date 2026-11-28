@@ -49,55 +49,9 @@ public sealed class ReviewSeatsService(
     private const string DefaultBase = "origin/HEAD";
 
     /// <inheritdoc />
-    public ReviewCommandResult Prepare(
-        ReviewSeatsRequest request,
-        Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
-        IProcessExecutor indexExecutor,
-        TextWriter output,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(indexExecutor);
-        ArgumentNullException.ThrowIfNull(output);
-        ArgumentNullException.ThrowIfNull(decisionModel);
-
-        string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
-        DiagnosticReport report = new();
-        if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResultFactory.Reported(1, report);
-
-        SeatSetup? setup = ResolveSetup(root, request, config, report, out ReviewCommandResult? failure);
-        if (setup is null)
-            return failure ?? ReviewCommandResultFactory.Reported(1, report);
-
-        // The index is synced before any seat starts, so no seat reads an index older than the diff.
-        WorktreeIndexOutcome index = worktreeIndex.Ensure(
-            setup.Tree,
-            DoctorOptions.Defaults,
-            indexExecutor,
-            environment.TempDirectory);
-
-        string folder = Path.Combine(setup.ReviewFolder, ScratchLayout.CycleFolder(setup.Plan.Number));
-        string gatesPath = Path.Combine(folder, ScratchLayout.GatesFileName);
-        string baseRef = request.BaseRef ?? DefaultBase;
-        IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
-
-        IReviewDecisionModel model = decisionModel(root, config);
-        CouncilSeatPlan seats = setup.Plan.Prior is { } verified && !request.Full
-            ? VerifierSeats(setup.Tree, verified, setup.Recheck)
-            : WithDecisionModel(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken);
-
-        if (!WriteSeats(folder, root, baseRef, gatesPath, setup, changed, seats, index, report, out string evidence))
-            return ReviewCommandResultFactory.Reported(1, report);
-
-        PrintDispatch(output, request, setup, seats, model, index, root, folder, gatesPath, evidence);
-        return new ReviewCommandResult(0);
-    }
-
-    /// <inheritdoc />
     public async Task<ReviewCommandResult> PrepareAsync(
         ReviewSeatsRequest request,
-        Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
+        Func<string, KyberWeaveConfig, CancellationToken, Task<IReviewDecisionModel>> decisionModel,
         IProcessRunner indexExecutor,
         TextWriter output,
         CancellationToken cancellationToken = default)
@@ -130,7 +84,7 @@ public sealed class ReviewSeatsService(
         string baseRef = request.BaseRef ?? DefaultBase;
         IReadOnlyList<string>? changed = ChangedPaths(root, baseRef);
 
-        IReviewDecisionModel model = decisionModel(root, config);
+        IReviewDecisionModel model = await decisionModel(root, config, cancellationToken).ConfigureAwait(false);
         CouncilSeatPlan seats = setup.Plan.Prior is { } verified && !request.Full
             ? VerifierSeats(setup.Tree, verified, setup.Recheck)
             : await WithDecisionModelAsync(root, baseRef, changed, CouncilSeating.Plan(changed), model, cancellationToken)
@@ -313,44 +267,6 @@ public sealed class ReviewSeatsService(
     /// <param name="task">The task id the verdict should read, or null when the cycle folder records it.</param>
     internal static string ReviewSeatsCommandVerdictLine(string? task) =>
         task is null ? "kyber-weave review verdict ." : $"kyber-weave review verdict . --task {task}";
-
-    /// <summary>
-    /// Leaves out each judgement lens the decision model confidently finds does not apply to the change. With no model
-    /// configured, or no changed-file list, the seating is returned unchanged.
-    /// </summary>
-    private CouncilSeatPlan WithDecisionModel(
-        string root,
-        string baseRef,
-        IReadOnlyList<string>? changed,
-        CouncilSeatPlan seats,
-        IReviewDecisionModel model,
-        CancellationToken cancellationToken)
-    {
-        if (!model.Configured || changed is not { Count: > 0 })
-            return seats;
-
-        string patch;
-        try
-        {
-            patch = git.DiffSinceMergeBase(root, baseRef).Patch;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
-        {
-            patch = string.Empty;
-        }
-
-        IReadOnlyDictionary<string, string> ruledOut = decisionSteps.NotApplicableLensesAsync(
-                model, seats.Now, ReviewLensRules.Summarize(changed, patch), cancellationToken)
-            .GetAwaiter()
-            .GetResult();
-        if (ruledOut.Count == 0)
-            return seats;
-
-        Dictionary<string, string> notSeated = new(seats.NotSeated, StringComparer.Ordinal);
-        foreach ((string lens, string reason) in ruledOut)
-            notSeated[lens] = reason;
-        return new CouncilSeatPlan([.. seats.Now.Where(lens => !ruledOut.ContainsKey(lens))], seats.AfterGates, notSeated);
-    }
 
     /// <summary>
     /// Leaves out each judgement lens the decision model confidently finds does not apply to the change, asking

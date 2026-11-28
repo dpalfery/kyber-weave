@@ -45,7 +45,7 @@ public sealed class ReviewSeatsCommand(
 
         ReviewCommandResult result = await service.PrepareAsync(
             Request(settings),
-            (repositoryRoot, config) => decisionModels.CreateForRepository(repositoryRoot, config, settings.NoDecisionModel, cachePath: null),
+            (repositoryRoot, config, token) => decisionModels.CreateForRepositoryAsync(repositoryRoot, config, settings.NoDecisionModel, cachePath: null, token),
             new BoundedRunner(processes, IndexTimeout),
             standard.Out,
             cancellationToken).ConfigureAwait(false);

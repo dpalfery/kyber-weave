@@ -284,13 +284,6 @@ public sealed class ReviewCommandConsoleSeamTests
             return Task.FromResult(result);
         }
 
-        // The interface keeps its synchronous member for the callers outside this slice; the commands use RunAsync.
-        public ReviewCommandResult Run(ReviewCatalogueRequest request, TextWriter output, CancellationToken cancellationToken)
-        {
-            Output = output;
-            return result;
-        }
-
         public ReviewCommandResult Run(ReviewCycleRequest request, TextWriter output, CancellationToken cancellationToken)
         {
             Output = output;
@@ -302,28 +295,15 @@ public sealed class ReviewCommandConsoleSeamTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(result);
 
-        public ReviewCommandResult Run(ReviewSuppressionsRequest request, CancellationToken cancellationToken) => result;
-
         public Task<ReviewCommandResult> PrepareAsync(
             ReviewSeatsRequest request,
-            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
+            Func<string, KyberWeaveConfig, CancellationToken, Task<IReviewDecisionModel>> decisionModel,
             IProcessRunner indexExecutor,
             TextWriter output,
             CancellationToken cancellationToken = default)
         {
             Output = output;
             return Task.FromResult(result);
-        }
-
-        public ReviewCommandResult Prepare(
-            ReviewSeatsRequest request,
-            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
-            IProcessExecutor indexExecutor,
-            TextWriter output,
-            CancellationToken cancellationToken)
-        {
-            Output = output;
-            return result;
         }
     }
 
@@ -340,22 +320,12 @@ public sealed class ReviewCommandConsoleSeamTests
             Output = output;
             return Task.FromResult(result);
         }
-
-        public ReviewCommandResult Run(
-            ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output, CancellationToken cancellationToken)
-        {
-            Request = request;
-            Output = output;
-            return result;
-        }
     }
 
     private sealed class ScriptedVerdicts(ReviewVerdictResult result) : IReviewVerdictService
     {
         public Task<ReviewVerdictResult> DecideAsync(ReviewVerdictRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(result);
-
-        public ReviewVerdictResult Decide(ReviewVerdictRequest request, CancellationToken cancellationToken) => result;
     }
 
     private sealed class NoDecisionModels : IReviewDecisionModelFactory
@@ -367,10 +337,6 @@ public sealed class ReviewCommandConsoleSeamTests
             TimeProvider clock,
             string? unavailableReason = null,
             string? cachePath = null) => throw new NotSupportedException();
-
-        public IReviewDecisionModel CreateForRepository(
-            string repositoryRoot, KyberWeaveConfig config, bool disabled, string? cachePath) =>
-            throw new NotSupportedException();
 
         public Task<IReviewDecisionModel> CreateForRepositoryAsync(
             string repositoryRoot,

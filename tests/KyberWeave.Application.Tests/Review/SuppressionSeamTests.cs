@@ -28,23 +28,23 @@ public sealed class SuppressionSeamTests
         new(programs, _files, new NoFileReader(), new FakePathResolver(_files), _environment);
 
     [Fact]
-    public void TheScanReportsARelativeDirectoryThatDoesNotExistUnderTheInjectedWorkingDirectory()
+    public async Task TheScanAsyncReportsARelativeDirectoryThatDoesNotExistUnderTheInjectedWorkingDirectory()
     {
-        SuppressionScanResult result = Scanner(new ScriptedProcessRunner()).Scan("repo", "origin/main");
+        SuppressionScanResult result = await Scanner(new ScriptedProcessRunner()).ScanAsync("repo", "origin/main", CancellationToken.None);
 
         Assert.False(result.Succeeded);
         Assert.Contains("/work/repo", result.Failure, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheScanRunsGitInTheDirectoryARelativeSpellingResolvesTo()
+    public async Task TheScanAsyncRunsGitInTheDirectoryARelativeSpellingResolvesTo()
     {
         _files.CreateDirectory("/work/repo");
         ScriptedProcessRunner programs = new ScriptedProcessRunner()
             .Script("git", new ProcessRunResult(0, string.Empty, false), DiffArgv)
             .Script("git", new ProcessRunResult(0, string.Empty, false), UntrackedArgv);
 
-        SuppressionScanResult result = Scanner(programs).Scan("repo", "origin/main");
+        SuppressionScanResult result = await Scanner(programs).ScanAsync("repo", "origin/main", CancellationToken.None);
 
         Assert.True(result.Succeeded);
         Assert.Empty(result.Findings);
@@ -52,30 +52,15 @@ public sealed class SuppressionSeamTests
     }
 
     [Fact]
-    public void TheCommandRefusesARelativePathThatResolvesToNoDirectory()
+    public async Task TheCommandAsyncRefusesARelativePathThatResolvesToNoDirectory()
     {
         ReviewSuppressionsService service = new(
             new RecordingScanner(), _files, new FakePathResolver(_files), _environment);
 
-        ReviewCommandResult result = service.Run(new ReviewSuppressionsRequest("repo", null));
+        ReviewCommandResult result = await service.RunAsync(new ReviewSuppressionsRequest("repo", null), CancellationToken.None);
 
         Assert.Equal(ReviewCommandResult.ClientInputExitCode, result.ExitCode);
         Assert.Contains("/work/repo", result.ClientError, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TheCommandHandsTheScannerTheDirectoryARelativeSpellingResolvesTo()
-    {
-        _files.CreateDirectory("/work/repo");
-        RecordingScanner scanner = new();
-        ReviewSuppressionsService service = new(
-            scanner, _files, new FakePathResolver(_files), _environment);
-
-        ReviewCommandResult result = service.Run(new ReviewSuppressionsRequest("repo", "origin/main"));
-
-        Assert.Equal(0, result.ExitCode);
-        Assert.Equal("/work/repo", scanner.ScannedDirectory);
-        Assert.Equal("origin/main", scanner.BaseRef);
     }
 
     [Fact]
@@ -121,13 +106,6 @@ public sealed class SuppressionSeamTests
         public string? ScannedDirectory { get; private set; }
 
         public string? BaseRef { get; private set; }
-
-        public SuppressionScanResult Scan(string workingDirectory, string baseRef)
-        {
-            ScannedDirectory = workingDirectory;
-            BaseRef = baseRef;
-            return new SuppressionScanResult([], null);
-        }
 
         public Task<SuppressionScanResult> ScanAsync(
             string workingDirectory,

@@ -30,20 +30,6 @@ public sealed class SuppressionScanService(
         ["ls-files", "-z", "--others", "--exclude-standard", "--"];
 
     /// <inheritdoc />
-    public SuppressionScanResult Scan(string workingDirectory, string baseRef)
-    {
-        if (!TryPrepareScan(workingDirectory, baseRef, out string root, out SuppressionScanResult? failure))
-            return failure;
-
-        GitRunResult diffResult = RunGit(root, SuppressionScan.MaxDiffBytes, [.. DiffPrefixArguments, baseRef, "--"]);
-        if (!TryParseDiff(baseRef, diffResult, out SuppressionCandidates? added, out SuppressionScanResult? diffFailure))
-            return diffFailure;
-
-        GitRunResult untrackedResult = RunGit(root, null, UntrackedArguments);
-        return FinishScan(root, added, untrackedResult);
-    }
-
-    /// <inheritdoc />
     public async Task<SuppressionScanResult> ScanAsync(
         string workingDirectory,
         string baseRef,
@@ -151,27 +137,6 @@ public sealed class SuppressionScanService(
     }
 
     private readonly record struct GitRunResult(bool Succeeded, string Output, bool ExceededBudget = false);
-
-    /// <summary>
-    /// Runs git with argv, never a shell, and returns its output or the reason it produced none. A missing git, a
-    /// timeout, and a non-zero exit are all the same fact to the caller: the change was not read.
-    /// </summary>
-    private GitRunResult RunGit(string workingDirectory, long? maxOutputBytes, params string[] arguments)
-    {
-        try
-        {
-            ProcessResult result = ((IProgramRunner)programs).Run("git", arguments, workingDirectory, GitTimeout, maxOutputBytes);
-            return ToGitRunResult(arguments, result);
-        }
-        catch (OutputLimitExceededException ex)
-        {
-            return new GitRunResult(false, ex.Message.Trim(), ExceededBudget: true);
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or TimeoutException or IOException)
-        {
-            return new GitRunResult(false, ex.Message.Trim());
-        }
-    }
 
     private async Task<GitRunResult> RunGitAsync(
         string workingDirectory,
