@@ -1405,7 +1405,9 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("LEFT JOIN first_model fmm ON fmm.root = p.request_span_id ");
         sql.Append(CultureInfo.InvariantCulture, $"ORDER BY p.position {sqlOrder}");
 
-        IReadOnlyList<ReadTimeSessionRequestSummary> rows = QueryRows<ReadTimeSessionRequestSummary>(
+        // The page statement carries the total in every row, so the page and its total come from one
+        // evaluation of the request chain; only an empty page needs a second statement for the total.
+        IReadOnlyList<(ReadTimeSessionRequestSummary Row, int PageTotal)> paged = QueryRows<(ReadTimeSessionRequestSummary Row, int PageTotal)>(
             sql.ToString(),
             parameters,
             static reader =>
@@ -1420,18 +1422,21 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
                 string timestampUtc = requestStarted.HasValue
                     ? FormatTimestamp(requestStarted.Value)
                     : (firstTurnStarted.HasValue ? FormatTimestamp(firstTurnStarted.Value) : string.Empty);
-                return new ReadTimeSessionRequestSummary(
+                return (new ReadTimeSessionRequestSummary(
                     RequestSpanId: reader.GetString(reader.GetOrdinal("request_span_id")),
                     TimestampUtc: timestampUtc,
                     Turns: reader.GetInt32(reader.GetOrdinal("turn_total")),
                     Model: model,
-                    PromptPreview: null);
+                    PromptPreview: null), reader.GetInt32(reader.GetOrdinal("page_total")));
             });
 
-        int total = QueryRows<int>(
-            ctes + "SELECT (SELECT COUNT(*) FROM all_requests) AS page_total",
-            parameters,
-            static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
+        ReadTimeSessionRequestSummary[] rows = [.. paged.Select(static entry => entry.Row)];
+        int total = paged.Count > 0
+            ? paged[0].PageTotal
+            : QueryRows<int>(
+                ctes + "SELECT (SELECT COUNT(*) FROM all_requests) AS page_total",
+                parameters,
+                static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
 
         return new SessionRequestFigurePageResult(rows, total);
     }
@@ -1481,21 +1486,23 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
         sql.Append("sum_chat_output, output_match ");
         sql.Append(CultureInfo.InvariantCulture, $"FROM measurable ORDER BY position {sqlOrder} LIMIT {limitMarker} OFFSET {offsetMarker}");
 
-        IReadOnlyList<ReadTimeTurnReconciliation> rows = QueryRows<ReadTimeTurnReconciliation>(
+        IReadOnlyList<(ReadTimeTurnReconciliation Row, int PageTotal)> paged = QueryRows<(ReadTimeTurnReconciliation Row, int PageTotal)>(
             sql.ToString(),
             parameters,
-            static reader => new ReadTimeTurnReconciliation(
+            static reader => (new ReadTimeTurnReconciliation(
                 RequestSpanId: reader.GetString(reader.GetOrdinal("span_id")),
                 RootInput: ReadNullableInt64(reader, "reported_input"),
                 SumChatInput: reader.GetInt64(reader.GetOrdinal("sum_chat_input")),
                 InputMatch: reader.GetInt64(reader.GetOrdinal("input_match")) == 1L,
                 RootOutput: ReadNullableInt64(reader, "reported_output"),
                 SumChatOutput: reader.GetInt64(reader.GetOrdinal("sum_chat_output")),
-                OutputMatch: reader.GetInt64(reader.GetOrdinal("output_match")) == 1L));
+                OutputMatch: reader.GetInt64(reader.GetOrdinal("output_match")) == 1L), reader.GetInt32(reader.GetOrdinal("page_total"))));
 
-        int total = rows.Count == 0
+        // As for the request page: the total comes from the page statement's own rows.
+        ReadTimeTurnReconciliation[] rows = [.. paged.Select(static entry => entry.Row)];
+        int total = paged.Count == 0
             ? ReadSessionSectionTotal(ctes, "measurable", "session reconciliation page", parameters)
-            : QueryRows<int>(ctes + "SELECT COUNT(*) AS page_total FROM measurable", parameters, static reader => reader.GetInt32(reader.GetOrdinal("page_total")))[0];
+            : paged[0].PageTotal;
 
         return new SessionReconciliationFigurePageResult(rows, total);
     }
@@ -2994,7 +3001,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             : $"({spanMarker})";
 
         string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
-        List<RawRecordHeader> rawRecords = [.. Query(recordSql, parameters, ReadRawRecordHeader)];
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
 
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
         foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
@@ -3126,7 +3133,7 @@ public partial class SqliteRelationalStore : IRelationalStoreReader
             : $" WHERE ai.span_id IN (SELECT r.span_id FROM record r WHERE {wherePredicate})";
 
         string recordSql = "SELECT " + RecordReadColumns + " " + RecordReadFrom + recordFilter + " ORDER BY r.rowid ASC";
-        List<RawRecordHeader> rawRecords = [.. Query(recordSql, parameters, ReadRawRecordHeader)];
+        List<RawRecordHeader> rawRecords = [.. QueryRows(recordSql, parameters, ReadRawRecordHeader)];
 
         Dictionary<string, List<CollectedTokenCount>> tokensBySpan = new(StringComparer.Ordinal);
         foreach ((string SpanId, TokenClass TokenClass, long Count) row in QueryRows<(string SpanId, TokenClass TokenClass, long Count)>(
