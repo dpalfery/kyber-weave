@@ -61,7 +61,7 @@ public sealed record DocumentFrontmatter
     /// Heading slug of the leaf an exact document-id query returns; default is the preamble
     /// (<c>{doc-id}#</c>).
     /// </summary>
-    public string? Lead { get; set; }
+    public string? Lead { get; init; }
 
     /// <summary>
     /// Per-section keywords and code-refs keyed by heading slug; preamble uses

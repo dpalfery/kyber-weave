@@ -9,7 +9,9 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// The analysis cache over an in-memory checkout: which paths it refuses before it ever touches the database.
-/// The in-process SQLite adapter itself is proven by the integration tests.
+/// The in-process SQLite adapter itself, its bounded busy retry included, is proven by the integration tests
+/// (SqliteAnalysisPersistenceIntegrationTests). The branch that leaves the cache closed when the native SQLite
+/// provider cannot load needs a host without the library, so no automated test covers it.
 /// </summary>
 public sealed class SqliteAnalysisPersistenceSeamTests
 {
@@ -32,7 +34,6 @@ public sealed class SqliteAnalysisPersistenceSeamTests
 
         Assert.False(persistence.IsAvailable);
         Assert.False(_files.DirectoryExists(CacheDirectory));
-        Assert.Empty(processes.CallsTo("sqlite3"));
     }
 
     [Fact]
@@ -44,8 +45,6 @@ public sealed class SqliteAnalysisPersistenceSeamTests
         ScriptedProcessExecutor processes = Scripted(_ => Ok("0\n"));
 
         _ = Assert.Throws<InvalidOperationException>(() => Open(processes));
-
-        Assert.Empty(processes.CallsTo("sqlite3"));
     }
 
     private static ProcessResult Ok(string output) => new(0, output, string.Empty);

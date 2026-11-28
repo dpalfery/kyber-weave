@@ -84,8 +84,10 @@ public class SqliteRelationalStoreWriteTests
 
         string pragmaSql = store.ExecutedSql[0];
         Assert.Contains("PRAGMA journal_mode = WAL;", pragmaSql, StringComparison.Ordinal);
-        Assert.Contains("PRAGMA synchronous = NORMAL;", pragmaSql, StringComparison.Ordinal);
-        Assert.Contains($"PRAGMA journal_size_limit = {SqliteRelationalStore.WalSizeLimitBytes.ToString(CultureInfo.InvariantCulture)};", pragmaSql, StringComparison.Ordinal);
+        // The per-connection settings run on every connection the store opens, not once here.
+        string perConnection = string.Join("\n", store.PragmasPerConnection.Select(static pragma => pragma.Sql));
+        Assert.Contains("PRAGMA synchronous = NORMAL;", perConnection, StringComparison.Ordinal);
+        Assert.Contains($"PRAGMA journal_size_limit = {SqliteRelationalStore.WalSizeLimitBytes.ToString(CultureInfo.InvariantCulture)};", perConnection, StringComparison.Ordinal);
         string expectedStoreStateDdl = NormalizeLineEndings(SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"))).Trim();
         Assert.Contains(expectedStoreStateDdl, NormalizeLineEndings(store.ExecutedSql[1]), StringComparison.Ordinal);
 
@@ -815,6 +817,8 @@ public class SqliteRelationalStoreWriteTests
 
     private class RecordingSqliteRelationalStore : SqliteRelationalStore
     {
+        public IReadOnlyList<SqlStatement> PragmasPerConnection => ConnectionPragmas;
+
         private readonly List<string> executedSql = [];
         private readonly Queue<string> queuedResponses = new();
 
