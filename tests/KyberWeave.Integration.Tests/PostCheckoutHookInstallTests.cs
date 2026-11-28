@@ -29,11 +29,11 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     public void Dispose() => _git.Dispose();
 
     [Fact]
-    public void EnsureInstallsTheHookExecutableAndReportsItInstalled()
+    public async Task EnsureInstallsTheHookExecutableAndReportsItInstalled()
     {
         _git.CreateGovernedRepository();
 
-        DoctorCheck? check = DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        DoctorCheck? check = await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
         string hook = PostCheckoutGitFixture.HookPath(_git.Repository);
         Assert.True(File.Exists(hook), "Ensure must write .git/hooks/post-checkout in a governed repository.");
@@ -53,14 +53,14 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     /// hooks folder. Writing under the worktree's own folder would leave every other worktree without the hook.
     /// </summary>
     [Fact]
-    public void EnsureFromALinkedWorktreeWritesTheCommonHooksFolderNotTheWorktreeFolder()
+    public async Task EnsureFromALinkedWorktreeWritesTheCommonHooksFolderNotTheWorktreeFolder()
     {
         _git.CreateGovernedRepository();
         _git.CommitAll(_git.Repository, "govern the repository");
         string worktree = Path.Combine(_git.Root, "linked");
         _git.GitOk(_git.Repository, "worktree", "add", "-b", "linked-branch", worktree);
 
-        DoctorTestServices.PostCheckout.EnsureAsync(worktree, _git.Executor()).GetAwaiter().GetResult();
+        await DoctorTestServices.PostCheckout.EnsureAsync(worktree, _git.Executor());
 
         Assert.True(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
         Assert.False(
@@ -69,12 +69,12 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     }
 
     [Fact]
-    public void EnsureWithAnUntrackedRelativeHooksPathWritesIntoThatFolder()
+    public async Task EnsureWithAnUntrackedRelativeHooksPathWritesIntoThatFolder()
     {
         _git.CreateGovernedRepository();
         _git.GitOk(_git.Repository, "config", "core.hooksPath", "hooks-local");
 
-        DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
         Assert.True(File.Exists(Path.Combine(_git.Repository, "hooks-local", "post-checkout")));
         Assert.False(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
@@ -85,23 +85,23 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     /// The install reports the problem and writes nothing.
     /// </summary>
     [Fact]
-    public void EnsureWithATrackedHooksPathWritesNothingAndWarns()
+    public async Task EnsureWithATrackedHooksPathWritesNothingAndWarns()
     {
         _git.CreateGovernedRepository();
         string hooks = Path.Combine(_git.Repository, "githooks");
         Directory.CreateDirectory(hooks);
-        File.WriteAllText(Path.Combine(hooks, "pre-commit"), "#!/bin/sh\nexit 0\n");
+        await File.WriteAllTextAsync(Path.Combine(hooks, "pre-commit"), "#!/bin/sh\nexit 0\n");
         _git.CommitAll(_git.Repository, "track the hooks folder");
         _git.GitOk(_git.Repository, "config", "core.hooksPath", "githooks");
 
-        DoctorCheck? check = DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        DoctorCheck? check = await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
         Assert.False(File.Exists(Path.Combine(hooks, "post-checkout")));
         AssertWarning(check);
     }
 
     [Fact]
-    public void EnsureLeavesAHookWithoutTheExecutableBitByteForByteAndWarns()
+    public async Task EnsureLeavesAHookWithoutTheExecutableBitByteForByteAndWarns()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -110,11 +110,11 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
 
         _git.CreateGovernedRepository();
         string hook = WriteHook("#!/bin/sh\necho mine\n", executable: false);
-        byte[] before = File.ReadAllBytes(hook);
+        byte[] before = await File.ReadAllBytesAsync(hook);
 
-        DoctorCheck? check = DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        DoctorCheck? check = await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
-        Assert.Equal(before, File.ReadAllBytes(hook));
+        Assert.Equal(before, await File.ReadAllBytesAsync(hook));
         if (!OperatingSystem.IsWindows())
         {
             Assert.Equal(PlainMode, File.GetUnixFileMode(hook));
@@ -124,15 +124,15 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     }
 
     [Fact]
-    public void EnsureLeavesAPythonHookByteForByteAndWarns()
+    public async Task EnsureLeavesAPythonHookByteForByteAndWarns()
     {
         _git.CreateGovernedRepository();
         string hook = WriteHook("#!/usr/bin/env python3\nprint('keep')\n", executable: true);
-        byte[] before = File.ReadAllBytes(hook);
+        byte[] before = await File.ReadAllBytesAsync(hook);
 
-        DoctorCheck? check = DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        DoctorCheck? check = await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
-        Assert.Equal(before, File.ReadAllBytes(hook));
+        Assert.Equal(before, await File.ReadAllBytesAsync(hook));
         AssertWarning(check);
     }
 
@@ -141,39 +141,39 @@ public sealed class PostCheckoutHookInstallTests : IDisposable
     /// out again, and the owner's own lines must survive the removal.
     /// </summary>
     [Fact]
-    public void EnsureWithWorktreeIndexHookFalseRemovesTheInstalledBlockAndKeepsOtherLines()
+    public async Task EnsureWithWorktreeIndexHookFalseRemovesTheInstalledBlockAndKeepsOtherLines()
     {
         _git.CreateGovernedRepository();
-        DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
         string hook = PostCheckoutGitFixture.HookPath(_git.Repository);
-        File.AppendAllText(hook, "echo keep-me\n");
+        await File.AppendAllTextAsync(hook, "echo keep-me\n");
         PostCheckoutGitFixture.WriteGoverned(_git.Repository, "stop-on-tool-failure: true\nworktree-index-hook: false\n");
 
-        DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
         Assert.True(File.Exists(hook), "The owner's own line remains, so the file must not be deleted.");
-        string text = File.ReadAllText(hook);
+        string text = await File.ReadAllTextAsync(hook);
         Assert.DoesNotContain(PostCheckoutHookText.Block, text, StringComparison.Ordinal);
         Assert.Contains("echo keep-me", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void InspectWithoutTheHookReportsAWarningAndWritesNothing()
+    public async Task InspectWithoutTheHookReportsAWarningAndWritesNothing()
     {
         _git.CreateGovernedRepository();
 
-        DoctorCheck? check = DoctorTestServices.PostCheckout.InspectAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        DoctorCheck? check = await DoctorTestServices.PostCheckout.InspectAsync(_git.Repository, _git.Executor());
 
         Assert.False(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));
         AssertWarning(check);
     }
 
     [Fact]
-    public void EnsureInARepositoryWithoutGovernedDocsReturnsNoCheckAndWritesNoFile()
+    public async Task EnsureInARepositoryWithoutGovernedDocsReturnsNoCheckAndWritesNoFile()
     {
         _git.CreateRepository();
 
-        DoctorCheck? check = DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor()).GetAwaiter().GetResult();
+        DoctorCheck? check = await DoctorTestServices.PostCheckout.EnsureAsync(_git.Repository, _git.Executor());
 
         Assert.Null(check);
         Assert.False(File.Exists(PostCheckoutGitFixture.HookPath(_git.Repository)));

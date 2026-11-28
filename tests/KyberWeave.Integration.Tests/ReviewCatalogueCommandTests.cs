@@ -32,10 +32,10 @@ public sealed class ReviewCatalogueCommandTests : IDisposable
     /// its declared technologies: the block <c>docs init</c> writes.
     /// </summary>
     [Fact]
-    public void StdoutEqualsTheRenderedCatalogueBlockForTheFixtureTechnologies()
+    public async Task StdoutEqualsTheRenderedCatalogueBlockForTheFixtureTechnologies()
     {
         string repo = NewFixtureRepo("go", ["go"]);
-        ReviewGatesPlan plan = DocsTestCommands.Catalogue.PlanAsync(repo, ["go"], CancellationToken.None).GetAwaiter().GetResult();
+        ReviewGatesPlan plan = await DocsTestCommands.Catalogue.PlanAsync(repo, ["go"], CancellationToken.None);
         Assert.True(
             plan.ShouldWrite,
             "The go fixture planned no review block, so the stdout comparison proves nothing.");
