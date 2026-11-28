@@ -20,7 +20,7 @@ public abstract class CredentialStoreContractTests : IAsyncLifetime
 
     /// <summary>Nothing to set up: each test creates the stores it uses through <see cref="NewStore"/>.</summary>
     /// <returns>A completed task.</returns>
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+    public virtual ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
     /// <summary>Creates the store under test.</summary>
     /// <returns>The credential store seam.</returns>

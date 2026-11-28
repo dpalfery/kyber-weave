@@ -16,7 +16,7 @@ public sealed class OperatingSystemCredentialStoreContractTests : CredentialStor
 
     /// <summary>Probes the host's store once, so each test skips rather than fails where there is none.</summary>
     /// <returns>A task that completes once the probe has answered.</returns>
-    public new async ValueTask InitializeAsync()
+    public override async ValueTask InitializeAsync()
     {
         await base.InitializeAsync().ConfigureAwait(false);
         _unavailable = await CredentialStoreAvailability.ProbeAsync(
