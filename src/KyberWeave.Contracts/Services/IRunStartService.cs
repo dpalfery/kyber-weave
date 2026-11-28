@@ -95,7 +95,7 @@ public sealed record RunStartRequest(
     string? Resume,
     KyberWeaveConfig Config,
     string? ConfigPath,
-    IProcessExecutor? IndexExecutor,
+    IProcessRunner? IndexExecutor,
     string? Autonomy = null);
 
 /// <summary>How one run start ended.</summary>
@@ -107,7 +107,9 @@ public sealed record RunStartOutcome(RunStartStatus Status, IReadOnlyList<RunSta
 /// <summary>Fetches, resolves the base and creates the branch a run works on, before anyone investigates or plans.</summary>
 public interface IRunStartService
 {
-    /// <summary>Runs the step in the repository the request names.</summary>
+    /// <summary>Runs the step in the repository the request names, without blocking a thread while its children run.</summary>
     /// <param name="request">The branch, the resume target and the configuration.</param>
-    RunStartOutcome Start(RunStartRequest request);
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    /// <returns>The outcome of the step.</returns>
+    Task<RunStartOutcome> StartAsync(RunStartRequest request, CancellationToken cancellationToken = default);
 }

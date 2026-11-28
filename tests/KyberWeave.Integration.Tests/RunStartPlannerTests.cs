@@ -168,20 +168,22 @@ public sealed class RunStartPlannerTests : IDisposable
     ///     The record the real command writes is the one <c>KW-ARB-RUN-001</c> reads: after a run start,
     ///     in place or in a worktree, the repository counts as having a live run from either checkout.
     /// </summary>
+    /// <param name="busy">Whether a second worktree is already attached to the probe repository.</param>
+    /// <returns>The completed test.</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void TheRecordItWritesSatisfiesTheRunStartGuard(bool busy)
+    public async Task TheRecordItWritesSatisfiesTheRunStartGuard(bool busy)
     {
         if (busy)
             _probe.AddLinkedWorktree("spare");
-        Assert.False(Evidence.Started(_probe.Root, _probe.Home));
+        Assert.False(await Evidence.StartedAsync(_probe.Root, _probe.Home, TestContext.Current.CancellationToken));
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0. {result.Output}");
         Assert.True(
-            Evidence.Started(_probe.Root, _probe.Home),
+            await Evidence.StartedAsync(_probe.Root, _probe.Home, TestContext.Current.CancellationToken),
             $"run start must leave a record the guard reads as a live run. {result.Output}");
     }
 

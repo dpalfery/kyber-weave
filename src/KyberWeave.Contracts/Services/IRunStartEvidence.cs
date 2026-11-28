@@ -7,9 +7,10 @@ namespace KyberWeave.Contracts.Services;
 /// </summary>
 public interface IRunStartEvidence
 {
-    /// <summary>Whether a run is live for the repository <paramref name="workingDirectory" /> belongs to.</summary>
+    /// <summary>Whether a run is live for the repository <paramref name="workingDirectory" /> belongs to, without blocking a thread while git runs.</summary>
     /// <param name="workingDirectory">The tool call's working directory.</param>
     /// <param name="homeDirectory">The operator's home, which holds <c>.kyber-weave/runs</c>.</param>
+    /// <param name="cancellationToken">Cancels the git child.</param>
     /// <returns>True or false from the records; null when git cannot name the repository or the records cannot be read.</returns>
-    bool? Started(string workingDirectory, string homeDirectory);
+    Task<bool?> StartedAsync(string workingDirectory, string homeDirectory, CancellationToken cancellationToken = default);
 }

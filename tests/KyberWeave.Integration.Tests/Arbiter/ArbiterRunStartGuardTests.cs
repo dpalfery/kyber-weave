@@ -54,73 +54,73 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     [Fact]
-    public void NoRunRecord_IsNotStarted()
+    public async Task NoRunRecord_IsNotStarted()
     {
-        Assert.False(_evidence.Started(_repo, _home.Path));
+        Assert.False(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ARunBranchedInPlace_IsStarted()
+    public async Task ARunBranchedInPlace_IsStarted()
     {
         StartInPlace();
 
-        Assert.True(_evidence.Started(_repo, _home.Path));
+        Assert.True(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ARunInAWorktree_IsStartedFromTheMainCheckoutToo()
+    public async Task ARunInAWorktree_IsStartedFromTheMainCheckoutToo()
     {
         string worktree = Path.Combine(_repoParent.Path, "wt");
         Git(_repo, "worktree", "add", "-q", "-b", Branch, worktree);
         Record(worktree);
 
-        Assert.True(_evidence.Started(_repo, _home.Path));
-        Assert.True(_evidence.Started(worktree, _home.Path));
+        Assert.True(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
+        Assert.True(await _evidence.StartedAsync(worktree, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ARunWhoseBranchIsNoLongerCheckedOut_IsNotStarted()
+    public async Task ARunWhoseBranchIsNoLongerCheckedOut_IsNotStarted()
     {
         StartInPlace();
         Git(_repo, "switch", "-q", "main");
 
-        Assert.False(_evidence.Started(_repo, _home.Path));
+        Assert.False(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ARunWhoseWorktreeIsGone_IsNotStarted()
+    public async Task ARunWhoseWorktreeIsGone_IsNotStarted()
     {
         _runState.Write(
             _home.Path, Branch, "origin/main",
             new RunStartPlace(CommonDir(), Path.Combine(_repoParent.Path, "gone"), DateTimeOffset.UtcNow));
 
-        Assert.False(_evidence.Started(_repo, _home.Path));
+        Assert.False(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ARunOfAnotherRepository_DoesNotCount()
+    public async Task ARunOfAnotherRepository_DoesNotCount()
     {
         Git(_repo, "switch", "-q", "-c", Branch);
         _runState.Write(
             _home.Path, Branch, "origin/main",
             new RunStartPlace(Path.Combine(_repoParent.Path, "other", ".git"), _repo, DateTimeOffset.UtcNow));
 
-        Assert.False(_evidence.Started(_repo, _home.Path));
+        Assert.False(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ARecordFromBeforeThePlaceWasRecorded_IsSkipped()
+    public async Task ARecordFromBeforeThePlaceWasRecorded_IsSkipped()
     {
         Git(_repo, "switch", "-q", "-c", Branch);
         _runState.Write(_home.Path, Branch, "origin/main");
 
-        Assert.False(_evidence.Started(_repo, _home.Path));
+        Assert.False(await _evidence.StartedAsync(_repo, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void ADirectoryOutsideAnyRepository_IsUnknown()
+    public async Task ADirectoryOutsideAnyRepository_IsUnknown()
     {
-        Assert.Null(_evidence.Started(_home.Path, _home.Path));
+        Assert.Null(await _evidence.StartedAsync(_home.Path, _home.Path, TestContext.Current.CancellationToken));
     }
 
     [Fact]

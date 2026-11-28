@@ -39,7 +39,7 @@ namespace KyberWeave.Cli.Commands.Run;
 ///         reported for a missing tool never masks it.
 ///     </para>
 /// </remarks>
-public sealed class RunStartCommand : Command<RunStartSettings>
+public sealed class RunStartCommand : AsyncCommand<RunStartSettings>
 {
     /// <summary>The outcome a caller acts on: the branch exists and the run may continue.</summary>
     private const int Ready = 0;
@@ -64,7 +64,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     private readonly IProcessEnvironment _environment;
     private readonly IAnsiConsole _console;
     private readonly IConsole _standard;
-    private readonly IProcessExecutor? _executor;
+    private readonly IProcessRunner? _executor;
 
     /// <summary>Creates the command over the services it reads and writes through.</summary>
     /// <param name="runners">Opens the git runner for the repository the run starts in.</param>
@@ -83,7 +83,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         IProcessEnvironment environment,
         IAnsiConsole console,
         IConsole standard,
-        IProcessExecutor? executor = null)
+        IProcessRunner? executor = null)
     {
         ArgumentNullException.ThrowIfNull(runners);
         ArgumentNullException.ThrowIfNull(starts);
@@ -104,7 +104,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         RunStartSettings settings,
         CancellationToken cancellationToken)
@@ -132,7 +132,7 @@ public sealed class RunStartCommand : Command<RunStartSettings>
         }
 
         string currentDirectory = _environment.CurrentDirectory;
-        string? repositoryRoot = _runners.Open(currentDirectory).DetectRepositoryRoot();
+        string? repositoryRoot = await _runners.Open(currentDirectory).DetectRepositoryRootAsync(cancellationToken).ConfigureAwait(false);
         if (repositoryRoot is null)
         {
             return Fail(
@@ -147,10 +147,11 @@ public sealed class RunStartCommand : Command<RunStartSettings>
             return ToolFailure;
         }
 
-        RunStartOutcome outcome = _starts.Start(
+        RunStartOutcome outcome = await _starts.StartAsync(
             new RunStartRequest(
                 repositoryRoot, branch, settings.Resume, config, configPath, _executor,
-                _briefs.ResolveAutonomy(repositoryRoot, settings.Autonomy, config)));
+                _briefs.ResolveAutonomy(repositoryRoot, settings.Autonomy, config)),
+            cancellationToken).ConfigureAwait(false);
         WriteMessages(outcome.Messages, settings.Json);
 
         if (outcome.Facts is not { } facts)
@@ -171,49 +172,29 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         if (settings.Json)
         {
-            object json = new
-            {
-                @base = facts.BaseBranch,
-                baseRef = facts.StartRef,
-                branch = facts.Branch,
-                worktree = worktreePath,
-                location = facts.Location == RunStartLocation.InPlace ? "in-place" : "worktree",
-                revision = facts.BaseRevision,
-                resumed = facts.ResumeTarget is not null,
-                index = facts.IndexLabel,
-                completed = facts.Completed.Select(task => new { id = task.Id, report = task.Report }),
-                completedWarning = facts.CompletedWarning,
-                versions = new
-                {
-                    failing = settings.FailingVersion,
-                    head = facts.HeadVersion,
-                    @base = facts.BaseVersion
-                },
-                serverAlignment = new
-                {
-                    remote = RunStartPlanner.Remote,
-                    host = RunStartPlanner.HostOf(facts.OriginAddress),
-                    remoteUrl = facts.OriginAddress,
-                    head = facts.AlignmentRevision,
-                    ahead = facts.Ahead,
-                    behind = facts.Behind,
-                    aligned = facts.Ahead is not null && facts.Behind is not null
-                            ? facts.Ahead == 0 && facts.Behind == 0
-                            : (bool?)null
-                }
-            };
-
-            JsonNode document = JsonSerializer.SerializeToNode(json, JsonOptions)
-                ?? throw new InvalidOperationException("The run-start report could not be serialized.");
-            if (brief is not null)
-            {
-                document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
-            }
-
-            _standard.Out.WriteLine(document.ToJsonString(JsonOptions));
+            await _standard.Out
+                .WriteLineAsync(BuildJsonReport(facts, settings, worktreePath, brief))
+                .ConfigureAwait(false);
             return Ready;
         }
 
+        await WriteHumanReportAsync(facts, settings, worktreePath, brief).ConfigureAwait(false);
+
+        return Ready;
+    }
+
+    /// <summary>Prints the report a person reads for a started run, then the brief when there is one.</summary>
+    /// <param name="facts">What the step established.</param>
+    /// <param name="settings">The parsed settings, which carry the failing version.</param>
+    /// <param name="worktreePath">Where the run works, or null when it works in place.</param>
+    /// <param name="brief">The conductor's brief, or null when none was asked for or it could not be built.</param>
+    /// <returns>The completed write.</returns>
+    private async Task WriteHumanReportAsync(
+        RunStartFacts facts,
+        RunStartSettings settings,
+        string? worktreePath,
+        BriefResult? brief)
+    {
         WriteReport(
             facts.BaseBranch,
             facts.StartRef,
@@ -234,10 +215,62 @@ public sealed class RunStartCommand : Command<RunStartSettings>
 
         if (brief is not null)
         {
-            _standard.Out.Write("\n" + BriefFormatter.ToText(brief));
+            await _standard.Out.WriteAsync("\n" + BriefFormatter.ToText(brief)).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Builds the one JSON document a machine caller reads for a started run.</summary>
+    /// <param name="facts">What the step established.</param>
+    /// <param name="settings">The parsed settings, which carry the failing version.</param>
+    /// <param name="worktreePath">Where the run works, or null when it works in place.</param>
+    /// <param name="brief">The conductor's brief, or null when none was asked for or it could not be built.</param>
+    /// <returns>The document as text, with the brief embedded when there is one.</returns>
+    private static string BuildJsonReport(
+        RunStartFacts facts,
+        RunStartSettings settings,
+        string? worktreePath,
+        BriefResult? brief)
+    {
+        object json = new
+        {
+            @base = facts.BaseBranch,
+            baseRef = facts.StartRef,
+            branch = facts.Branch,
+            worktree = worktreePath,
+            location = facts.Location == RunStartLocation.InPlace ? "in-place" : "worktree",
+            revision = facts.BaseRevision,
+            resumed = facts.ResumeTarget is not null,
+            index = facts.IndexLabel,
+            completed = facts.Completed.Select(task => new { id = task.Id, report = task.Report }),
+            completedWarning = facts.CompletedWarning,
+            versions = new
+            {
+                failing = settings.FailingVersion,
+                head = facts.HeadVersion,
+                @base = facts.BaseVersion
+            },
+            serverAlignment = new
+            {
+                remote = RunStartPlanner.Remote,
+                host = RunStartPlanner.HostOf(facts.OriginAddress),
+                remoteUrl = facts.OriginAddress,
+                head = facts.AlignmentRevision,
+                ahead = facts.Ahead,
+                behind = facts.Behind,
+                aligned = facts.Ahead is not null && facts.Behind is not null
+                        ? facts.Ahead == 0 && facts.Behind == 0
+                        : (bool?)null
+            }
+        };
+
+        JsonNode document = JsonSerializer.SerializeToNode(json, JsonOptions)
+            ?? throw new InvalidOperationException("The run-start report could not be serialized.");
+        if (brief is not null)
+        {
+            document["brief"] = JsonNode.Parse(BriefFormatter.ToJson(brief));
         }
 
-        return Ready;
+        return document.ToJsonString(JsonOptions);
     }
 
     /// <summary>Prints what the step has to tell the operator, in the order it came.</summary>
@@ -267,14 +300,6 @@ public sealed class RunStartCommand : Command<RunStartSettings>
                 _ => $"[grey]  {Markup.Escape(message.Text)}[/]",
             });
         }
-    }
-
-    /// <summary>The two-argument overload the rest of this branch's commands carry.</summary>
-    /// <param name="context">The command context Spectre supplies.</param>
-    /// <param name="settings">The parsed settings.</param>
-    public int Execute(CommandContext context, RunStartSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     /// <summary>

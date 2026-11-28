@@ -9,14 +9,19 @@ namespace KyberWeave.Application.RunStart;
 public sealed class RunStartEvidenceService(IGitRepositoryFacts git, IRunStateStore runs) : IRunStartEvidence
 {
     /// <inheritdoc />
-    public bool? Started(string workingDirectory, string homeDirectory)
+    public async Task<bool?> StartedAsync(
+        string workingDirectory,
+        string homeDirectory,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory) || string.IsNullOrWhiteSpace(homeDirectory))
         {
             return null;
         }
 
-        string? repository = git.GetCommonDirectory(workingDirectory);
+        string? repository = await git
+            .GetCommonDirectoryAsync(workingDirectory, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         return repository is null ? null : runs.HasLiveRun(homeDirectory, repository);
     }
 }

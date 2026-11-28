@@ -36,9 +36,9 @@ public sealed class RunStartCommandConsoleTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ANonConventionalType_RefusesOnTheConsoleWithExitCodeTwo()
+    public async Task Execute_ANonConventionalType_RefusesOnTheConsoleWithExitCodeTwo()
     {
-        int exit = Run(new RunStartSettings { Harness = "claude", Type = "bogus", Slug = "x" });
+        int exit = await Run(new RunStartSettings { Harness = "claude", Type = "bogus", Slug = "x" });
 
         Assert.Equal(2, exit);
         Assert.StartsWith("kyber-weave run start: error: ", Output(), StringComparison.Ordinal);
@@ -46,78 +46,78 @@ public sealed class RunStartCommandConsoleTests : IDisposable
     }
 
     [Fact]
-    public void Execute_PathWithoutBrief_RefusesOnTheConsoleWithExitCodeTwo()
+    public async Task Execute_PathWithoutBrief_RefusesOnTheConsoleWithExitCodeTwo()
     {
-        int exit = Run(Valid(new RunStartSettings { Path = "docs" }));
+        int exit = await Run(Valid(new RunStartSettings { Path = "docs" }));
 
         Assert.Equal(2, exit);
         Assert.Contains("--path and --autonomy only apply with --brief.", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_TheAutonomyTheRunResolvesToIsHandedToTheStart()
+    public async Task Execute_TheAutonomyTheRunResolvesToIsHandedToTheStart()
     {
         _briefs.ResolvedAutonomy = "autonomous";
 
-        Run(Valid(new RunStartSettings { Brief = true, Autonomy = "autonomous" }));
+        _ = await Run(Valid(new RunStartSettings { Brief = true, Autonomy = "autonomous" }));
 
         Assert.Equal("autonomous", Assert.Single(_starts.Requests).Autonomy);
         Assert.Equal("autonomous", _briefs.GivenAutonomy);
     }
 
     [Fact]
-    public void Execute_ARunWithNoAutonomySetIsStartedWithNone()
+    public async Task Execute_ARunWithNoAutonomySetIsStartedWithNone()
     {
-        Run(Valid(new RunStartSettings()));
+        _ = await Run(Valid(new RunStartSettings()));
 
         Assert.Null(Assert.Single(_starts.Requests).Autonomy);
     }
 
     [Fact]
-    public void Execute_OutsideARepository_FailsNamingTheCurrentDirectoryFromTheEnvironment()
+    public async Task Execute_OutsideARepository_FailsNamingTheCurrentDirectoryFromTheEnvironment()
     {
         _runners.Root = null;
 
-        int exit = Run(Valid(new RunStartSettings()));
+        int exit = await Run(Valid(new RunStartSettings()));
 
         Assert.Equal(1, exit);
         Assert.Contains("'/kw/work' is not inside a git repository", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_AConfigurationThatDoesNotLoad_WritesItsDiagnosticAndReturnsOne()
+    public async Task Execute_AConfigurationThatDoesNotLoad_WritesItsDiagnosticAndReturnsOne()
     {
         _configs.Failure = new Diagnostic("KW-CONFIG-001", Severity.Error, "unreadable", "kyber-weave.yml", Hint: "fix it");
 
-        int exit = Run(Valid(new RunStartSettings()));
+        int exit = await Run(Valid(new RunStartSettings()));
 
         Assert.Equal(1, exit);
         Assert.Equal("KW-CONFIG-001 unreadable\n  → fix it\n", Output());
     }
 
     [Fact]
-    public void Execute_AFailedStart_PrintsTheServiceMessagesInOrderAndMapsTheStatusToTheExitCode()
+    public async Task Execute_AFailedStart_PrintsTheServiceMessagesInOrderAndMapsTheStatusToTheExitCode()
     {
         _starts.Outcome = new RunStartOutcome(
             RunStartStatus.CodeGraphMissing,
             [new RunStartMessage(RunStartMessageKind.Error, "no codegraph"), new RunStartMessage(RunStartMessageKind.Remedy, "install it")],
             null);
 
-        int exit = Run(Valid(new RunStartSettings()));
+        int exit = await Run(Valid(new RunStartSettings()));
 
         Assert.Equal(3, exit);
         Assert.Equal("kyber-weave run start: error: no codegraph\n→ install it\n", Output());
     }
 
     [Fact]
-    public void Execute_AFailedStartUnderJson_SendsTheMessagesToStandardError()
+    public async Task Execute_AFailedStartUnderJson_SendsTheMessagesToStandardError()
     {
         _starts.Outcome = new RunStartOutcome(
             RunStartStatus.ToolFailure,
             [new RunStartMessage(RunStartMessageKind.Error, "fetch failed", StandardErrorWhenJson: true)],
             null);
 
-        int exit = Run(Valid(new RunStartSettings { Json = true }));
+        int exit = await Run(Valid(new RunStartSettings { Json = true }));
 
         Assert.Equal(1, exit);
         Assert.Equal("kyber-weave run start: error: fetch failed" + Environment.NewLine, _standard.ErrorOutput);
@@ -125,11 +125,11 @@ public sealed class RunStartCommandConsoleTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ASuccessfulStart_PrintsTheReportToTheConsole()
+    public async Task Execute_ASuccessfulStart_PrintsTheReportToTheConsole()
     {
         _starts.Outcome = Started(null);
 
-        int exit = Run(Valid(new RunStartSettings { FailingVersion = "1.2.3" }));
+        int exit = await Run(Valid(new RunStartSettings { FailingVersion = "1.2.3" }));
 
         Assert.Equal(0, exit);
         Assert.Equal(
@@ -149,22 +149,22 @@ public sealed class RunStartCommandConsoleTests : IDisposable
     }
 
     [Fact]
-    public void Execute_AResumedStart_ListsTheCompletedTasks()
+    public async Task Execute_AResumedStart_ListsTheCompletedTasks()
     {
         _starts.Outcome = Started("claude/fix/x");
 
-        _ = Run(Valid(new RunStartSettings { Resume = "claude/fix/x" }));
+        _ = await Run(Valid(new RunStartSettings { Resume = "claude/fix/x" }));
 
         Assert.Contains("kyber-weave run start resumed", Output(), StringComparison.Ordinal);
         Assert.Contains("  completed 1\n    1.1\n      done it\n", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_JsonStart_WritesOneDocumentToStandardOutputAndNothingToTheConsole()
+    public async Task Execute_JsonStart_WritesOneDocumentToStandardOutputAndNothingToTheConsole()
     {
         _starts.Outcome = Started(null);
 
-        int exit = Run(Valid(new RunStartSettings { Json = true }));
+        int exit = await Run(Valid(new RunStartSettings { Json = true }));
 
         Assert.Equal(0, exit);
         Assert.Empty(Output());
@@ -174,24 +174,24 @@ public sealed class RunStartCommandConsoleTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ABriefThatCannotBeBuilt_WarnsOnTheConsoleAndStillReturnsReady()
+    public async Task Execute_ABriefThatCannotBeBuilt_WarnsOnTheConsoleAndStillReturnsReady()
     {
         _starts.Outcome = Started(null);
         _briefs.BuildError = "no facts";
 
-        int exit = Run(Valid(new RunStartSettings { Brief = true }));
+        int exit = await Run(Valid(new RunStartSettings { Brief = true }));
 
         Assert.Equal(0, exit);
         Assert.Contains("warn the conductor's brief could not be built (no facts)", Output(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Execute_ABriefThatCannotBeBuiltUnderJson_WarnsOnStandardError()
+    public async Task Execute_ABriefThatCannotBeBuiltUnderJson_WarnsOnStandardError()
     {
         _starts.Outcome = Started(null);
         _briefs.BuildError = "no facts";
 
-        _ = Run(Valid(new RunStartSettings { Brief = true, Json = true }));
+        _ = await Run(Valid(new RunStartSettings { Brief = true, Json = true }));
 
         Assert.Contains("warn: the conductor's brief could not be built (no facts)", _standard.ErrorOutput, StringComparison.Ordinal);
     }
@@ -229,11 +229,11 @@ public sealed class RunStartCommandConsoleTests : IDisposable
 
     private string Output() => _markup.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-    private int Run(RunStartSettings settings)
+    private async Task<int> Run(RunStartSettings settings)
     {
         FakeProcessEnvironment environment = new(currentDirectory: "/kw/work");
         RunStartCommand command = new(_runners, _starts, _briefs, _configs, environment, _markup, _standard);
-        return command.Execute(null!, settings);
+        return await command.ExecuteAsync(null!, settings, CancellationToken.None);
     }
 
     private sealed class StubRunners : IRunStartRunnerFactory
@@ -247,52 +247,69 @@ public sealed class RunStartCommandConsoleTests : IDisposable
     {
         public string RepositoryRoot => root ?? string.Empty;
 
-        public string? DetectRepositoryRoot() => root;
+        public Task<string?> DetectRepositoryRootAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(root);
 
-        public GitOutcome Git(params string[] arguments) => throw new NotSupportedException();
+        public Task<GitOutcome> GitAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public GitOutcome CheckoutStatus() => throw new NotSupportedException();
+        public Task<GitOutcome> CheckoutStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public bool? CheckoutIsClean() => throw new NotSupportedException();
+        public Task<bool?> CheckoutIsCleanAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public GitOutcome WorktreeList() => throw new NotSupportedException();
+        public Task<GitOutcome> WorktreeListAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public bool? AnotherWorktreeIsAttached() => throw new NotSupportedException();
+        public Task<bool?> AnotherWorktreeIsAttachedAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public string? OriginHeadSymbolicRef() => throw new NotSupportedException();
+        public Task<string?> OriginHeadSymbolicRefAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public string? ResolveRevision(string revision) => throw new NotSupportedException();
+        public Task<string?> ResolveRevisionAsync(string revision, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public bool HasLocalBranch(string branch) => throw new NotSupportedException();
+        public Task<bool> HasLocalBranchAsync(string branch, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public bool HasRemoteBranch(string branch) => throw new NotSupportedException();
+        public Task<bool> HasRemoteBranchAsync(string branch, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public string? Describe(string revision) => throw new NotSupportedException();
+        public Task<string?> DescribeAsync(string revision, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public (int? Ahead, int? Behind) Divergence(string left, string right) => throw new NotSupportedException();
+        public Task<(int? Ahead, int? Behind)> DivergenceAsync(string left, string right, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public GitOutcome CommitMessages(string baseRef, string tip) => throw new NotSupportedException();
+        public Task<GitOutcome> CommitMessagesAsync(string baseRef, string tip, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public string? OriginAddress() => throw new NotSupportedException();
+        public Task<string?> OriginAddressAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public bool CodeGraphBinaryIsAvailable() => throw new NotSupportedException();
 
-        public GitOutcome Fetch() => throw new NotSupportedException();
+        public Task<GitOutcome> FetchAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public GitOutcome CreateBranchInPlace(string branch, string startRef) => throw new NotSupportedException();
+        public Task<GitOutcome> CreateBranchInPlaceAsync(string branch, string startRef, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
-        public GitOutcome SwitchToBranch(string branch) => throw new NotSupportedException();
+        public Task<GitOutcome> SwitchToBranchAsync(string branch, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public string WorktreePathFor(string branch, DateTimeOffset startedAt) => throw new NotSupportedException();
 
-        public GitOutcome EnsureWorktreeFolderExcluded() => throw new NotSupportedException();
+        public Task<GitOutcome> EnsureWorktreeFolderExcludedAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
 
         public void ReleaseWorktreeClaim(string worktreePath) => throw new NotSupportedException();
 
-        public GitOutcome CreateBranchInWorktree(string branch, string startRef, string worktreePath) =>
+        public Task<GitOutcome> CreateBranchInWorktreeAsync(string branch, string startRef, string worktreePath, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public GitOutcome AddWorktreeForBranch(string branch, string worktreePath, string? startRef = null) =>
+        public Task<GitOutcome> AddWorktreeForBranchAsync(string branch, string worktreePath, string? startRef = null, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 
@@ -302,10 +319,10 @@ public sealed class RunStartCommandConsoleTests : IDisposable
 
         public RunStartOutcome Outcome { get; set; } = new(RunStartStatus.Started, [], null);
 
-        public RunStartOutcome Start(RunStartRequest request)
+        public Task<RunStartOutcome> StartAsync(RunStartRequest request, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            return Outcome;
+            return Task.FromResult(Outcome);
         }
     }
 
