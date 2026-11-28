@@ -506,18 +506,21 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
                 if (attempt < BusyAttempts) continue;
                 throw new InvalidOperationException(
                     $"The documentation analysis cache remained locked after {BusyAttempts} bounded attempts. " +
-                    FailureDetail(exception),
+                    FailureDetail(exception) + " Another process holds the cache; retry when it finishes.",
                     exception);
             }
             catch (SqliteException exception) when (IsOperationalFailure(exception))
             {
                 throw new InvalidOperationException(
-                    "The documentation analysis cache could not be accessed. " + FailureDetail(exception),
+                    "The documentation analysis cache could not be accessed. " + FailureDetail(exception) +
+                    " Check that the cache file and its folder are readable and writable.",
                     exception);
             }
             catch (SqliteException exception)
             {
-                throw CorruptCache(FailureDetail(exception), exception);
+                throw CorruptCache(
+                    FailureDetail(exception) + " Delete the cache file to rebuild it on the next run.",
+                    exception);
             }
         }
 
@@ -877,7 +880,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         string reason = exception.Message.Trim();
         return reason.Length == 0
-            ? $"SQLite error {exception.SqliteErrorCode} on the cache file; check that it and its folder are readable and writable."
+            ? $"SQLite error {exception.SqliteErrorCode} on the cache file."
             : $"SQLite error {exception.SqliteErrorCode} on the cache file: {reason}";
     }
 

@@ -900,14 +900,19 @@ public sealed class SqliteRelationalStoreReadTests : IDisposable
         Assert.Equivalent(memory.SessionRecordsContentFree("sess-boundary"), sqlite.SessionRecordsContentFree("sess-boundary"), strict: true);
         Assert.Equivalent(memory.SessionRecordsForRebuild("sess-boundary"), sqlite.SessionRecordsForRebuild("sess-boundary"), strict: true);
 
+        // A non-empty page carries its total in its own rows: one statement, one evaluation of the chain.
+        sqlite.ClearRecordedSql();
         SessionRequestFigurePageResult reqs = sqlite.SessionRequestFigures("sess-boundary", 1, 25);
+        _ = Assert.Single(sqlite.ExecutedSql);
         Assert.Equal(["span-b-2", "span-b-1"], reqs.Items.Select(static r => r.RequestSpanId).ToArray());
         Assert.Equivalent(memory.SessionRequestFigures("sess-boundary", 1, 25), reqs, strict: true);
         SessionRequestFigurePageResult reqsAsc = sqlite.SessionRequestFigures("sess-boundary", 1, 25, "asc");
         Assert.Equal(["span-b-1", "span-b-2"], reqsAsc.Items.Select(static r => r.RequestSpanId).ToArray());
         Assert.Equivalent(memory.SessionRequestFigures("sess-boundary", 1, 25, "asc"), reqsAsc, strict: true);
 
+        sqlite.ClearRecordedSql();
         SessionReconciliationFigurePageResult recons = sqlite.SessionReconciliationFigures("sess-boundary", 1, 25);
+        _ = Assert.Single(sqlite.ExecutedSql);
         Assert.Equal(["span-b-2", "span-b-1"], recons.Items.Select(static r => r.RequestSpanId).ToArray());
         Assert.Equivalent(memory.SessionReconciliationFigures("sess-boundary", 1, 25), recons, strict: true);
         SessionReconciliationFigurePageResult reconsAsc = sqlite.SessionReconciliationFigures("sess-boundary", 1, 25, "asc");
