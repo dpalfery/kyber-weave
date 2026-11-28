@@ -426,6 +426,13 @@ public sealed class DocsAnalysisCompositionTests
             DocsAnalysisEmbeddingConfig config) =>
             new([], EmbeddingUsage.None);
 
+        public async Task<EmbeddingGenerationResult> GenerateAsync(
+            IReadOnlyCollection<EmbeddingCacheKey> keys,
+            IReadOnlyCollection<string> inputs,
+            DocsAnalysisEmbeddingConfig config,
+            CancellationToken cancellationToken = default) =>
+            await Task.FromResult(Generate(keys, inputs, config)).ConfigureAwait(false);
+
         public void Dispose() => DisposeCount++;
     }
 

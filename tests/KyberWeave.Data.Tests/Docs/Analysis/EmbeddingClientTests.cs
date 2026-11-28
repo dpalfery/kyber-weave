@@ -586,6 +586,13 @@ public sealed class EmbeddingClientTests
                 embeddings,
                 new EmbeddingUsage(PromptTokens: 11, TotalTokens: 13));
         }
+
+        public async Task<EmbeddingGenerationResult> GenerateAsync(
+            IReadOnlyCollection<EmbeddingCacheKey> keys,
+            IReadOnlyCollection<string> inputs,
+            DocsAnalysisEmbeddingConfig config,
+            CancellationToken cancellationToken = default) =>
+            await Task.FromResult(Generate(keys, inputs, config)).ConfigureAwait(false);
     }
 
     private sealed class RecordingPersistence(

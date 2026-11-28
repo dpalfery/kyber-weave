@@ -18,6 +18,20 @@ public interface IEmbeddingGenerator
         IReadOnlyCollection<EmbeddingCacheKey> keys,
         IReadOnlyCollection<string> inputs,
         DocsAnalysisEmbeddingConfig config);
+
+    /// <summary>
+    /// Generates a vector for every input without blocking a thread.
+    /// </summary>
+    /// <param name="keys">The cache keys the vectors store under, in request order.</param>
+    /// <param name="inputs">The texts to embed; input <c>i</c> stores under key <c>i</c>.</param>
+    /// <param name="config">The endpoint, model, dimensions, batch size and timeout to send under.</param>
+    /// <param name="cancellationToken">Cancels the in-flight endpoint calls.</param>
+    /// <returns>The vectors in request order with the usage the endpoint reported.</returns>
+    Task<EmbeddingGenerationResult> GenerateAsync(
+        IReadOnlyCollection<EmbeddingCacheKey> keys,
+        IReadOnlyCollection<string> inputs,
+        DocsAnalysisEmbeddingConfig config,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Infrastructure-neutral cache for reviewer verdicts and normalized vectors.</summary>

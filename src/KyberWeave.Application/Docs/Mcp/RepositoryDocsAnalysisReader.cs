@@ -106,6 +106,47 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     }
 
     /// <inheritdoc />
+    public async Task<DocumentationAnalysisResult> AnalyzeAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        KyberWeaveConfig config = LoadConfig();
+        DocumentSet documents = _documents.Create(_repositoryRoot, config.Ontology).Load();
+        cancellationToken.ThrowIfCancellationRequested();
+        CodeGraphPorts codeGraphPorts = await _codeGraph.ForRepositoryAsync(_repositoryRoot, cancellationToken)
+            .ConfigureAwait(false);
+        ICodeGraphResolver codeGraph = codeGraphPorts.Resolver;
+        DocGraphProjection graph = DocGraphProjectionBuilder.Build(
+            documents,
+            codeGraph,
+            config.DocsAnalysis.Search.MaxCodeNeighbors);
+        cancellationToken.ThrowIfCancellationRequested();
+        IAnalysisPersistence persistence = await _persistence.OpenAsync(_repositoryRoot, cancellationToken)
+            .ConfigureAwait(false);
+        IEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
+            ? null
+            : _embeddings.Create();
+        using IDisposable? embeddingOwner = embeddingGenerator as IDisposable;
+        IEmbeddingResolver? embeddingResolver = embeddingGenerator is null
+            ? null
+            : new EmbeddingCoordinator(embeddingGenerator, persistence);
+        DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
+            new ClaimExtractor(),
+            [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
+            embeddingResolver,
+            persistence);
+        ManagedGlossaryLoadResult glossary = _glossaries.Open(_repositoryRoot, config).Load();
+
+        DocumentationAnalysisResult result = await analyzer.AnalyzeAsync(
+            documents,
+            graph,
+            config.DocsAnalysis,
+            glossary.AnalysisGlossary,
+            cancellationToken).ConfigureAwait(false);
+        AddCodeGraphUnavailable(result.Diagnostics, codeGraph);
+        return result;
+    }
+
+    /// <inheritdoc />
     public GlossaryLookupResult LookupGlossary(string term)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);

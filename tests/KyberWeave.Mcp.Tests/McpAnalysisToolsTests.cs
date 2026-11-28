@@ -385,6 +385,9 @@ public sealed class McpAnalysisToolsTests
     {
         public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default) => result;
 
+        public async Task<DocumentationAnalysisResult> AnalyzeAsync(CancellationToken cancellationToken = default) =>
+            await Task.FromResult(Analyze(cancellationToken)).ConfigureAwait(false);
+
         [SuppressMessage(
             "Globalization",
             "CA1308:Normalize strings to uppercase",

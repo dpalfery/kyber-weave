@@ -60,7 +60,47 @@ public sealed partial class DocumentationAnalyzer(
 
         AddExactDuplicateClusters(claims, candidates);
         CandidateTally tally = CollectCandidates(claims, graph, config, glossary, candidates, diagnostics, cancellationToken);
+        return FinishAnalysis(claims, candidates, tally, config, diagnostics, cancellationToken);
+    }
 
+    /// <summary>Analyzes eligible documents without changing the corpus or blocking a thread.</summary>
+    public async Task<DocumentationAnalysisResult> AnalyzeAsync(
+        DocumentSet documents,
+        DocGraphProjection graph,
+        DocsAnalysisConfig config,
+        AnalysisGlossary? glossary = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(config);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        DiagnosticReport diagnostics = new DiagnosticReport();
+        IReadOnlyList<Claim> claims = ExtractEligibleClaims(documents, config, diagnostics);
+        cancellationToken.ThrowIfCancellationRequested();
+        Dictionary<string, AnalysisCandidate> candidates = new Dictionary<string, AnalysisCandidate>(StringComparer.Ordinal);
+
+        AddExactDuplicateClusters(claims, candidates);
+        CandidateTally tally = await CollectCandidatesAsync(
+            claims,
+            graph,
+            config,
+            glossary,
+            candidates,
+            diagnostics,
+            cancellationToken).ConfigureAwait(false);
+        return FinishAnalysis(claims, candidates, tally, config, diagnostics, cancellationToken);
+    }
+
+    private DocumentationAnalysisResult FinishAnalysis(
+        IReadOnlyList<Claim> claims,
+        IDictionary<string, AnalysisCandidate> candidates,
+        CandidateTally tally,
+        DocsAnalysisConfig config,
+        DiagnosticReport diagnostics,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         IReadOnlyList<AnalysisCandidate> consolidated = ConsolidateTerminology(candidates.Values);
         IReadOnlyList<AnalysisCandidate> reviewed = ApplyVerdicts(consolidated, config.VerdictConfidence);
@@ -103,7 +143,72 @@ public sealed partial class DocumentationAnalyzer(
     {
         CandidateTally tally = new CandidateTally();
         List<ClaimPairCandidate> semanticSeedPairs = new List<ClaimPairCandidate>();
+        CollectSourceCandidates(claims, graph, config, glossary, candidates, tally, semanticSeedPairs, cancellationToken);
 
+        if (config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EmbeddingResolutionResult resolution = ResolveEmbeddings(claims, config.Embeddings);
+            return FinishEmbeddingCandidates(
+                claims,
+                config,
+                glossary,
+                candidates,
+                diagnostics,
+                tally,
+                semanticSeedPairs,
+                resolution,
+                cancellationToken);
+        }
+
+        return tally;
+    }
+
+    private async Task<CandidateTally> CollectCandidatesAsync(
+        IReadOnlyList<Claim> claims,
+        DocGraphProjection graph,
+        DocsAnalysisConfig config,
+        AnalysisGlossary? glossary,
+        Dictionary<string, AnalysisCandidate> candidates,
+        DiagnosticReport diagnostics,
+        CancellationToken cancellationToken)
+    {
+        CandidateTally tally = new CandidateTally();
+        List<ClaimPairCandidate> semanticSeedPairs = new List<ClaimPairCandidate>();
+        CollectSourceCandidates(claims, graph, config, glossary, candidates, tally, semanticSeedPairs, cancellationToken);
+
+        if (config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EmbeddingResolutionResult resolution = await ResolveEmbeddingsAsync(
+                claims,
+                config.Embeddings,
+                cancellationToken).ConfigureAwait(false);
+            return FinishEmbeddingCandidates(
+                claims,
+                config,
+                glossary,
+                candidates,
+                diagnostics,
+                tally,
+                semanticSeedPairs,
+                resolution,
+                cancellationToken);
+        }
+
+        return tally;
+    }
+
+    private void CollectSourceCandidates(
+        IReadOnlyList<Claim> claims,
+        DocGraphProjection graph,
+        DocsAnalysisConfig config,
+        AnalysisGlossary? glossary,
+        IDictionary<string, AnalysisCandidate> candidates,
+        CandidateTally tally,
+        List<ClaimPairCandidate> semanticSeedPairs,
+        CancellationToken cancellationToken)
+    {
         ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, graph, config.Search);
         foreach (IClaimCandidateSource source in _candidateSources.Where(source => ShouldRun(source.Kind, config)))
         {
@@ -137,33 +242,40 @@ public sealed partial class DocumentationAnalyzer(
                 ClassifyPair(pair, config.Search, glossary, candidates);
             }
         }
+    }
 
-        if (config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off)
+    private CandidateTally FinishEmbeddingCandidates(
+        IReadOnlyList<Claim> claims,
+        DocsAnalysisConfig config,
+        AnalysisGlossary? glossary,
+        IDictionary<string, AnalysisCandidate> candidates,
+        DiagnosticReport diagnostics,
+        CandidateTally tally,
+        IReadOnlyList<ClaimPairCandidate> semanticSeedPairs,
+        EmbeddingResolutionResult resolution,
+        CancellationToken cancellationToken)
+    {
+        diagnostics.AddRange(resolution.Diagnostics.Items);
+        tally.EmbeddingCacheHits = resolution.CacheHits;
+        tally.EmbeddingCacheMisses = resolution.CacheMisses;
+        tally.EmbeddingPromptTokens = resolution.Usage.PromptTokens;
+        tally.EmbeddingTotalTokens = resolution.Usage.TotalTokens;
+
+        if (resolution.Embeddings.Count == claims.Count)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            EmbeddingResolutionResult resolution = ResolveEmbeddings(claims, config.Embeddings);
-            diagnostics.AddRange(resolution.Diagnostics.Items);
-            tally.EmbeddingCacheHits = resolution.CacheHits;
-            tally.EmbeddingCacheMisses = resolution.CacheMisses;
-            tally.EmbeddingPromptTokens = resolution.Usage.PromptTokens;
-            tally.EmbeddingTotalTokens = resolution.Usage.TotalTokens;
-
-            if (resolution.Embeddings.Count == claims.Count)
+            ClaimCandidateSourceResult result = EmbeddingCandidateBuilder.Build(
+                claims,
+                resolution.Embeddings,
+                semanticSeedPairs,
+                config.Search);
+            tally.SourceTruncated |= result.Truncated;
+            tally.EmbeddingComparisons += result.ComparisonCount;
+            tally.EmbeddingCandidates += result.Pairs.Count;
+            foreach (ClaimPairCandidate pair in result.Pairs)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ClaimCandidateSourceResult result = EmbeddingCandidateBuilder.Build(
-                    claims,
-                    resolution.Embeddings,
-                    semanticSeedPairs,
-                    config.Search);
-                tally.SourceTruncated |= result.Truncated;
-                tally.EmbeddingComparisons += result.ComparisonCount;
-                tally.EmbeddingCandidates += result.Pairs.Count;
-                foreach (ClaimPairCandidate pair in result.Pairs)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    ClassifyPair(pair, config.Search, glossary, candidates);
-                }
+                ClassifyPair(pair, config.Search, glossary, candidates);
             }
         }
 
@@ -222,6 +334,32 @@ public sealed partial class DocumentationAnalyzer(
                 claim.ContextualHash,
                 claim.ContextualText)).ToArray(),
             config);
+    }
+
+    private async Task<EmbeddingResolutionResult> ResolveEmbeddingsAsync(
+        IReadOnlyList<Claim> claims,
+        DocsAnalysisEmbeddingConfig config,
+        CancellationToken cancellationToken)
+    {
+        if (embeddingResolver is null)
+        {
+            return EmbeddingResolutionResults.Unavailable(
+                config.Mode,
+                "No embedding provider is configured in this host.");
+        }
+        if (persistence is null)
+        {
+            return EmbeddingResolutionResults.Unavailable(
+                config.Mode,
+                "No safe analysis persistence provider is configured in this host.");
+        }
+
+        return await embeddingResolver.ResolveAsync(
+            claims.Select(claim => new EmbeddingWorkItem(
+                claim.ContextualHash,
+                claim.ContextualText)).ToArray(),
+            config,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private IReadOnlyList<Claim> ExtractEligibleClaims(
