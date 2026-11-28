@@ -50,8 +50,10 @@ public static class HookFastPath
             document = adapter.AllowDocument(parsed.RootElement);
             return true;
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
+            // KW-STD-CS-006 boundary, a hook entry point: any adapter failure falls through to the
+            // hook command, which decides the call and reports what went wrong.
             return false;
         }
     }
