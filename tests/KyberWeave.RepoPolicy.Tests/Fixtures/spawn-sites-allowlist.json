@@ -1112,12 +1112,6 @@
       "bound": "Builds only; the recording executor answers an empty result and starts no process."
     },
     {
-      "file": "tests/KyberWeave.Cli.Tests/ReviewIndexTimeoutTests.cs",
-      "text": "_ = executor.Run(new ProcessStartInfo(\"codegraph\"), string.Empty);",
-      "count": 1,
-      "bound": "Builds only; the executor is the time-bounded wrapper over a scripted fake that starts nothing. It proves the 10-minute index limit reaches the run."
-    },
-    {
       "file": "src/KyberWeave.Data/Update/BinaryReplacer.cs",
       "text": "ProcessStartInfo startInfo = new(\"xattr\")",
       "count": 1,

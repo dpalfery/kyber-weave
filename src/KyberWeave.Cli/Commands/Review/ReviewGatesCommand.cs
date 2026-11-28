@@ -21,7 +21,7 @@ public sealed class ReviewGatesCommand(
     IReviewGatesService service,
     IConsole standard,
     IAnsiConsole ansi,
-    IBoundedProcessExecutor processes) : Command<ReviewGatesSettings>
+    IProcessRunner processes) : AsyncCommand<ReviewGatesSettings>
 {
     private const int ClientInputExitCode = ReviewCommandResult.ClientInputExitCode;
 
@@ -29,7 +29,7 @@ public sealed class ReviewGatesCommand(
     internal static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, ReviewGatesSettings settings,
+    public override async Task<int> ExecuteAsync(CommandContext context, ReviewGatesSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -112,11 +112,11 @@ public sealed class ReviewGatesCommand(
             return ClientInputExitCode;
         }
 
-        ReviewCommandResult result = service.Run(
+        ReviewCommandResult result = await service.RunAsync(
             Request(settings),
-            new TimeBoundedProcessExecutor(processes, IndexTimeout),
+            new BoundedRunner(processes, IndexTimeout),
             standard.Out,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (result.ClientError is not null)
         {
@@ -128,8 +128,8 @@ public sealed class ReviewGatesCommand(
             CommandHelpers.Finish(ansi, result.Report, settings, "review gates", "Gate");
 
         foreach (string line in result.Epilogue ?? [])
-            standard.Out.WriteLine(line);
-        standard.Out.Flush();
+            await standard.Out.WriteLineAsync(line).ConfigureAwait(false);
+        await standard.Out.FlushAsync(cancellationToken).ConfigureAwait(false);
 
         return result.ExitCode;
     }
@@ -156,5 +156,24 @@ public sealed class ReviewGatesCommand(
     private void WriteClientInputError(string message)
     {
         ansi.MarkupLine($"[red]kyber-weave review gates: error: {Markup.Escape(message)}[/]");
+    }
+
+    /// <summary>Bounds every child at the index timeout unless the run names its own, so the index cannot outlive the review.</summary>
+    /// <param name="runner">The process seam that starts the child and kills it when the limit passes.</param>
+    /// <param name="timeout">The limit applied to a run that names none of its own.</param>
+    private sealed class BoundedRunner(IProcessRunner runner, TimeSpan timeout) : IProcessRunner
+    {
+        /// <inheritdoc />
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            return runner.RunAsync(request with { Timeout = request.Timeout ?? timeout }, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public bool IsAlive(int processId) => runner.IsAlive(processId);
+
+        /// <inheritdoc />
+        public string? FindOnPath(string program) => runner.FindOnPath(program);
     }
 }
