@@ -50,6 +50,9 @@ Unique `file(line,col) id` locations from the audit build of `KyberWeave.sln` an
 | CA1001 | KW-STD-CS-012 owner is disposable | — | 40 | 1 | — | 41 | mechanical |
 | CA2227 | KW-STD-CS-003 collection setter | 4 | — | — | — | 4 | mechanical |
 
+Progress (2026-11-27): every analyzer in the table above is at zero after the remediation waves;
+CA1031 was the last, in wave C. The table stays as the starting baseline.
+
 Rules with no analyzer, as raw `grep -E` hit counts over `src` and `dash/server` (not yet sorted
 into real violations and false positives; the inventory pass does that). A backslash before a
 pipe in a pattern cell is the table's escape; the pattern the grep runs uses a plain pipe.
@@ -161,7 +164,9 @@ this prompt (fill the `<…>` parts from `slices.md`):
 > - CA1001 / CA1063: make the owning type `IDisposable` (or `IAsyncDisposable`) and dispose the field;
 >   a sealed type needs only `Dispose()`, no finalizer and no `Dispose(bool)`.
 > - CA2227: remove the setter and expose an `IReadOnly*` collection or an `init` property.
-> - CA1031: catch the exception types the call can throw, or log and `throw;`.
+> - CA1031: catch the exception types the call can throw, or log and `throw;`. At one of the
+>   boundaries KW-STD-CS-006 lists, use its `when (ex is not OutOfMemoryException && ex is not
+>   OperationCanceledException)` filter, record the error, and name the boundary in a comment.
 > - CA1502 / CA1506: extract private methods or a collaborator behind an interface; keep every public
 >   signature.
 > - Add no `#pragma`, no `NoWarn`, no `SuppressMessage`, and do not touch either `.globalconfig`.
