@@ -18,18 +18,18 @@ public sealed class GitHubReleaseClientTests
         new(handler, "1.2.3", environment ?? (_ => null));
 
     [Fact]
-    public void TheLatestStableTagIsReadFromTheLatestEndpoint()
+    public async Task TheLatestStableTagIsReadFromTheLatestEndpoint()
     {
         using GitHubReleaseClient client = Client(uri =>
             uri == GitHubReleaseClient.LatestApi
                 ? Json("{\"tag_name\":\"v9.9.9\",\"draft\":false}")
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
 
-        Assert.Equal("9.9.9", client.ResolveLatestStable());
+        Assert.Equal("9.9.9", await client.ResolveLatestStableAsync());
     }
 
     [Fact]
-    public void AnAssetIsCopiedIntoTheStreamTheCallerSupplies()
+    public async Task AnAssetIsCopiedIntoTheStreamTheCallerSupplies()
     {
         using GitHubReleaseClient client = Client(uri =>
             uri == GitHubReleaseClient.AssetUri("v1.0.0", "kw.tar.gz")
@@ -37,18 +37,18 @@ public sealed class GitHubReleaseClientTests
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
         using MemoryStream destination = new();
 
-        client.DownloadAsset("v1.0.0", "kw.tar.gz", destination);
+        await client.DownloadAssetAsync("v1.0.0", "kw.tar.gz", destination);
 
         Assert.Equal([1, 2, 3], destination.ToArray());
     }
 
     [Fact]
-    public void AMissingAssetNamesTheReleaseAndWritesNothing()
+    public async Task AMissingAssetNamesTheReleaseAndWritesNothing()
     {
         using GitHubReleaseClient client = Client(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
         using MemoryStream destination = new();
 
-        SelfUpdateException failure = Assert.Throws<SelfUpdateException>(() => client.DownloadAsset("v1.0.0", "kw.tar.gz", destination));
+        SelfUpdateException failure = await Assert.ThrowsAsync<SelfUpdateException>(() => client.DownloadAssetAsync("v1.0.0", "kw.tar.gz", destination));
 
         Assert.Contains("v1.0.0", failure.Message, StringComparison.Ordinal);
         Assert.Equal(0, destination.Length);
@@ -59,12 +59,12 @@ public sealed class GitHubReleaseClientTests
         Assert.Throws<SelfUpdateException>(() => GitHubReleaseClient.AssetUri("v1.0.0", "../../etc/passwd"));
 
     [Fact]
-    public void EveryRequestIsAGetThatNamesTheProductAndAsksForTheGitHubMediaType()
+    public async Task EveryRequestIsAGetThatNamesTheProductAndAsksForTheGitHubMediaType()
     {
         using FakeHttpMessageHandler handler = new(Json("{\"tag_name\":\"v2.0.0\"}"));
         using GitHubReleaseClient client = Client(handler);
 
-        _ = client.ResolveLatestStable();
+        _ = await client.ResolveLatestStableAsync();
 
         RecordedHttpRequest request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Get, request.Method);
@@ -75,12 +75,12 @@ public sealed class GitHubReleaseClientTests
     }
 
     [Fact]
-    public void ATokenInTheEnvironmentIsSentAsABearerCredential()
+    public async Task ATokenInTheEnvironmentIsSentAsABearerCredential()
     {
         using FakeHttpMessageHandler handler = new(Json("{\"tag_name\":\"v2.0.0\"}"));
         using GitHubReleaseClient client = Client(handler, name => name == "GH_TOKEN" ? " token-1 " : null);
 
-        _ = client.ResolveLatestStable();
+        _ = await client.ResolveLatestStableAsync();
 
         RecordedHttpRequest request = Assert.Single(handler.Requests);
         Assert.Equal("Bearer", request.Authorization?.Scheme);
@@ -88,23 +88,23 @@ public sealed class GitHubReleaseClientTests
     }
 
     [Fact]
-    public void AServerErrorOtherThanNotFoundFailsTheLookupAndNamesTheStatus()
+    public async Task AServerErrorOtherThanNotFoundFailsTheLookupAndNamesTheStatus()
     {
         using GitHubReleaseClient client = Client(_ => new HttpResponseMessage(HttpStatusCode.BadGateway));
 
-        SelfUpdateException failure = Assert.Throws<SelfUpdateException>(() => client.ResolveLatestStable());
+        SelfUpdateException failure = await Assert.ThrowsAsync<SelfUpdateException>(() => client.ResolveLatestStableAsync());
 
         Assert.Contains("HTTP 502", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnUnreachableServerSurfacesTheTransportFailureAndTheDownloadWritesNothing()
+    public async Task AnUnreachableServerSurfacesTheTransportFailureAndTheDownloadWritesNothing()
     {
         using FakeHttpMessageHandler handler = FakeHttpMessageHandler.Failing(new HttpRequestException("connection refused"));
         using GitHubReleaseClient client = Client(handler);
         using MemoryStream destination = new();
 
-        _ = Assert.Throws<HttpRequestException>(() => client.DownloadAsset("v1.0.0", "kw.tar.gz", destination));
+        _ = await Assert.ThrowsAsync<HttpRequestException>(() => client.DownloadAssetAsync("v1.0.0", "kw.tar.gz", destination));
 
         Assert.Equal(0, destination.Length);
     }

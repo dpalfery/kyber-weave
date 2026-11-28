@@ -141,11 +141,13 @@ internal sealed class SelfUpdater : IDisposable
             _environment.GetVariable);
     }
 
-    internal SelfUpdateOutcome Run(SelfUpdateOptions options)
+    internal async Task<SelfUpdateOutcome> RunAsync(
+        SelfUpdateOptions options,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return RunCore(options);
+            return await RunCoreAsync(options, cancellationToken).ConfigureAwait(false);
         }
         catch (SelfUpdateException ex)
         {
@@ -169,10 +171,12 @@ internal sealed class SelfUpdater : IDisposable
         _releases.Dispose();
     }
 
-    private SelfUpdateOutcome RunCore(SelfUpdateOptions options)
+    private async Task<SelfUpdateOutcome> RunCoreAsync(
+        SelfUpdateOptions options,
+        CancellationToken cancellationToken)
     {
         if (options.FinishUpdate)
-            return FinishUpdate(options);
+            return await FinishUpdateAsync(options, cancellationToken).ConfigureAwait(false);
 
         if (options.ReleaseCandidate && !string.IsNullOrWhiteSpace(options.Version))
         {
@@ -190,12 +194,12 @@ internal sealed class SelfUpdater : IDisposable
         else if (options.ReleaseCandidate)
         {
             _log("resolving latest release (including candidates)…");
-            version = _releases.ResolveNewestListed();
+            version = await _releases.ResolveNewestListedAsync(cancellationToken).ConfigureAwait(false);
         }
         else
         {
             _log("resolving latest release…");
-            version = _releases.ResolveLatestStable();
+            version = await _releases.ResolveLatestStableAsync(cancellationToken).ConfigureAwait(false);
         }
 
         bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
@@ -205,7 +209,7 @@ internal sealed class SelfUpdater : IDisposable
             // Nothing to download, but a new kyberdash can still be running an old engine, a tray, or an
             // OpenCode plugin file. Reconciling here is what clears a stale engine with one command (C3).
             ReconcileKyberDash(options, version, windows, false);
-            RefreshArbiterHooks(options, version, windows);
+            await RefreshArbiterHooksAsync(options, version, windows, cancellationToken).ConfigureAwait(false);
             RefreshCopilotPrompt();
             return new SelfUpdateOutcome(0, $"already on {version}");
         }
@@ -215,35 +219,46 @@ internal sealed class SelfUpdater : IDisposable
         try
         {
             _log($"installing {tag} ({_host.Rid}) → {_host.InstallDirectory}");
-            string sums = _releases.DownloadChecksums(tag);
+            string sums = await _releases.DownloadChecksumsAsync(tag, cancellationToken).ConfigureAwait(false);
             List<(string BaseName, string ExtractedPath, string Destination)> staged =
             [
-                StageBinary(CliBaseName, _host.Rid, tag, windows, sums, work)
+                await StageBinaryAsync(CliBaseName, _host.Rid, tag, windows, sums, work, cancellationToken).ConfigureAwait(false)
             ];
             if (!options.NoMcp)
-                staged.Add(StageBinary(McpBaseName, _host.Rid, tag, windows, sums, work));
+            {
+                staged.Add(await StageBinaryAsync(
+                    McpBaseName,
+                    _host.Rid,
+                    tag,
+                    windows,
+                    sums,
+                    work,
+                    cancellationToken).ConfigureAwait(false));
+            }
 
             // KyberDash carries its own RID (darwin-* on macOS, matching linux-*/win-x64 elsewhere).
             if (ShouldUpdateKyberDash(options, version, windows))
             {
-                staged.AddRange(StageKyberDashBinaries(
+                staged.AddRange(await StageKyberDashBinariesAsync(
                     PlatformRid.KyberDashRid(_host.Rid),
                     tag,
                     windows,
                     sums,
-                    work));
+                    work,
+                    cancellationToken).ConfigureAwait(false));
             }
 
             // The arbiter ships like kyber-weave-mcp, under this host's .NET RID.
             if (ShouldUpdateArbiter(options, version, windows, sums))
             {
-                staged.Add(StageBinary(
+                staged.Add(await StageBinaryAsync(
                     ArbiterBaseName,
                     _host.Rid,
                     tag,
                     windows,
                     sums,
-                    work));
+                    work,
+                    cancellationToken).ConfigureAwait(false));
             }
 
             // This process's own image is committed last. Overwriting it costs the runtime the ability
@@ -346,7 +361,9 @@ internal sealed class SelfUpdater : IDisposable
     /// post-update steps for the version this binary is: the KyberDash steps, then the arbiter hook refresh, in-process.
     /// It downloads, resolves and commits nothing, and prints no outcome line, because the process that started it does.
     /// </summary>
-    private SelfUpdateOutcome FinishUpdate(SelfUpdateOptions options)
+    private async Task<SelfUpdateOutcome> FinishUpdateAsync(
+        SelfUpdateOptions options,
+        CancellationToken cancellationToken)
     {
         if (options.ReleaseCandidate)
         {
@@ -376,7 +393,7 @@ internal sealed class SelfUpdater : IDisposable
 
         bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
         ReconcileKyberDash(options, version, windows, true);
-        RefreshArbiterHooks(options, version, windows);
+        await RefreshArbiterHooksAsync(options, version, windows, cancellationToken).ConfigureAwait(false);
         RefreshCopilotPrompt();
         return new SelfUpdateOutcome(0, string.Empty);
     }
@@ -811,7 +828,11 @@ internal sealed class SelfUpdater : IDisposable
     /// only when an arbiter is installed: update replaces what is installed, it does not add a surface the owner left out.
     /// Every failure after that check is a warning with exit 0, because the binaries are already committed.
     /// </summary>
-    private void RefreshArbiterHooks(SelfUpdateOptions options, string version, bool windows)
+    private async Task RefreshArbiterHooksAsync(
+        SelfUpdateOptions options,
+        string version,
+        bool windows,
+        CancellationToken cancellationToken)
     {
         if (options.NoArbiter || _arbiterHookRefresher is null || _arbiterTargets is null)
             return;
@@ -848,7 +869,9 @@ internal sealed class SelfUpdater : IDisposable
             if (!registryRead && !hasConfiguredGlobalTargets)
                 return;
 
-            ArbiterHookRefreshResult outcome = _arbiterHookRefresher.Refresh(roots);
+            ArbiterHookRefreshResult outcome = await _arbiterHookRefresher
+                .RefreshAsync(roots, cancellationToken)
+                .ConfigureAwait(false);
 
             if (roots.Count == 0 && !hasConfiguredGlobalTargets)
                 _log("arbiter hooks are checked");
@@ -1170,29 +1193,45 @@ internal sealed class SelfUpdater : IDisposable
         return home;
     }
 
-    private (string BaseName, string ExtractedPath, string Destination) StageBinary(
+    private async Task<(string BaseName, string ExtractedPath, string Destination)> StageBinaryAsync(
         string baseName,
         string rid,
         string tag,
         bool windows,
         string sums,
-        string workDirectory)
+        string workDirectory,
+        CancellationToken cancellationToken)
     {
-        string extractDir = DownloadAndExtractArchive(baseName, rid, tag, windows, sums, workDirectory);
+        string extractDir = await DownloadAndExtractArchiveAsync(
+            baseName,
+            rid,
+            tag,
+            windows,
+            sums,
+            workDirectory,
+            cancellationToken).ConfigureAwait(false);
         string extractedName = BinaryInstaller.InstalledFileName(baseName, windows);
         string extractedPath = FindExtractedBinary(extractDir, extractedName);
         string destination = Path.Combine(_host.InstallDirectory, extractedName);
         return (baseName, extractedPath, destination);
     }
 
-    private List<(string BaseName, string ExtractedPath, string Destination)> StageKyberDashBinaries(
+    private async Task<List<(string BaseName, string ExtractedPath, string Destination)>> StageKyberDashBinariesAsync(
         string rid,
         string tag,
         bool windows,
         string sums,
-        string workDirectory)
+        string workDirectory,
+        CancellationToken cancellationToken)
     {
-        string extractDir = DownloadAndExtractArchive(KyberDashBaseName, rid, tag, windows, sums, workDirectory);
+        string extractDir = await DownloadAndExtractArchiveAsync(
+            KyberDashBaseName,
+            rid,
+            tag,
+            windows,
+            sums,
+            workDirectory,
+            cancellationToken).ConfigureAwait(false);
         string cliName = BinaryInstaller.InstalledFileName(KyberDashBaseName, windows);
         List<(string BaseName, string ExtractedPath, string Destination)> staged =
         [
@@ -1211,24 +1250,29 @@ internal sealed class SelfUpdater : IDisposable
         return staged;
     }
 
-    private string DownloadAndExtractArchive(
+    private async Task<string> DownloadAndExtractArchiveAsync(
         string baseName,
         string rid,
         string tag,
         bool windows,
         string sums,
-        string workDirectory)
+        string workDirectory,
+        CancellationToken cancellationToken)
     {
         string archiveName = BinaryInstaller.ArchiveName(baseName, rid);
         string archivePath = Path.Combine(workDirectory, archiveName);
         _log($"downloading {archiveName}…");
         using (Stream destination = _files.OpenWriteNew(archivePath))
-            _releases.DownloadAsset(tag, archiveName, destination);
+        {
+            await _releases
+                .DownloadAssetAsync(tag, archiveName, destination, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         string expected = ChecksumVerifier.ExpectedHex(sums, archiveName);
         byte[] hash;
         using (Stream archive = _files.OpenRead(archivePath))
-            hash = SHA256.HashData(archive);
+            hash = await SHA256.HashDataAsync(archive, cancellationToken).ConfigureAwait(false);
         ChecksumVerifier.Verify(expected, hash, archiveName);
 
         string extractDir = Path.Combine(workDirectory, baseName + "-extract");

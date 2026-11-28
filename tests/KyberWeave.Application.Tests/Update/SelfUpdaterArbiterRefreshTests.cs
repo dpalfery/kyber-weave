@@ -38,7 +38,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// once for the enabled projects instead of shelling out to a hook script.
     /// </summary>
     [Fact]
-    public void Update_InvokesArbiterRefreshSeamForEnabledProjectsWhenArbiterInstalled()
+    public async Task Update_InvokesArbiterRefreshSeamForEnabledProjectsWhenArbiterInstalled()
     {
         InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
@@ -63,7 +63,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(1, refresher.Calls);
@@ -74,7 +74,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// An update must not add a surface the owner did not choose.
     /// </summary>
     [Fact]
-    public void Update_SkipsArbiterRefreshSeamWhenNoArbiterInstalled()
+    public async Task Update_SkipsArbiterRefreshSeamWhenNoArbiterInstalled()
     {
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
@@ -98,7 +98,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(0, refresher.Calls);
@@ -109,7 +109,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// the injected seam is the only path to it, so no process runner sees an arbiter hook argv.
     /// </summary>
     [Fact]
-    public void Update_ArbiterRefreshSeamIsInjectedNeverShelledOut()
+    public async Task Update_ArbiterRefreshSeamIsInjectedNeverShelledOut()
     {
         InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
@@ -142,7 +142,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(1, refresher.Calls);
@@ -154,7 +154,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// handed: a project whose hook update fails must not be counted as refreshed.
     /// </summary>
     [Fact]
-    public void Update_ReportsTheRefreshOutcomeNotTheInputCount()
+    public async Task Update_ReportsTheRefreshOutcomeNotTheInputCount()
     {
         InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
@@ -212,7 +212,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: _world.Targets(environment),
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(
@@ -226,7 +226,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// global hook is refreshed so it points at the current Arbiter binary instead of a stale one.
     /// </summary>
     [Fact]
-    public void Refresh_RefreshesExistingGlobalArbiterHookListedInUserConfig()
+    public async Task Refresh_RefreshesExistingGlobalArbiterHookListedInUserConfig()
     {
         string home = Path.Combine(_world.Install, "home");
         _world.Files.CreateDirectory(home);
@@ -242,7 +242,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         };
 
         ArbiterHookRefresher refresher = _world.Refresher(environment, log.Add);
-        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+        ArbiterHookRefreshResult outcome = await refresher.RefreshAsync([]);
 
         Assert.Equal(1, outcome.Refreshed);
         string content = _world.Files.ReadAllText(hookPath);
@@ -256,7 +256,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// keep the user's own hook beside them.
     /// </summary>
     [Fact]
-    public void Refresh_AddsSubagentStopToAnExistingGlobalFactoryHook()
+    public async Task Refresh_AddsSubagentStopToAnExistingGlobalFactoryHook()
     {
         string home = Path.Combine(_world.Install, "home");
         _world.Files.CreateDirectory(home);
@@ -283,7 +283,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         };
 
         ArbiterHookRefresher refresher = _world.Refresher(environment, _ => { });
-        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+        ArbiterHookRefreshResult outcome = await refresher.RefreshAsync([]);
 
         Assert.Equal(1, outcome.Refreshed);
         string content = _world.Files.ReadAllText(hookPath);
@@ -303,7 +303,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// keep the user's own hook beside it.
     /// </summary>
     [Fact]
-    public void Refresh_AddsSubagentStopToAnExistingGlobalClaudeSettingsFile()
+    public async Task Refresh_AddsSubagentStopToAnExistingGlobalClaudeSettingsFile()
     {
         string home = Path.Combine(_world.Install, "home");
         _world.Files.CreateDirectory(home);
@@ -331,7 +331,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         };
 
         ArbiterHookRefresher refresher = _world.Refresher(environment, _ => { });
-        ArbiterHookRefreshResult outcome = refresher.Refresh([]);
+        ArbiterHookRefreshResult outcome = await refresher.RefreshAsync([]);
 
         Assert.Equal(1, outcome.Refreshed);
         string content = _world.Files.ReadAllText(hookPath);
@@ -352,7 +352,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// only for harnesses named in <c>arbiter.global.targets</c>, and it never rewrites foreign bytes.
     /// </summary>
     [Fact]
-    public void Update_RefreshesOnlyListedGlobalArbiterHooksWithoutTouchingForeignBytes()
+    public async Task Update_RefreshesOnlyListedGlobalArbiterHooksWithoutTouchingForeignBytes()
     {
         string home = Path.Combine(_world.Install, "home");
         _world.Files.CreateDirectory(home);
@@ -391,7 +391,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: _world.Targets(environment),
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         string content = _world.Files.ReadAllText(hookPath);
@@ -408,7 +408,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// the receipt holding two <c>hooks.json</c> blocks could not be written back at all.
     /// </summary>
     [Fact]
-    public void Update_RefreshesEveryGlobalBlockAndRewritesItsRecordedEntries()
+    public async Task Update_RefreshesEveryGlobalBlockAndRewritesItsRecordedEntries()
     {
         InstallArbiter();
         using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
@@ -450,7 +450,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             arbiterHookRefresher: refresher,
             arbiterTargets: _world.Targets(environment),
             finishingProcess: loopback.Invoke);
-        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+        SelfUpdateOutcome outcome = await updater.RunAsync(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(
@@ -472,7 +472,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// rewritten.
     /// </summary>
     [Fact]
-    public void Refresh_UpdatesTheHookEntryAndLeavesAnotherFileForTheSameTargetUntouched()
+    public async Task Refresh_UpdatesTheHookEntryAndLeavesAnotherFileForTheSameTargetUntouched()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "home-with-a-sibling-file"));
         string home = userPaths.HomeDirectory;
@@ -515,7 +515,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefreshResult outcome = _world.Refresher(environment, _ => { }).Refresh([]);
+        ArbiterHookRefreshResult outcome = await _world.Refresher(environment, _ => { }).RefreshAsync([]);
 
         Assert.Equal(1, outcome.Refreshed);
         string refreshedHook = _world.Files.ReadAllText(hookPath);
@@ -731,12 +731,14 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         /// <summary>When unset, every input root is reported as refreshed.</summary>
         public ArbiterHookRefreshResult? Result { get; set; }
 
-        public ArbiterHookRefreshResult Refresh(IReadOnlyList<string> projectRoots)
+        public Task<ArbiterHookRefreshResult> RefreshAsync(
+            IReadOnlyList<string> projectRoots,
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(projectRoots);
             Calls++;
             RefreshedRoots.AddRange(projectRoots);
-            return Result ?? new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
+            return Task.FromResult(Result ?? new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0));
         }
     }
 }

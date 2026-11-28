@@ -55,13 +55,13 @@ public sealed class SelfUpdaterTests
 
     /// <summary>The archives are downloaded, checked and staged in a temporary directory the file-system seam made.</summary>
     [Fact]
-    public void AReleaseUpdateStagesEachArchiveInATemporaryDirectoryAndDeletesIt()
+    public async Task AReleaseUpdateStagesEachArchiveInATemporaryDirectoryAndDeletesIt()
     {
         _files.WriteAllText(ProcessPath, "old-cli");
         using MapHandler handler = ServeRelease(CliBaseName, McpBaseName);
 
         using SelfUpdater updater = CreateUpdater(handler);
-        SelfUpdateOutcome outcome = updater.Run(
+        SelfUpdateOutcome outcome = await updater.RunAsync(
             new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -76,13 +76,13 @@ public sealed class SelfUpdaterTests
     /// before the process loses the ability to load what it has not read yet.
     /// </summary>
     [Fact]
-    public void TheRunningImageIsCommittedLast()
+    public async Task TheRunningImageIsCommittedLast()
     {
         _files.WriteAllText(ProcessPath, "old-cli");
         using MapHandler handler = ServeRelease(CliBaseName, McpBaseName);
 
         using SelfUpdater updater = CreateUpdater(handler);
-        _ = updater.Run(
+        _ = await updater.RunAsync(
             new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
 
         Assert.Equal<string>([McpPath, ProcessPath], _system.ReplacedDestinations);
@@ -95,7 +95,7 @@ public sealed class SelfUpdaterTests
     /// happens after that commit, so a rollback that does nothing leaves half the update in place.
     /// </summary>
     [Fact]
-    public void AFailedCommitRollsBackTheBinariesAlreadyReplaced()
+    public async Task AFailedCommitRollsBackTheBinariesAlreadyReplaced()
     {
         _files.WriteAllText(ProcessPath, "old-cli");
         _files.WriteAllText(McpPath, "old-mcp");
@@ -104,7 +104,7 @@ public sealed class SelfUpdaterTests
         using MapHandler handler = ServeRelease(CliBaseName, McpBaseName);
 
         using SelfUpdater updater = CreateUpdater(handler);
-        SelfUpdateOutcome outcome = updater.Run(
+        SelfUpdateOutcome outcome = await updater.RunAsync(
             new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -120,7 +120,7 @@ public sealed class SelfUpdaterTests
     /// test owns rather than from the developer's own home directory.
     /// </summary>
     [Fact]
-    public void AnAlreadyCurrentHostReportsWhereTheTrayRecordWouldBe()
+    public async Task AnAlreadyCurrentHostReportsWhereTheTrayRecordWouldBe()
     {
         _files.WriteAllText(ProcessPath, "old-cli");
 
@@ -128,7 +128,7 @@ public sealed class SelfUpdaterTests
         SelfUpdateHost current = new(ProcessPath, "0.1.7-rc.20", "osx-arm64", IsWindows: false, IsMacOs: false);
 
         using SelfUpdater updater = CreateUpdater(handler, current);
-        SelfUpdateOutcome outcome = updater.Run(
+        SelfUpdateOutcome outcome = await updater.RunAsync(
             new SelfUpdateOptions("0.1.7-rc.20", ReleaseCandidate: false, NoMcp: false, NoArbiter: true));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -141,19 +141,19 @@ public sealed class SelfUpdaterTests
     /// the same handler must still send. Disposing the handler with the first updater breaks every later update.
     /// </summary>
     [Fact]
-    public void TwoUpdatesOverTheSameHandlerBothRun()
+    public async Task TwoUpdatesOverTheSameHandlerBothRun()
     {
         _files.WriteAllText(ProcessPath, "old-cli");
         using MapHandler handler = ServeRelease(CliBaseName, McpBaseName);
 
         using (SelfUpdater first = CreateUpdater(handler))
         {
-            Assert.Equal(0, first.Run(
-                new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true)).ExitCode);
+            Assert.Equal(0, (await first.RunAsync(
+                new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true))).ExitCode);
         }
 
         using SelfUpdater second = CreateUpdater(handler);
-        SelfUpdateOutcome outcome = second.Run(
+        SelfUpdateOutcome outcome = await second.RunAsync(
             new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
 
         Assert.Equal(0, outcome.ExitCode);
@@ -162,14 +162,14 @@ public sealed class SelfUpdaterTests
 
     /// <summary>The install directory is checked through the file-system and update-system seams.</summary>
     [Fact]
-    public void AnAbsentInstallDirectoryIsRefused()
+    public async Task AnAbsentInstallDirectoryIsRefused()
     {
         _files.DeleteTreeNoFollow(InstallDirectory);
 
         using MapHandler handler = new();
 
         using SelfUpdater updater = CreateUpdater(handler);
-        SelfUpdateOutcome outcome = updater.Run(
+        SelfUpdateOutcome outcome = await updater.RunAsync(
             new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false));
 
         Assert.Equal(1, outcome.ExitCode);

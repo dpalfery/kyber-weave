@@ -45,9 +45,9 @@ public sealed class ArbiterHookRefresherTests
         _log.Add);
 
     [Fact]
-    public void OnlyAProjectThatEnablesTheArbiterIsRefreshed()
+    public async Task OnlyAProjectThatEnablesTheArbiterIsRefreshed()
     {
-        ArbiterHookRefreshResult result = Refresher().Refresh([EnabledProject, DisabledProject]);
+        ArbiterHookRefreshResult result = await Refresher().RefreshAsync([EnabledProject, DisabledProject]);
 
         SquadUpdateRequest update = Assert.Single(_lifecycle.Updates);
         Assert.Equal(EnabledProject, update.TargetRoot);
@@ -56,15 +56,15 @@ public sealed class ArbiterHookRefresherTests
     }
 
     [Fact]
-    public void AGlobalCommandCodeModIsRewrittenToTheCurrentBody()
+    public async Task AGlobalCommandCodeModIsRewrittenToTheCurrentBody()
     {
         string home = Path.Combine(_files.Root, "home");
         string modPath = Path.Combine(home, ".commandcode", "mods", "kyber-arbiter.ts");
         _files.CreateDirectory(Path.GetDirectoryName(modPath)!);
         _files.WriteAllText(modPath, "// stale");
 
-        ArbiterHookRefreshResult result = Refresher(new StaticUserConfig(["commandcode"]), home)
-            .Refresh([EnabledProject]);
+        ArbiterHookRefreshResult result = await Refresher(new StaticUserConfig(["commandcode"]), home)
+            .RefreshAsync([EnabledProject]);
 
         string refreshed = _files.ReadAllText(modPath);
         Assert.NotEqual("// stale", refreshed);
@@ -74,11 +74,11 @@ public sealed class ArbiterHookRefresherTests
     }
 
     [Fact]
-    public void ARefreshTheLifecycleReportsAsFailedIsCountedAndLogged()
+    public async Task ARefreshTheLifecycleReportsAsFailedIsCountedAndLogged()
     {
         _lifecycle.Result = new SquadLifecycleResult(false, Errors: ["the renderer refused"]);
 
-        ArbiterHookRefreshResult result = Refresher().Refresh([EnabledProject]);
+        ArbiterHookRefreshResult result = await Refresher().RefreshAsync([EnabledProject]);
 
         Assert.Equal(0, result.Refreshed);
         Assert.Equal(1, result.Failed);
@@ -86,7 +86,7 @@ public sealed class ArbiterHookRefresherTests
     }
 
     [Fact]
-    public void ARefreshTheLifecycleThrowsFromIsCountedAndLogged()
+    public async Task ARefreshTheLifecycleThrowsFromIsCountedAndLogged()
     {
         ArbiterHookRefresher refresher = new(
             new FakeProcessEnvironment(homeDirectory: "/kw/home", readVariable: _ => null),
@@ -98,7 +98,7 @@ public sealed class ArbiterHookRefresherTests
             new FakeMcpWiringService(),
             _log.Add);
 
-        ArbiterHookRefreshResult result = refresher.Refresh([EnabledProject]);
+        ArbiterHookRefreshResult result = await refresher.RefreshAsync([EnabledProject]);
 
         Assert.Equal(0, result.Refreshed);
         Assert.Equal(1, result.Failed);
@@ -106,11 +106,11 @@ public sealed class ArbiterHookRefresherTests
     }
 
     [Fact]
-    public void AProjectRootTheConfigRepositoryCannotReadIsSkippedWithAWarning()
+    public async Task AProjectRootTheConfigRepositoryCannotReadIsSkippedWithAWarning()
     {
         // A name no file system can take: the repository reports it as a file failure, the same answer it gives a
         // project whose configuration cannot be read.
-        ArbiterHookRefreshResult result = Refresher().Refresh(["a\0b"]);
+        ArbiterHookRefreshResult result = await Refresher().RefreshAsync(["a\0b"]);
 
         Assert.Empty(_lifecycle.Updates);
         Assert.Equal(1, result.Failed);
@@ -118,9 +118,9 @@ public sealed class ArbiterHookRefresherTests
     }
 
     [Fact]
-    public void AnEmptyRootAndAWhitespaceRootAreSkipped()
+    public async Task AnEmptyRootAndAWhitespaceRootAreSkipped()
     {
-        ArbiterHookRefreshResult result = Refresher().Refresh([string.Empty, " "]);
+        ArbiterHookRefreshResult result = await Refresher().RefreshAsync([string.Empty, " "]);
 
         Assert.Empty(_lifecycle.Updates);
         Assert.Equal((0, 0), (result.Refreshed, result.Failed));

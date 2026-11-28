@@ -6,7 +6,7 @@ using KyberWeave.Domain.Update;
 namespace KyberWeave.Cli.Commands.Update;
 
 /// <summary>Updates the installed kyber-weave binaries from a GitHub Release.</summary>
-public sealed class UpdateCommand : Command<UpdateSettings>
+public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
 {
     private readonly ISelfUpdateService _updater;
     private readonly IAnsiConsole _console;
@@ -22,13 +22,16 @@ public sealed class UpdateCommand : Command<UpdateSettings>
         _console = console;
     }
 
-    public override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        UpdateSettings settings,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         try
         {
-            SelfUpdateOutcome outcome = _updater.Run(
+            SelfUpdateOutcome outcome = await _updater.RunAsync(
                 new SelfUpdateOptions(
                     settings.Version,
                     settings.ReleaseCandidate,
@@ -38,7 +41,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
                     settings.NoArbiter,
                     settings.NoRestart,
                     settings.FinishUpdate),
-                Log);
+                Log,
+                cancellationToken).ConfigureAwait(false);
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }
@@ -47,11 +51,6 @@ public sealed class UpdateCommand : Command<UpdateSettings>
             WriteOutcome(new SelfUpdateOutcome(1, ex.Message));
             return 1;
         }
-    }
-
-    public int Execute(CommandContext context, UpdateSettings settings)
-    {
-        return Execute(context, settings, CancellationToken.None);
     }
 
     private void Log(string message)
