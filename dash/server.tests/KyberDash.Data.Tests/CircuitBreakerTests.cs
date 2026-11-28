@@ -124,13 +124,13 @@ public sealed class CircuitBreakerTests : IDisposable
     }
 
     [Fact]
-    public void Breaker_ResetClosesAnOpenCircuitImmediately()
+    public async Task Breaker_ResetClosesAnOpenCircuitImmediately()
     {
         SqliteCircuitBreaker breaker = NewBreaker();
         Trip(breaker);
         Assert.Equal(DashCircuitState.Open, breaker.State);
 
-        breaker.Reset();
+        await breaker.ResetAsync();
 
         Assert.Equal(DashCircuitState.Closed, breaker.State);
         Assert.Equal(7, breaker.Execute(() => 7));
