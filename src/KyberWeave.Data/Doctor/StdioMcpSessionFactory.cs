@@ -21,9 +21,15 @@ public sealed class StdioMcpSessionFactory(TimeProvider time) : IMcpStdioSession
 
         public string? WaitForFirstErrorLine(TimeSpan wait) => inner.WaitForFirstErrorLine(wait);
 
+        public Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default) =>
+            inner.WaitForFirstErrorLineAsync(wait);
+
         public void SendLine(string line) => inner.SendLine(line);
 
         public string ReadLine() => inner.ReadLine();
+
+        public Task<string> ReadLineAsync(CancellationToken cancellationToken = default) =>
+            inner.ReadLineAsync(cancellationToken);
 
         public void Dispose() => inner.Dispose();
     }

@@ -58,6 +58,32 @@ public sealed class McpServerLiveProbeSessionTests
         Assert.Equal(["mcp.start", "mcp.handshake", "mcp.docs_explore", "mcp.root"], checks.Select(check => check.Id));
     }
 
+    /// <summary>The asynchronous probe makes the same decisions over the same scripted exchange.</summary>
+    [Fact]
+    public async Task TheAsyncProbePassesAllMcpChecksForAMatchingRoot()
+    {
+        _ = Healthy();
+
+        IReadOnlyList<DoctorCheck> checks = await Probe().RunAsync(Root, Options());
+
+        Assert.All(checks, check => Assert.True(check.Passed, check.Reason));
+        Assert.Equal(["mcp.start", "mcp.handshake", "mcp.docs_explore", "mcp.root"], checks.Select(check => check.Id));
+    }
+
+    /// <summary>The asynchronous probe fails a timed-out handshake and still disposes the session.</summary>
+    [Fact]
+    public async Task TheAsyncProbeFailsAHandshakeTimeoutAndKillsTheChild()
+    {
+        _ = _session.ReadFails(new TimeoutException());
+
+        IReadOnlyList<DoctorCheck> checks = await Probe().RunAsync(Root, Options(TimeSpan.FromSeconds(1)));
+
+        DoctorCheck handshake = Check(checks, "mcp.handshake");
+        Assert.False(handshake.Passed);
+        Assert.Contains("--mcp-timeout", handshake.Fix, StringComparison.Ordinal);
+        Assert.True(_session.Disposed);
+    }
+
     /// <summary>The probe asks for the renamed docs tool, never the retired name, and keeps the stable check id.</summary>
     [Fact]
     public void TheProbeRequestsTheRenamedDocsToolAndKeepsItsCheckId()
