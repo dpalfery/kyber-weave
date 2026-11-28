@@ -18,7 +18,7 @@ public sealed class SkillScanner
 
     /// <summary>Scans the skill's prose, its bundled scripts and its provenance.</summary>
     /// <param name="skill">The skill to scan.</param>
-    /// <param name="readScriptText">Reads one bundled script; returning null or throwing is reported as a finding, because a script nobody could read was not scanned.</param>
+    /// <param name="readScriptText">Reads one bundled script; returning null, or throwing a file failure (an I/O, access or path error), is reported as a finding, because a script nobody could read was not scanned; any other exception is a defect and propagates.</param>
     /// <returns>One diagnostic per finding, in prose, script and provenance order.</returns>
     public IEnumerable<Diagnostic> Scan(Skill skill, Func<SkillResource, string?> readScriptText)
     {

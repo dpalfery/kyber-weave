@@ -357,7 +357,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             squadLock = stateStore.ReadLock(targetRoot, scope);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
         {
             _output.Ansi.WriteLine();
             _output.Ansi.MarkupLine($"[red]Error reading Squad lock file: {Markup.Escape(ex.Message)}[/]");
@@ -492,7 +492,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                             version = squadLock.SquadVersion;
                         else if (!string.IsNullOrWhiteSpace(squadLock?.CliVersion)) version = squadLock.CliVersion;
                     }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+                    catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
                     {
                         // Treat unreadable lock as unknown version
                     }
