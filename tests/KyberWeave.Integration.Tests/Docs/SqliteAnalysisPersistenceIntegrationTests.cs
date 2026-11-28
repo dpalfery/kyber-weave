@@ -1,6 +1,7 @@
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Persistence;
+using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -96,6 +97,77 @@ public sealed class SqliteAnalysisPersistenceIntegrationTests
         InvalidDataException failure = Assert.Throws<InvalidDataException>(() => DocsPorts.Sqlite(repository.Path));
 
         Assert.Contains("newer than supported version", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADatabaseThatStaysLockedFailsAfterThreeBoundedAttempts()
+    {
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
+        using SqliteConnection holder = HoldExclusiveLock(persistence.DatabasePath);
+
+        Stopwatch elapsed = Stopwatch.StartNew();
+        InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
+            () => persistence.SaveClaims([Claim("locked")]));
+
+        // Three attempts of about 1 s each, not the driver's 30 s default per attempt.
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(10), $"The locked cache took {elapsed.Elapsed} to give up.");
+
+        Assert.Contains("remained locked after 3 bounded attempts", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ALockReleasedDuringTheRetriesLetsTheCallSucceed()
+    {
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
+        SqliteConnection holder = HoldExclusiveLock(persistence.DatabasePath);
+        // Each attempt waits 1 s on the lock; releasing it during the second attempt proves the retry.
+        using Timer release = new(_ => holder.Dispose(), null, TimeSpan.FromMilliseconds(1400), Timeout.InfiniteTimeSpan);
+
+        persistence.SaveClaims([Claim("retried")]);
+
+        Assert.Equal("retried", Assert.Single(persistence.LoadClaims(["retried"])).Key);
+    }
+
+    [Fact]
+    public void AVectorStoredWithTheWrongTypeIsReportedAsACorruptCache()
+    {
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
+        using (SqliteConnection connection = new($"Data Source={persistence.DatabasePath}"))
+        {
+            connection.Open();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO analysis_embeddings VALUES (CAST('h' AS BLOB), CAST('p' AS BLOB), CAST('m' AS BLOB), " +
+                "2, CAST('float' AS BLOB), 'not a vector');";
+            command.ExecuteNonQuery();
+        }
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => persistence.LoadEmbeddings([new EmbeddingCacheKey("h", "p", "m", 2, "float")]));
+    }
+
+    [Fact]
+    public void ALoadOfMoreKeysThanSqliteHasVariablesReadsThemAll()
+    {
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
+        string[] ids = [.. Enumerable.Range(0, 40_000).Select(index => "claim-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture))];
+        persistence.SaveClaims([.. ids.Select(id => Claim(id))]);
+
+        Assert.Equal(ids.Length, persistence.LoadClaims(ids).Count);
+    }
+
+    private static SqliteConnection HoldExclusiveLock(string databasePath)
+    {
+        SqliteConnection holder = new($"Data Source={databasePath};Pooling=False");
+        holder.Open();
+        using SqliteCommand command = holder.CreateCommand();
+        command.CommandText = "BEGIN EXCLUSIVE;";
+        command.ExecuteNonQuery();
+        return holder;
     }
 
     private static TempDirectory SafeRepository()
