@@ -766,8 +766,8 @@
     {
       "file": "src/KyberWeave.Application/Doctor/RepositoryDoctorService.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Builds the git rev-parse start info only; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
+      "count": 2,
+      "bound": "Builds the git rev-parse start info only, for the sync and async doctor paths; each runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/StdioSession.cs",
@@ -862,8 +862,8 @@
     {
       "file": "src/KyberWeave.Application/Doctor/PostCheckoutHookInstaller.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Started through the injected IProcessExecutor. The doctor command passes ProcessExecutor.WithTimeout(DoctorOptions.IndexTimeout), 600 s by default, which kills the child tree on expiry; git argv only, in the repository root."
+      "count": 2,
+      "bound": "Started through the injected process seam on the sync and async paths. The doctor command passes a timeout, 600 s by default, which kills the child tree on expiry; git argv only, in the repository root."
     },
     {
       "file": "tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs",
@@ -1104,6 +1104,18 @@
       "text": "ProcessRunner.Run(startInfo, standardInput, timeout, maxOutputBytes, cancellationToken);",
       "count": 1,
       "bound": "The synchronous half of the comparison helper; the probe is short-lived and each bounded case passes a 1 s timeout that kills the tree on expiry."
+    },
+    {
+      "file": "tests/KyberWeave.Testing/Fakes/ScriptedProcessExecutor.cs",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
+      "count": 1,
+      "bound": "Builds only; the fake answers from its script and starts no process."
+    },
+    {
+      "file": "tests/KyberWeave.Cli.Tests/DoctorCommandSeamTests.cs",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
+      "count": 1,
+      "bound": "Builds only; the recording executor answers an empty result and starts no process."
     },
     {
       "file": "tests/KyberWeave.Cli.Tests/DoctorCommandSeamTests.cs",

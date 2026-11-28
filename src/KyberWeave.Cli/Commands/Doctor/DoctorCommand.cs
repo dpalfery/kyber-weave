@@ -25,7 +25,7 @@ namespace KyberWeave.Cli.Commands.Doctor;
 ///         production defaults are the actual stdin and process environment.
 ///     </para>
 /// </remarks>
-public sealed class DoctorCommand : Command<DoctorSettings>
+public sealed class DoctorCommand : AsyncCommand<DoctorSettings>
 {
     /// <summary>The line a bare, non-interactive run prints so its user knows how to provision.</summary>
     internal const string NonInteractiveHint = "provisioning skipped: non-interactive; rerun with --provision";
@@ -75,19 +75,19 @@ public sealed class DoctorCommand : Command<DoctorSettings>
         (settings.Check ? 1 : 0) + (settings.Provision ? 1 : 0) + (settings.Ensure ? 1 : 0) + (settings.PostCheckout ? 1 : 0);
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, DoctorSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, DoctorSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         if (ModesRequested(settings) > 1)
         {
-            _console.Error.WriteLine("kyber-weave: error: choose one of --check, --provision, --ensure or --post-checkout, not more than one.");
+            await _console.Error.WriteLineAsync("kyber-weave: error: choose one of --check, --provision, --ensure or --post-checkout, not more than one.").ConfigureAwait(false);
             return 2;
         }
 
         if (settings.IndexTimeoutSeconds <= 0 || settings.McpTimeoutSeconds <= 0)
         {
-            _console.Error.WriteLine("kyber-weave: error: --index-timeout and --mcp-timeout must be positive seconds.");
+            await _console.Error.WriteLineAsync("kyber-weave: error: --index-timeout and --mcp-timeout must be positive seconds.").ConfigureAwait(false);
             return 2;
         }
 
@@ -128,26 +128,47 @@ public sealed class DoctorCommand : Command<DoctorSettings>
         {
             // The path is client input, and an unusable one is a refusal: exit 2, never an exception. Callers
             // branch on the 0/1/2/3 contract, so a stack trace would be indistinguishable from a broken doctor.
-            _console.Error.WriteLine($"kyber-weave: error: '{settings.Path}' is not a usable path.");
+            await _console.Error.WriteLineAsync($"kyber-weave: error: '{settings.Path}' is not a usable path.").ConfigureAwait(false);
             return 2;
         }
 
-        IProcessExecutor executor = _executor ?? new BoundedExecutor(_processes, options.IndexTimeout);
+        IProcessRunner executor = _executor as IProcessRunner ?? new BoundedExecutor(_processes, options.IndexTimeout);
         // The hook's own mode skips the MCP and Copilot probes and installs nothing, so it is routed apart from the doctor run.
         DoctorReport report = settings.PostCheckout
-            ? _doctor.RunPostCheckout(root, options, executor)
-            : _doctor.Run(root, mode, options, executor, environment);
+            ? await _doctor.RunPostCheckoutAsync(root, options, executor, cancellationToken: cancellationToken).ConfigureAwait(false)
+            : await _doctor.RunAsync(root, mode, options, executor, environment, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         if (hint && !settings.Json)
-            _console.Out.WriteLine(NonInteractiveHint);
+            await _console.Out.WriteLineAsync(NonInteractiveHint).ConfigureAwait(false);
 
         DoctorReportRenderer.Write(_console.Out, report, settings.Json);
         return report.ExitCode;
     }
 
-    private sealed class BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout) : IProcessExecutor
+    private sealed class BoundedExecutor : IProcessRunner
     {
+        private readonly IBoundedProcessExecutor _process;
+        private readonly IProcessRunner _runner;
+        private readonly TimeSpan _timeout;
+
+        public BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout)
+        {
+            ArgumentNullException.ThrowIfNull(process);
+
+            _process = process;
+            _runner = process as IProcessRunner
+                ?? throw new InvalidOperationException("The bounded process executor must also be an IProcessRunner.");
+            _timeout = timeout;
+        }
+
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            process.Run(startInfo, standardInput, timeout);
+            _process.Run(startInfo, standardInput, _timeout);
+
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default) =>
+            _runner.RunAsync(request, cancellationToken);
+
+        public bool IsAlive(int processId) => _runner.IsAlive(processId);
+
+        public string? FindOnPath(string program) => _runner.FindOnPath(program);
     }
 }

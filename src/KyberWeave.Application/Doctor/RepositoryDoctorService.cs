@@ -113,6 +113,90 @@ public sealed class RepositoryDoctorService(
         return new DoctorReport(repositoryRoot, mode, exitCode, checks);
     }
 
+    /// <summary>Runs the doctor against <paramref name="root"/> without blocking a thread.</summary>
+    /// <param name="root">The directory to check. The git toplevel of this directory becomes the repository root.</param>
+    /// <param name="mode">Read-only, provisioning, or the ensure run that leaves the index and both tools proved.</param>
+    /// <param name="options">The budgets and executable names.</param>
+    /// <param name="executor">Runs git and CodeGraph children.</param>
+    /// <param name="environment">Reads one environment variable. Injected so the home-directory refusal is testable.</param>
+    /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    public async Task<DoctorReport> RunAsync(
+        string root,
+        DoctorMode mode,
+        DoctorOptions options,
+        IProcessRunner executor,
+        Func<string, string?> environment,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(executor);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        (string? repositoryRoot, string? notRepository) =
+            await ResolveRepositoryRootAsync(root, executor, cancellationToken).ConfigureAwait(false);
+        if (repositoryRoot is null)
+            return Refused(root, mode, new DoctorCheck(
+                "repository.root",
+                false,
+                notRepository,
+                "run kyber-weave doctor from inside a git repository"));
+
+        // HOME is the Unix answer; USERPROFILE is the Windows one. A blank value counts as unset, because an empty
+        // path makes GetFullPath throw. The install command resolves home through the same helper, so the probe below
+        // looks for the prompt file where install wrote it.
+        string? home = CopilotPromptHome.FromEnvironment(environment);
+        if (!string.IsNullOrWhiteSpace(home) && SamePath(repositoryRoot, home))
+            return Refused(repositoryRoot, mode, new DoctorCheck(
+                "repository.root",
+                false,
+                "the repository root is the home directory; refusing to index it",
+                "cd into a repository and run kyber-weave doctor"));
+
+        CodeGraphOutcome codegraph = await provisioner.RunAsync(
+            repositoryRoot,
+            mode,
+            options,
+            executor,
+            lockDirectory ?? processEnvironment.TempDirectory,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        IReadOnlyList<DoctorCheck> mcpChecks = await mcpProbe.RunAsync(repositoryRoot, options, cancellationToken).ConfigureAwait(false);
+        List<DoctorCheck> checks = [.. codegraph.Checks, NestedWorktreesCheck(repositoryRoot), .. mcpChecks];
+
+        // D1: a repository may set `stop-on-tool-failure: false` to be told about a broken tool and carry on. The exit
+        // code is what a caller branches on, so the opt-out has to change the code and not only the wording. It applies
+        // to the ensure run — the command a code-editing run starts with — and never to `--check`, whose reader asked
+        // for a verdict. A missing binary still exits 3: installing it is the user's decision either way.
+        bool stops = mode != DoctorMode.Ensure || settings.Read(repositoryRoot).StopsOnToolFailure;
+        if (!stops)
+            checks = [.. checks.Select(AsWarning)];
+
+        // The git post-checkout hook is a shared file, so only the ensure run may write it; check and provision report
+        // on it without touching it. A hook problem is a passing warning, so it never changes the exit code.
+        DoctorCheck? hook = mode == DoctorMode.Ensure
+            ? await postCheckoutHook.EnsureAsync(repositoryRoot, executor, cancellationToken).ConfigureAwait(false)
+            : await postCheckoutHook.InspectAsync(repositoryRoot, executor, cancellationToken).ConfigureAwait(false);
+        if (hook is not null)
+            checks = [.. checks, hook];
+
+        // The Copilot prompt override is opt-in: with no installed prompt file the probe adds nothing. It runs for any
+        // repository the user's home contains, because the override is machine-wide and not a per-repository setting.
+        if (!string.IsNullOrWhiteSpace(home))
+            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), files, paths, processEnvironment.CurrentDirectory, environment("XDG_CONFIG_HOME"))];
+
+        // Advisory only: a passing check with a warning, in every mode, so it never changes the exit code.
+        checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment, files.DirectoryExists, files.FileExists)];
+
+        int exitCode = codegraph.BinaryMissing
+            ? 3
+            : checks.Any(check => !check.Passed) ? 1 : 0;
+
+        return new DoctorReport(repositoryRoot, mode, exitCode, checks);
+    }
+
     /// <summary>
     ///     Runs the doctor for the git post-checkout hook: indexes a new worktree without restoring the tracked edits
     ///     the index run would otherwise revert.
@@ -155,6 +239,62 @@ public sealed class RepositoryDoctorService(
                 executor,
                 lockDirectory ?? processEnvironment.TempDirectory,
                 CodeGraphRestore.InitConfigFilesOnly);
+
+            int exitCode = outcome.Status switch
+            {
+                WorktreeIndexStatus.BinaryMissing => 3,
+                WorktreeIndexStatus.Failed => 1,
+                _ => 0
+            };
+
+            return new DoctorReport(repositoryRoot, DoctorMode.Ensure, exitCode, outcome.Checks);
+        }
+
+        return new DoctorReport(
+            repositoryRoot,
+            DoctorMode.Ensure,
+            0,
+            [new DoctorCheck(WorktreeIndexHookCheckId, true, "skipped: worktree-index-hook is false in the repository configuration", null)]);
+    }
+
+    /// <summary>Runs the doctor for the git post-checkout hook without blocking a thread.</summary>
+    /// <param name="root">The worktree root the hook was fired in.</param>
+    /// <param name="options">The index budget and executable names.</param>
+    /// <param name="executor">Runs git and CodeGraph children.</param>
+    /// <param name="lockDirectory">Where the index lock file lives. Null uses the OS temp directory.</param>
+    /// <param name="cancellationToken">Cancels the git and CodeGraph children.</param>
+    public async Task<DoctorReport> RunPostCheckoutAsync(
+        string root,
+        DoctorOptions options,
+        IProcessRunner executor,
+        string? lockDirectory = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(executor);
+
+        (string? repositoryRoot, string? notRepository) =
+            await ResolveRepositoryRootAsync(root, executor, cancellationToken).ConfigureAwait(false);
+        if (repositoryRoot is null)
+            return Refused(root, DoctorMode.Ensure, new DoctorCheck(
+                "repository.root",
+                false,
+                notRepository,
+                "run kyber-weave doctor from inside a git repository"));
+
+        // The owner's switch: with the hook off, a new worktree gets no index run at all. Exit 0 and one line say so.
+        // A configuration that fails to load counts as on, the same rule the hook install follows.
+        bool hookOff = !settings.Read(repositoryRoot).WorktreeIndexHook;
+        if (!hookOff)
+        {
+            WorktreeIndexOutcome outcome = await worktreeIndex.EnsureAsync(
+                repositoryRoot,
+                options,
+                executor,
+                lockDirectory ?? processEnvironment.TempDirectory,
+                CodeGraphRestore.InitConfigFilesOnly,
+                cancellationToken).ConfigureAwait(false);
 
             int exitCode = outcome.Status switch
             {
@@ -231,6 +371,42 @@ public sealed class RepositoryDoctorService(
         try
         {
             ProcessResult result = executor.Run(startInfo, string.Empty);
+            if (result.ExitCode != 0)
+                return (null, $"'{root}' is not inside a git repository");
+
+            string top = result.StandardOutput.Trim();
+            return top.Length == 0 ? (null, $"'{root}' is not inside a git repository") : (top, null);
+        }
+        catch (TimeoutException)
+        {
+            // The executor bounds every child, so a hung git is an ordinary outcome the doctor reports.
+            return (null, "git did not finish while finding the repository root");
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
+        {
+            return (null, "git could not be run to find the repository root");
+        }
+    }
+
+    private static async Task<(string? Root, string? Reason)> ResolveRepositoryRootAsync(
+        string root,
+        IProcessRunner executor,
+        CancellationToken cancellationToken)
+    {
+        ProcessStartInfo startInfo = new("git")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = root
+        };
+        startInfo.ArgumentList.Add("rev-parse");
+        startInfo.ArgumentList.Add("--show-toplevel");
+
+        try
+        {
+            ProcessResult result = await executor.RunAsync(startInfo, string.Empty, timeout: null, cancellationToken).ConfigureAwait(false);
             if (result.ExitCode != 0)
                 return (null, $"'{root}' is not inside a git repository");
 
