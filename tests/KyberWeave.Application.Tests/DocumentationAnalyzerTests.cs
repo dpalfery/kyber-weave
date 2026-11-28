@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 public sealed class DocumentationAnalyzerTests
 {
     [Fact]
-    public void AnalyzeFiltersConfiguredStatusesAndGlossaryBeforeExtractingClaims()
+    public async Task AnalyzeFiltersConfiguredStatusesAndGlossaryBeforeExtractingClaims()
     {
         DocumentSet documents = Set(
             Document("current", "docs/current.md", Status.Current, "Shared claim with enough useful words."),
@@ -28,14 +28,14 @@ public sealed class DocumentationAnalyzerTests
             Document("glossary", "docs/glossary.md", Status.Current, "Shared claim with enough useful words."));
         DocsAnalysisConfig config = Config(statuses: ["current"], glossaryPath: "docs/glossary.md");
 
-        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), config);
+        DocumentationAnalysisResult result = await Analyzer().AnalyzeAsync(documents, Graph(documents), config);
 
         Assert.Equal(1, result.Metrics.ExtractedClaims);
         Assert.Empty(result.Candidates);
     }
 
     [Fact]
-    public void AnalyzeDefaultResolvedGlossaryPathWithNoncanonicalIdentityExcludesGlossary()
+    public async Task AnalyzeDefaultResolvedGlossaryPathWithNoncanonicalIdentityExcludesGlossary()
     {
         DocumentSet documents = Set(
             Document("current", "docs/current.md", Status.Current, "One current claim with enough useful words."),
@@ -45,20 +45,20 @@ public sealed class DocumentationAnalyzerTests
               docs-root: docs
             """).DocsAnalysis;
 
-        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), config);
+        DocumentationAnalysisResult result = await Analyzer().AnalyzeAsync(documents, Graph(documents), config);
 
         Assert.Equal(1, result.Metrics.ExtractedClaims);
     }
 
     [Fact]
-    public void AnalyzeExactDuplicateClaimsAcrossUnrelatedDocumentsReturnsOneGlobalCluster()
+    public async Task AnalyzeExactDuplicateClaimsAcrossUnrelatedDocumentsReturnsOneGlobalCluster()
     {
         DocumentSet documents = Set(
             Document("first", "docs/first.md", Status.Current, "The processor must retain every approved verdict."),
             Document("second", "docs/second.md", Status.Current, "THE processor must retain every approved verdict!"),
             Document("third", "docs/third.md", Status.Current, "The processor must retain every approved verdict."));
 
-        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), Config(mode: DocsAnalysisSearchMode.Graph));
+        DocumentationAnalysisResult result = await Analyzer().AnalyzeAsync(documents, Graph(documents), Config(mode: DocsAnalysisSearchMode.Graph));
 
         AnalysisCandidate candidate = Assert.Single(result.Candidates);
         Assert.Equal(AnalysisRuleKind.Duplicate, candidate.Kind);
@@ -112,7 +112,7 @@ public sealed class DocumentationAnalyzerTests
     [InlineData(DocsAnalysisSearchMode.Graph, 1, 0)]
     [InlineData(DocsAnalysisSearchMode.Hybrid, 1, 1)]
     [InlineData(DocsAnalysisSearchMode.HighRecall, 1, 1)]
-    public void AnalyzeSearchModeSelectsGraphAndLexicalCandidateSources(
+    public async Task AnalyzeSearchModeSelectsGraphAndLexicalCandidateSources(
         DocsAnalysisSearchMode mode,
         int expectedGraphCalls,
         int expectedLexicalCalls)
@@ -123,7 +123,7 @@ public sealed class DocumentationAnalyzerTests
         RecordingCandidateSource graph = new RecordingCandidateSource(CandidateSourceKind.Graph);
         RecordingCandidateSource lexical = new RecordingCandidateSource(CandidateSourceKind.Lexical);
 
-        Analyzer([graph, lexical]).Analyze(documents, Graph(documents), Config(mode: mode));
+        await Analyzer([graph, lexical]).AnalyzeAsync(documents, Graph(documents), Config(mode: mode));
 
         Assert.Equal(expectedGraphCalls, graph.CallCount);
         Assert.Equal(expectedLexicalCalls, lexical.CallCount);
@@ -138,7 +138,7 @@ public sealed class DocumentationAnalyzerTests
     [InlineData("Send requests to /api/v1/report.", "Send requests to /api/v2/report.")]
     [InlineData("Run `dotnet test` before review.", "Run `npm test` before review.")]
     [InlineData("Set `ExecutionMode.Local` for analysis.", "Set `ExecutionMode.Remote` for analysis.")]
-    public void AnalyzeGraphRelatedClaimsWithConflictSignalsReturnsPendingConflict(
+    public async Task AnalyzeGraphRelatedClaimsWithConflictSignalsReturnsPendingConflict(
         string leftText,
         string rightText)
     {
@@ -147,7 +147,7 @@ public sealed class DocumentationAnalyzerTests
             Document("right", "docs/right.md", Status.Current, rightText, component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.60, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
 
         AnalysisCandidate conflict = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
         Assert.False(conflict.IsExact);
@@ -156,21 +156,21 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeFencedCodeClaimsWithDifferentCommandsReturnsPendingConflict()
+    public async Task AnalyzeFencedCodeClaimsWithDifferentCommandsReturnsPendingConflict()
     {
         DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "```sh\ndotnet test\n```", component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, "```sh\nnpm test\n```", component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(minClaimTokens: 1));
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config(minClaimTokens: 1));
 
         AnalysisCandidate conflict = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
         Assert.All(conflict.Claims, claim => Assert.Equal(ClaimKind.CodeBlock, claim.Kind));
     }
 
     [Fact]
-    public void AnalyzeInformativeTermInDivergentDocumentContextsReturnsTerminologyCandidate()
+    public async Task AnalyzeInformativeTermInDivergentDocumentContextsReturnsTerminologyCandidate()
     {
         DocumentSet documents = Set(
             Document(
@@ -189,7 +189,7 @@ public sealed class DocumentationAnalyzerTests
                 section: "Agent execution"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.20, graph: 0);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
 
         AnalysisCandidate terminology = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.Equal("loop", terminology.Term);
@@ -200,11 +200,11 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeHighConfidenceDuplicateVerdictPromotesNearDuplicateToWarning()
+    public async Task AnalyzeHighConfidenceDuplicateVerdictPromotesNearDuplicateToWarning()
     {
         DocumentSet documents = NearDuplicateDocuments();
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
-        DocumentationAnalysisResult pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult pending = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
         AnalysisCandidate candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Duplicate);
         StubPersistence persistence = new StubPersistence(new AnalysisVerdict(
             candidate.Id,
@@ -212,20 +212,20 @@ public sealed class DocumentationAnalyzerTests
             0.90,
             "Both claims impose the same requirement."));
 
-        DocumentationAnalysisResult reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult reviewed = await Analyzer([source], persistence).AnalyzeAsync(documents, Graph(documents), Config());
 
         Diagnostic finding = Assert.Single(reviewed.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.DuplicateRuleCode);
         Assert.Equal(Severity.Warning, finding.Severity);
     }
 
     [Fact]
-    public void AnalyzeHighConfidenceConflictVerdictPromotesConflictToError()
+    public async Task AnalyzeHighConfidenceConflictVerdictPromotesConflictToError()
     {
         DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "The runner must emit token usage.", component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, "The runner must not emit token usage.", component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.70, graph: 1);
-        DocumentationAnalysisResult pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult pending = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
         AnalysisCandidate candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Conflict);
         StubPersistence persistence = new StubPersistence(new AnalysisVerdict(
             candidate.Id,
@@ -233,7 +233,7 @@ public sealed class DocumentationAnalyzerTests
             0.90,
             "The obligations cannot both hold in the same runtime scope."));
 
-        DocumentationAnalysisResult reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult reviewed = await Analyzer([source], persistence).AnalyzeAsync(documents, Graph(documents), Config());
 
         Diagnostic finding = Assert.Single(reviewed.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.ConflictRuleCode);
         Assert.Equal(Severity.Error, finding.Severity);
@@ -243,14 +243,14 @@ public sealed class DocumentationAnalyzerTests
     [InlineData(AnalysisVerdictLabel.Benign, 0.90, 0)]
     [InlineData(AnalysisVerdictLabel.Benign, 0.79, 1)]
     [InlineData(AnalysisVerdictLabel.Uncertain, 0.95, 1)]
-    public void AnalyzeVerdictLabelAndConfidenceControlCandidateSuppression(
+    public async Task AnalyzeVerdictLabelAndConfidenceControlCandidateSuppression(
         AnalysisVerdictLabel label,
         double confidence,
         int expectedCandidates)
     {
         DocumentSet documents = NearDuplicateDocuments();
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
-        DocumentationAnalysisResult pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult pending = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
         AnalysisCandidate candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Duplicate);
         StubPersistence persistence = new StubPersistence(new AnalysisVerdict(
             candidate.Id,
@@ -258,13 +258,13 @@ public sealed class DocumentationAnalyzerTests
             confidence,
             "Review disposition."));
 
-        DocumentationAnalysisResult reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult reviewed = await Analyzer([source], persistence).AnalyzeAsync(documents, Graph(documents), Config());
 
         Assert.Equal(expectedCandidates, reviewed.Candidates.Count);
     }
 
     [Fact]
-    public void AnalyzeApprovedScopedGlossarySensesCoverEveryOccurrenceSuppressesTerminologyWarning()
+    public async Task AnalyzeApprovedScopedGlossarySensesCoverEveryOccurrenceSuppressesTerminologyWarning()
     {
         DocumentSet documents = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop measures live-test runtime.", component: "Gameplay"),
@@ -286,14 +286,14 @@ public sealed class DocumentationAnalyzerTests
                 ["Codex loop"])
         ]);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config(), glossary);
 
         Assert.DoesNotContain(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.DoesNotContain(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.TerminologyRuleCode);
     }
 
     [Fact]
-    public void AnalyzeApprovedComponentScopeIgnoresCaseSuppressesTerminologyWarning()
+    public async Task AnalyzeApprovedComponentScopeIgnoresCaseSuppressesTerminologyWarning()
     {
         DocumentSet documents = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop measures live-test runtime.", component: "Gameplay"),
@@ -309,7 +309,7 @@ public sealed class DocumentationAnalyzerTests
                 ["gameplay loop"])
         ]);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config(), glossary);
 
         Assert.DoesNotContain(
             result.Candidates,
@@ -318,7 +318,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeApprovedCodeRefScopedSensesCoverEveryOccurrenceSuppressesTerminologyWarning()
+    public async Task AnalyzeApprovedCodeRefScopedSensesCoverEveryOccurrenceSuppressesTerminologyWarning()
     {
         DocumentSet documents = Set(
             Document(
@@ -352,7 +352,7 @@ public sealed class DocumentationAnalyzerTests
                 ["Codex loop"])
         ]);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config(), glossary);
 
         Assert.DoesNotContain(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.DoesNotContain(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.TerminologyRuleCode);
@@ -397,7 +397,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeInvalidIgnoreMarkupPropagatesOperationalRule004()
+    public async Task AnalyzeInvalidIgnoreMarkupPropagatesOperationalRule004()
     {
         DocumentSet documents = Set(Document(
             "invalid",
@@ -405,7 +405,7 @@ public sealed class DocumentationAnalyzerTests
             Status.Current,
             "<kyber-ignore rule=\"unknown\">Claim text.</kyber-ignore>"));
 
-        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = await Analyzer().AnalyzeAsync(documents, Graph(documents), Config());
 
         Assert.Contains(
             result.Diagnostics.Items,
@@ -424,7 +424,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeReportsCandidateSourceMetricsAndAppliesGlobalCandidateCap()
+    public async Task AnalyzeReportsCandidateSourceMetricsAndAppliesGlobalCandidateCap()
     {
         DocumentSet documents = Set(Enumerable.Range(0, 6)
             .Select(index => Document(
@@ -436,7 +436,7 @@ public sealed class DocumentationAnalyzerTests
         AdjacentPairCandidateSource graph = new AdjacentPairCandidateSource(CandidateSourceKind.Graph, comparisonCount: 5);
         AdjacentPairCandidateSource lexical = new AdjacentPairCandidateSource(CandidateSourceKind.Lexical, comparisonCount: 7);
 
-        DocumentationAnalysisResult result = Analyzer([graph, lexical]).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([graph, lexical]).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(maxCandidates: 2, lexicalDuplicateThreshold: 0.90));
@@ -453,7 +453,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeWhenEmbeddingsAreEnabledGeneratesCachesAndSuppliesSemanticCandidates()
+    public async Task AnalyzeWhenEmbeddingsAreEnabledGeneratesCachesAndSuppliesSemanticCandidates()
     {
         DocumentSet documents = Set(
             Document(
@@ -473,7 +473,7 @@ public sealed class DocumentationAnalyzerTests
         SemanticMatchGenerator generator = new SemanticMatchGenerator();
         EmbeddingPersistence persistence = new EmbeddingPersistence();
 
-        DocumentationAnalysisResult result = Analyzer([lexical], persistence, generator).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([lexical], persistence, generator).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(embeddings: new DocsAnalysisEmbeddingConfig
@@ -509,7 +509,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeDefaultSourcesSurfaceDivergentTerminologyBelowDuplicateCandidateThreshold()
+    public async Task AnalyzeDefaultSourcesSurfaceDivergentTerminologyBelowDuplicateCandidateThreshold()
     {
         DocumentSet documents = Set(
             Document(
@@ -525,7 +525,7 @@ public sealed class DocumentationAnalyzerTests
                 "The Codex loop churns autonomous tasks and consumes model tokens.",
                 section: "Agent automation"));
 
-        DocumentationAnalysisResult result = Analyzer().Analyze(
+        DocumentationAnalysisResult result = await Analyzer().AnalyzeAsync(
             documents,
             Graph(documents),
             Config(lexicalCandidateThreshold: 0.80));
@@ -569,7 +569,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeInlineCodeLiteralDifferencesRemainDetectableConflictEvidence()
+    public async Task AnalyzeInlineCodeLiteralDifferencesRemainDetectableConflictEvidence()
     {
         DocumentSet documents = Set(
             Document("local", "docs/local.md", Status.Current, "The analysis mode is `ExecutionMode.Local` for requests.", component: "Runtime"),
@@ -577,7 +577,7 @@ public sealed class DocumentationAnalyzerTests
         IReadOnlyList<Claim> claims = Extract(documents);
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.70, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
 
         Assert.Contains("ExecutionMode.Local", claims[0].Text, StringComparison.Ordinal);
         Assert.Contains("ExecutionMode.Remote", claims[1].ContextualText, StringComparison.Ordinal);
@@ -585,7 +585,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeSameContentPairAcrossLocationsMergesEveryDistinctEvidenceClaim()
+    public async Task AnalyzeSameContentPairAcrossLocationsMergesEveryDistinctEvidenceClaim()
     {
         DocumentSet documents = Set(
             Document("left-one", "docs/left-one.md", Status.Current, "The processor retains every imported approved verdict."),
@@ -594,7 +594,7 @@ public sealed class DocumentationAnalyzerTests
             Document("right-two", "docs/right-two.md", Status.Current, "The processor must retain all approved imported verdicts."));
         AllPairCandidateSource source = new AllPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
 
         AnalysisCandidate nearDuplicate = Assert.Single(
             result.Candidates,
@@ -637,7 +637,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeTerminologyClustersOneInformativeTermAcrossAllDivergentContexts()
+    public async Task AnalyzeTerminologyClustersOneInformativeTermAcrossAllDivergentContexts()
     {
         DocumentSet documents = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop wraps live testing documentation.", section: "Gameplay"),
@@ -645,7 +645,7 @@ public sealed class DocumentationAnalyzerTests
             Document("desktop", "docs/desktop.md", Status.Current, "The event loop schedules UI callbacks documentation.", section: "Desktop"));
         AllPairCandidateSource source = new AllPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(documents, Graph(documents), Config());
 
         AnalysisCandidate terminology = Assert.Single(
             result.Candidates,
@@ -718,14 +718,14 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeNonidenticalCodeBlocksWithoutSubstantiveDisagreementAreNotConflicts()
+    public async Task AnalyzeNonidenticalCodeBlocksWithoutSubstantiveDisagreementAreNotConflicts()
     {
         DocumentSet documents = Set(
             Document("debug", "docs/debug.md", Status.Current, "```csharp\nlogger.Debug(message);\n```", component: "Runtime"),
             Document("info", "docs/info.md", Status.Current, "```csharp\nlogger.Info(message);\n```", component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -773,7 +773,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeLexicalCandidateThresholdGatesDuplicateAndConflictButNotTerminologyDivergence()
+    public async Task AnalyzeLexicalCandidateThresholdGatesDuplicateAndConflictButNotTerminologyDivergence()
     {
         DocumentSet ordinaryDocuments = Set(
             Document("duplicate-a", "docs/duplicate-a.md", Status.Current, "The processor securely retains approved imported verdict records."),
@@ -787,8 +787,8 @@ public sealed class DocumentationAnalyzerTests
             lexicalCandidateThreshold: 0.80,
             lexicalDuplicateThreshold: 0.30);
 
-        DocumentationAnalysisResult ordinary = Analyzer().Analyze(ordinaryDocuments, Graph(ordinaryDocuments), config);
-        DocumentationAnalysisResult terminology = Analyzer().Analyze(terminologyDocuments, Graph(terminologyDocuments), config);
+        DocumentationAnalysisResult ordinary = await Analyzer().AnalyzeAsync(ordinaryDocuments, Graph(ordinaryDocuments), config);
+        DocumentationAnalysisResult terminology = await Analyzer().AnalyzeAsync(terminologyDocuments, Graph(terminologyDocuments), config);
 
         Assert.DoesNotContain(ordinary.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Duplicate);
         Assert.DoesNotContain(ordinary.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
@@ -813,7 +813,7 @@ public sealed class DocumentationAnalyzerTests
     [Theory]
     [InlineData("yaml", "mode: local", "mode: remote")]
     [InlineData("", "plain documentation example", "another documentation example")]
-    public void AnalyzeNonShellFencedBlocksAreNotShellCommandConflicts(
+    public async Task AnalyzeNonShellFencedBlocksAreNotShellCommandConflicts(
         string fenceInfo,
         string leftText,
         string rightText)
@@ -823,7 +823,7 @@ public sealed class DocumentationAnalyzerTests
             Document("right", "docs/right.md", Status.Current, Fence(fenceInfo, rightText), component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -835,7 +835,7 @@ public sealed class DocumentationAnalyzerTests
     [InlineData("bash", "MODE=local dotnet test", "MODE=remote dotnet test")]
     [InlineData("sh", "dotnet test && echo local", "dotnet test && echo remote")]
     [InlineData("bash", "cp /src/v1/report /dest", "cp /src/v2/report /dest")]
-    public void AnalyzeShellFencesRecognizeAssignmentsAndCompoundCommandsAsConflictEligible(
+    public async Task AnalyzeShellFencesRecognizeAssignmentsAndCompoundCommandsAsConflictEligible(
         string fenceInfo,
         string leftCommand,
         string rightCommand)
@@ -845,7 +845,7 @@ public sealed class DocumentationAnalyzerTests
             Document("right", "docs/right.md", Status.Current, Fence(fenceInfo, rightCommand), component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -902,7 +902,7 @@ public sealed class DocumentationAnalyzerTests
     [Theory]
     [InlineData("yaml", "version: 1", "version: 2")]
     [InlineData("text", "Endpoint is /api/v1/report", "Endpoint is /api/v2/report")]
-    public void AnalyzeNonShellFencesRemainEligibleForSubstantiveValueConflicts(
+    public async Task AnalyzeNonShellFencesRemainEligibleForSubstantiveValueConflicts(
         string fenceInfo,
         string leftValue,
         string rightValue)
@@ -912,7 +912,7 @@ public sealed class DocumentationAnalyzerTests
             Document("right", "docs/right.md", Status.Current, Fence(fenceInfo, rightValue), component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -921,7 +921,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzeShellFencesCompareMeaningfulCommandsBeyondComments()
+    public async Task AnalyzeShellFencesCompareMeaningfulCommandsBeyondComments()
     {
         DocumentSet differingAssignments = Set(
             Document("local", "docs/local.md", Status.Current, Fence("bash", "# shared setup\nMODE=local dotnet test"), component: "Runtime"),
@@ -931,11 +931,11 @@ public sealed class DocumentationAnalyzerTests
             Document("comment-b", "docs/comment-b.md", Status.Current, Fence("bash", "# remote note\ndotnet test"), component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult assignmentsResult = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult assignmentsResult = await Analyzer([source]).AnalyzeAsync(
             differingAssignments,
             Graph(differingAssignments),
             Config(minClaimTokens: 1));
-        DocumentationAnalysisResult commentsResult = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult commentsResult = await Analyzer([source]).AnalyzeAsync(
             commentsOnly,
             Graph(commentsOnly),
             Config(minClaimTokens: 1));
@@ -949,7 +949,7 @@ public sealed class DocumentationAnalyzerTests
     [InlineData("powershell", "# ")]
     [InlineData("cmd", "REM ")]
     [InlineData("bat", "::")]
-    public void AnalyzeRecognizedShellFenceIgnoresNumericAndNegationDifferencesInComments(
+    public async Task AnalyzeRecognizedShellFenceIgnoresNumericAndNegationDifferencesInComments(
         string fenceInfo,
         string commentPrefix)
     {
@@ -968,7 +968,7 @@ public sealed class DocumentationAnalyzerTests
                 component: "Runtime"));
         FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = await Analyzer([source]).AnalyzeAsync(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -1176,24 +1176,18 @@ public sealed class DocumentationAnalyzerTests
 
         public string GetProviderFingerprint(DocsAnalysisEmbeddingConfig config) => "semantic-provider";
 
-        public EmbeddingGenerationResult Generate(
-            IReadOnlyCollection<EmbeddingCacheKey> keys,
-            IReadOnlyCollection<string> inputs,
-            DocsAnalysisEmbeddingConfig config)
-        {
-            CallCount++;
-            Assert.Equal(keys.Count, inputs.Count);
-            return new EmbeddingGenerationResult(
-                keys.Select(key => new StoredEmbedding(key, [1f, 0f])).ToArray(),
-                EmbeddingUsage.None);
-        }
-
-        public async Task<EmbeddingGenerationResult> GenerateAsync(
+        public Task<EmbeddingGenerationResult> GenerateAsync(
             IReadOnlyCollection<EmbeddingCacheKey> keys,
             IReadOnlyCollection<string> inputs,
             DocsAnalysisEmbeddingConfig config,
-            CancellationToken cancellationToken = default) =>
-            await Task.FromResult(Generate(keys, inputs, config)).ConfigureAwait(false);
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            Assert.Equal(keys.Count, inputs.Count);
+            return Task.FromResult(new EmbeddingGenerationResult(
+                keys.Select(key => new StoredEmbedding(key, [1f, 0f])).ToArray(),
+                EmbeddingUsage.None));
+        }
     }
 
     private sealed class EmbeddingPersistence : IAnalysisPersistence

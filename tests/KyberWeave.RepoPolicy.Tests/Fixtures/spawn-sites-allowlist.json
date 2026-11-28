@@ -161,13 +161,7 @@
       "file": "tests/KyberWeave.Integration.Tests/McpStdioTransportExecutableTests.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"dotnet\")",
       "count": 1,
-      "bound": "Started by the Run at line 93: ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
-    },
-    {
-      "file": "tests/KyberWeave.Integration.Tests/McpStdioTransportExecutableTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, ExecutableRequests, TimeSpan.FromSeconds(30));",
-      "count": 1,
-      "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
+      "bound": "Started by ProcessRunner.RunAsync: timeout 30 s kills the child tree on expiry. The child is the KyberWeave product assembly, fed ExecutableRequests on stdin, which ProcessRunner closes so it exits at EOF."
     },
     {
       "file": "tests/KyberWeave.Integration.Tests/ProcessRunnerInputTests.cs",
@@ -760,8 +754,8 @@
     {
       "file": "src/KyberWeave.Application/Doctor/RepositoryDoctorService.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 2,
-      "bound": "Builds the git rev-parse start info only, for the sync and async doctor paths; each runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
+      "count": 1,
+      "bound": "Builds the git rev-parse start info only for the async doctor path; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/StdioSession.cs",
@@ -1067,13 +1061,7 @@
       "file": "tests/KyberWeave.Integration.Tests/McpDocsServerExecutableTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below with a 60 s timeout, which kills the child tree. argv only: the built docs assembly, the fixture repository root and --no-codegraph-refresh; stdin is the fixed request list in the test."
-    },
-    {
-      "file": "tests/KyberWeave.Integration.Tests/McpDocsServerExecutableTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, Requests, TimeSpan.FromSeconds(60));",
-      "count": 1,
-      "bound": "ProcessRunner.Run with a 60 s timeout kills the child tree on expiry. The child is the docs MCP assembly in a temporary fixture repository with --no-codegraph-refresh, fed the fixed request list in the test, so it exits once that input ends."
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.RunAsync call below with a 60 s timeout, which kills the child tree. argv only: the built docs assembly, the fixture repository root and --no-codegraph-refresh; stdin is the fixed request list in the test."
     },
     {
       "file": "tests/KyberWeave.Kernel.Tests/Processes/ProcessRunnerRoleViewTests.cs",

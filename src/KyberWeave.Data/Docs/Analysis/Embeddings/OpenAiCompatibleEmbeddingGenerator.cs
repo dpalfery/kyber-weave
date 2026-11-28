@@ -71,38 +71,6 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
-    public EmbeddingGenerationResult Generate(
-        IReadOnlyCollection<EmbeddingCacheKey> keys,
-        IReadOnlyCollection<string> inputs,
-        DocsAnalysisEmbeddingConfig config)
-    {
-        PlannedRequests? plan = PrepareRequests(keys, inputs, config);
-        if (plan is null)
-            return new EmbeddingGenerationResult([], EmbeddingUsage.None);
-
-        List<StoredEmbedding> result = new List<StoredEmbedding>(plan.OrderedKeys.Length);
-        int promptTokens = 0;
-        int totalTokens = 0;
-        for (int offset = 0; offset < plan.OrderedInputs.Length; offset += plan.BatchSize)
-        {
-            int count = Math.Min(plan.BatchSize, plan.OrderedInputs.Length - offset);
-            string[] batchInputs = plan.OrderedInputs.AsSpan(offset, count).ToArray();
-            ParsedBatch parsed = SendBatch(
-                plan.Endpoint,
-                plan.Model,
-                plan.Dimensions,
-                batchInputs,
-                plan.BearerToken,
-                plan.TimeoutSeconds);
-            for (int index = 0; index < parsed.Vectors.Count; index++)
-                result.Add(new StoredEmbedding(plan.OrderedKeys[offset + index], parsed.Vectors[index]));
-            promptTokens = checked(promptTokens + parsed.Usage.PromptTokens);
-            totalTokens = checked(totalTokens + parsed.Usage.TotalTokens);
-        }
-
-        return new EmbeddingGenerationResult(result, new EmbeddingUsage(promptTokens, totalTokens));
-    }
-
     /// <summary>
     /// Generates a vector for every input without blocking a thread.
     /// </summary>
@@ -188,33 +156,6 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
             config.TimeoutSeconds,
             orderedKeys,
             orderedInputs);
-    }
-
-    private ParsedBatch SendBatch(
-        Uri endpoint,
-        string model,
-        int? dimensions,
-        IReadOnlyList<string> inputs,
-        string? bearerToken,
-        int timeoutSeconds)
-    {
-        using HttpRequestMessage request = CreateRequest(endpoint, model, dimensions, inputs, bearerToken);
-        using CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds), _clock);
-        using HttpResponseMessage response = _client.Send(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellation.Token);
-        if (IsRedirect(response.StatusCode))
-            throw new InvalidOperationException("The local embedding endpoint returned a redirect; redirects are disabled.");
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"The local embedding endpoint returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).");
-        }
-
-        using Stream stream = response.Content.ReadAsStream();
-        using JsonDocument json = JsonDocument.Parse(stream);
-        return ParseBatch(json.RootElement, inputs.Count, dimensions);
     }
 
     private async Task<ParsedBatch> SendBatchAsync(

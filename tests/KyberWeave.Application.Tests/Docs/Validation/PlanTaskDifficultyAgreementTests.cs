@@ -65,22 +65,22 @@ public sealed class PlanTaskDifficultyAgreementTests : IDisposable
 
     private string Repo => Path.Combine(_files.Root, "repo");
 
-    private PlanTaskFileOutcome Write(AgreementProvider provider, string extra = "")
+    private Task<PlanTaskFileOutcome> WriteAsync(AgreementProvider provider, string extra = "")
     {
         _files.WriteAllText(Path.Combine(Repo, Plan), $"# Cards\n\n{Tasks}{extra}");
         PlanTaskAgentPick picker = new(provider, PlanTaskAgentPick.ImplementationAgents(), _resources);
         _pickers.Add(picker);
         return new PlanTaskFileGenerator(
             Repo, KyberWeaveConfigDefaults.Product, new InMemoryRepositoryFileStore(_files), picker)
-            .Run(Plan, PlanTaskFileMode.Write);
+            .RunAsync(Plan, PlanTaskFileMode.Write);
     }
 
     [Fact]
-    public void Agreed_ChangesNothingAndRaisesNothing()
+    public async Task Agreed_ChangesNothingAndRaisesNothing()
     {
         AgreementProvider provider = new("dev-medium", 0.95, DifficultyAgreement.Agreed, 0.9);
 
-        PlanTaskFileOutcome outcome = Write(provider);
+        PlanTaskFileOutcome outcome = await WriteAsync(provider);
         PlanTaskFileEntry task = outcome.File!.Tasks![0];
 
         Assert.DoesNotContain(outcome.Report.Items, item => item.Code == PlanTaskFileRules.DifficultyDisagreed);
@@ -90,11 +90,11 @@ public sealed class PlanTaskDifficultyAgreementTests : IDisposable
     }
 
     [Fact]
-    public void NotAgreedAtTheFloor_RaisesTheFindingAndKeepsTheArchitectsRating()
+    public async Task NotAgreedAtTheFloor_RaisesTheFindingAndKeepsTheArchitectsRating()
     {
         AgreementProvider provider = new("dev-medium", 0.95, DifficultyAgreement.NotAgreed, 0.9);
 
-        PlanTaskFileOutcome outcome = Write(provider);
+        PlanTaskFileOutcome outcome = await WriteAsync(provider);
         PlanTaskFileEntry task = outcome.File!.Tasks![0];
 
         Diagnostic finding = Assert.Single(outcome.Report.Items, item => item.Code == PlanTaskFileRules.DifficultyDisagreed);
@@ -110,34 +110,34 @@ public sealed class PlanTaskDifficultyAgreementTests : IDisposable
     }
 
     [Fact]
-    public void NotAgreedWithADecisionsRowAnsweringTheRating_RaisesNothing()
+    public async Task NotAgreedWithADecisionsRowAnsweringTheRating_RaisesNothing()
     {
         AgreementProvider provider = new("dev-medium", 0.95, DifficultyAgreement.NotAgreed, 0.9);
 
-        PlanTaskFileOutcome outcome = Write(provider, DecisionsAnsweringTheRating);
+        PlanTaskFileOutcome outcome = await WriteAsync(provider, DecisionsAnsweringTheRating);
 
         Assert.DoesNotContain(outcome.Report.Items, item => item.Code == PlanTaskFileRules.DifficultyDisagreed);
         Assert.Equal("easy", outcome.File!.Tasks![0].Difficulty);
     }
 
     [Fact]
-    public void NotAgreedBelowTheFloor_RaisesNothing()
+    public async Task NotAgreedBelowTheFloor_RaisesNothing()
     {
         AgreementProvider provider = new("dev-medium", 0.95, DifficultyAgreement.NotAgreed, 0.5);
 
-        PlanTaskFileOutcome outcome = Write(provider);
+        PlanTaskFileOutcome outcome = await WriteAsync(provider);
 
         Assert.DoesNotContain(outcome.Report.Items, item => item.Code == PlanTaskFileRules.DifficultyDisagreed);
         Assert.Equal("T1 difficulty easy: unchecked", Assert.Single(outcome.DifficultyChecks!));
     }
 
     [Fact]
-    public void NotAgreedSurvivesAPickBelowTheFloor()
+    public async Task NotAgreedSurvivesAPickBelowTheFloor()
     {
         // The agreement is its own answer: an unsure pick writes no agent, and must not discard the verdict.
         AgreementProvider provider = new("dev-medium", 0.5, DifficultyAgreement.NotAgreed, 0.9);
 
-        PlanTaskFileOutcome outcome = Write(provider);
+        PlanTaskFileOutcome outcome = await WriteAsync(provider);
 
         Diagnostic finding = Assert.Single(outcome.Report.Items, item => item.Code == PlanTaskFileRules.DifficultyDisagreed);
         Assert.Equal(Severity.Error, finding.Severity);
@@ -146,11 +146,11 @@ public sealed class PlanTaskDifficultyAgreementTests : IDisposable
     }
 
     [Fact]
-    public void TheRequestCarriesTheRubricAndTheArchitectsRating()
+    public async Task TheRequestCarriesTheRubricAndTheArchitectsRating()
     {
         AgreementProvider provider = new("dev-medium", 0.95, DifficultyAgreement.Agreed, 0.9);
 
-        Write(provider);
+        _ = await WriteAsync(provider);
 
         Assert.Contains("KW-DOC-TASKS-PICK-T1", provider.Asked);
         Assert.Contains("KW-DOC-TASKS-AGREE-T1", provider.Asked);

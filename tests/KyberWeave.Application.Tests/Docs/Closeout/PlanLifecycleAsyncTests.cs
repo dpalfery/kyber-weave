@@ -162,9 +162,6 @@ public sealed class PlanLifecycleAsyncTests
         public bool PickedAsync { get; private set; }
         public bool Disposed { get; private set; }
 
-        public IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks) =>
-            throw new InvalidOperationException("RunAsync must call PickAsync, never Pick.");
-
         public Task<IReadOnlyDictionary<string, PlanTaskAgentChoice>> PickAsync(
             IReadOnlyList<PlanTaskFileEntry> tasks,
             CancellationToken cancellationToken = default)

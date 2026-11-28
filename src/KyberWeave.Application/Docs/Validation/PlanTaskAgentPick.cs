@@ -151,42 +151,6 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     }
 
     /// <inheritdoc />
-    public IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks)
-    {
-        ArgumentNullException.ThrowIfNull(tasks);
-        Dictionary<string, PlanTaskAgentChoice> picks = new(StringComparer.Ordinal);
-        List<PlanTaskFileEntry> asked = [.. tasks.Where(task => !string.IsNullOrWhiteSpace(task.Id))
-            .Take(StateBudget.MaxQuestions)];
-        if (asked.Count == 0 || _candidates.Count < 2)
-            return picks;
-
-        HashSet<string> names = [.. _candidates.Select(agent => agent.Name)];
-        PlanTaskAgentChoice?[] choices;
-        try
-        {
-            choices = Task.WhenAll(asked.Select(AskAsync)).GetAwaiter().GetResult();
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            return picks;
-        }
-
-        for (int index = 0; index < asked.Count; index++)
-        {
-            if (choices[index] is not { } choice)
-                continue;
-
-            // An answer naming no candidate is no pick, exactly as a missing one; the agreement it arrived with
-            // is independent of the pick, so it is kept.
-            picks[asked[index].Id!] = choice.Agent is not null && !names.Contains(choice.Agent)
-                ? choice with { Agent = null, Confidence = 0 }
-                : choice;
-        }
-
-        return picks;
-    }
-
-    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<string, PlanTaskAgentChoice>> PickAsync(
         IReadOnlyList<PlanTaskFileEntry> tasks,
         CancellationToken cancellationToken = default)
@@ -219,6 +183,8 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             if (choices[index] is not { } choice || asked[index].Id is not { } id)
                 continue;
 
+            // An answer naming no candidate is no pick, exactly as a missing one; the agreement it arrived with
+            // is independent of the pick, so it is kept.
             picks[id] = choice.Agent is not null && !names.Contains(choice.Agent)
                 ? choice with { Agent = null, Confidence = 0 }
                 : choice;
@@ -226,9 +192,6 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
         return picks;
     }
-
-    /// <summary>One task's question, asked on its own so the model reads only that task's state.</summary>
-    private Task<PlanTaskAgentChoice?> AskAsync(PlanTaskFileEntry task) => AskAsync(task, CancellationToken.None);
 
     /// <summary>One task's question, asked on its own so the model reads only that task's state.</summary>
     /// <param name="task">The task to ask about.</param>

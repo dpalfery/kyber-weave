@@ -314,17 +314,6 @@ public sealed class ReviewCommandConsoleSeamTests
             Output = output;
             return Task.FromResult(result);
         }
-
-        public ReviewCommandResult Prepare(
-            ReviewSeatsRequest request,
-            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
-            IProcessExecutor indexExecutor,
-            TextWriter output,
-            CancellationToken cancellationToken)
-        {
-            Output = output;
-            return result;
-        }
     }
 
     private sealed class ScriptedGates(ReviewCommandResult result) : IReviewGatesService
@@ -339,14 +328,6 @@ public sealed class ReviewCommandConsoleSeamTests
             Request = request;
             Output = output;
             return Task.FromResult(result);
-        }
-
-        public ReviewCommandResult Run(
-            ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output, CancellationToken cancellationToken)
-        {
-            Request = request;
-            Output = output;
-            return result;
         }
     }
 

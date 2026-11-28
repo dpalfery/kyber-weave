@@ -31,7 +31,7 @@ public sealed class McpProjectPathTests : IDisposable
     [Fact]
     public async Task ProjectPathAnswersFromTheWorktreeWhileTheServerRootKeepsItsOwnDocuments()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         string worktree = AddWorktree(repo, "wt");
         await File.AppendAllTextAsync(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
         DocsTools tools = ServerTools(repo);
@@ -48,7 +48,7 @@ public sealed class McpProjectPathTests : IDisposable
     [Fact]
     public async Task ProjectPathNamingASubdirectoryOrTheServerRootIsAccepted()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         string worktree = AddWorktree(repo, "wt");
         await File.AppendAllTextAsync(Path.Combine(worktree, OntologyPage), $"\n\n{MarkerSentence}\n");
         DocsTools tools = ServerTools(repo);
@@ -63,7 +63,7 @@ public sealed class McpProjectPathTests : IDisposable
     [Fact]
     public async Task ProjectPathInAnotherRepositoryIsRefused()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         string foreign = Path.Combine(_temp.Path, "foreign");
         Directory.CreateDirectory(foreign);
         Git(foreign, "init", "-q");
@@ -79,7 +79,7 @@ public sealed class McpProjectPathTests : IDisposable
     [Fact]
     public async Task ProjectPathThatIsNotAGitDirectoryOrDoesNotExistIsRefused()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         string plain = Path.Combine(_temp.Path, "plain");
         Directory.CreateDirectory(plain);
         DocsTools tools = ServerTools(repo);
@@ -94,7 +94,7 @@ public sealed class McpProjectPathTests : IDisposable
     [Fact]
     public async Task RegistryKeepsAtMostFourWorktreesAndReusesTheirTools()
     {
-        string repo = CreateRepository();
+        string repo = await CreateRepositoryAsync();
         DocsRootRegistry registry = Registry(repo);
         DocsTools tools = ServerTools(repo, registry);
         string[] worktrees = [.. Enumerable.Range(1, 5).Select(i => AddWorktree(repo, "wt" + i))];
@@ -115,12 +115,12 @@ public sealed class McpProjectPathTests : IDisposable
     private static DocsTools ServerTools(string repo, DocsRootRegistry? registry = null) =>
         DocsRootRegistry.CreateTools(repo, codeGraphRefreshEnabled: false, registry ?? Registry(repo));
 
-    private string CreateRepository()
+    private async Task<string> CreateRepositoryAsync()
     {
         string repo = Path.Combine(_temp.Path, "repo");
         Directory.CreateDirectory(repo);
         Git(repo, "init", "-q", "-b", "main");
-        DocsTestCommands.Scaffolding.Scaffold(repo);
+        await DocsTestCommands.Scaffolding.ScaffoldAsync(repo);
         Git(repo, "add", "-A");
         Git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init");
         return repo;

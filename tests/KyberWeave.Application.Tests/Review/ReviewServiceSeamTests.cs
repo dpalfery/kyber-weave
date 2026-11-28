@@ -101,21 +101,6 @@ public sealed class ReviewServiceSeamTests
     }
 
     [Fact]
-    public void TheSeatsCommandLoadsTheConfigurationForTheRootARelativePathResolvesTo()
-    {
-        RecordingConfigs configs = new();
-
-        ReviewCommandResult result = Seats(configs).Prepare(
-            new ReviewSeatsRequest("repo", null, null, null, false, false, false),
-            (_, _) => throw new InvalidOperationException("unexpected call"),
-            new FakeProcessExecutor(),
-            TextWriter.Null);
-
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal("/work/repo", configs.Root);
-    }
-
-    [Fact]
     public async Task TheSeatsCommandAsyncLoadsTheConfigurationForTheRootARelativePathResolvesTo()
     {
         RecordingConfigs configs = new();

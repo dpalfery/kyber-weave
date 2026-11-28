@@ -426,18 +426,12 @@ public sealed class DocsAnalysisCompositionTests
 
         public string GetProviderFingerprint(DocsAnalysisEmbeddingConfig config) => "fake-provider";
 
-        public EmbeddingGenerationResult Generate(
-            IReadOnlyCollection<EmbeddingCacheKey> keys,
-            IReadOnlyCollection<string> inputs,
-            DocsAnalysisEmbeddingConfig config) =>
-            new([], EmbeddingUsage.None);
-
-        public async Task<EmbeddingGenerationResult> GenerateAsync(
+        public Task<EmbeddingGenerationResult> GenerateAsync(
             IReadOnlyCollection<EmbeddingCacheKey> keys,
             IReadOnlyCollection<string> inputs,
             DocsAnalysisEmbeddingConfig config,
             CancellationToken cancellationToken = default) =>
-            await Task.FromResult(Generate(keys, inputs, config)).ConfigureAwait(false);
+            Task.FromResult(new EmbeddingGenerationResult([], EmbeddingUsage.None));
 
         public void Dispose() => DisposeCount++;
     }

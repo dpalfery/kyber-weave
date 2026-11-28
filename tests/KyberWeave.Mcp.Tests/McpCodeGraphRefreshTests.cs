@@ -54,7 +54,7 @@ public sealed class McpCodeGraphRefreshTests
     [Fact]
     public async Task WhenResolverFactoryThrowsDuringRefresh_FailsToolsUnderStopRule()
     {
-        Scaffold(Root);
+        await ScaffoldAsync(Root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, Root);
 
         int resolverCalls = 0;
@@ -84,7 +84,7 @@ public sealed class McpCodeGraphRefreshTests
     [Fact]
     public async Task WhenResolverFactoryThrowsAndConfigUnreadable_DefaultsToStopRule()
     {
-        Scaffold(Root);
+        await ScaffoldAsync(Root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, Root);
 
         DocsTools tools = ScaffoldedTools(
@@ -108,7 +108,7 @@ public sealed class McpCodeGraphRefreshTests
     [Fact]
     public async Task WhenDocsTreeUnreadable_BlockedResponseReportsDocumentsUnavailable()
     {
-        Scaffold(Root);
+        await ScaffoldAsync(Root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, Root);
 
         KyberWeaveConfig config = _host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(Root);
@@ -161,7 +161,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock, SyncSucceeded);
         List<TimeSpan> pauses = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, pauses);
 
         string response = await tools.ExploreAsync("anything");
 
@@ -188,7 +188,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(HeldIndexLock);
         List<TimeSpan> pauses = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, pauses, stopsOnToolFailure);
 
         string response = await tools.ExploreAsync("anything");
 
@@ -218,7 +218,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(new ProcessResult(1, SyncBanner, error + "\n"));
         List<TimeSpan> pauses = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, pauses, stopsOnToolFailure);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, pauses, stopsOnToolFailure);
 
         string response = await tools.ExploreAsync("anything");
 
@@ -243,7 +243,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, waits);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, waits);
 
         _ = await tools.ExploreAsync("anything");
 
@@ -267,7 +267,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, (wait, _) =>
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, (wait, _) =>
         {
             Assert.Empty(executor.Calls);
             waits.Add(wait);
@@ -298,7 +298,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, waits);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, waits);
         string pid = holderIsRunning ? LivePid : DeadPid;
         _host.Files.WriteAllText(IndexLockFile, pid);
         _ = _host.Processes.WithAlive(LiveProcessId, holderIsRunning);
@@ -334,7 +334,7 @@ public sealed class McpCodeGraphRefreshTests
     {
         ScriptedProcessExecutor executor = SyncAnswers(SyncSucceeded);
         List<TimeSpan> waits = [];
-        DocsTools tools = ToolsWithAnIndex(Root, executor, waits, stopsOnToolFailure: false);
+        DocsTools tools = await ToolsWithAnIndexAsync(Root, executor, waits, stopsOnToolFailure: false);
         _host.Files.WriteAllText(IndexLockFile, LivePid);
         _ = _host.Processes.WithAlive(LiveProcessId);
 
@@ -399,18 +399,18 @@ public sealed class McpCodeGraphRefreshTests
         });
     }
 
-    private DocsTools ToolsWithAnIndex(
+    private Task<DocsTools> ToolsWithAnIndexAsync(
         string root, IProcessRunner executor, List<TimeSpan> pauses, bool stopsOnToolFailure = true) =>
-        ToolsWithAnIndex(root, executor, (wait, _) =>
+        ToolsWithAnIndexAsync(root, executor, (wait, _) =>
         {
             pauses.Add(wait);
             return Task.CompletedTask;
         }, stopsOnToolFailure);
 
-    private DocsTools ToolsWithAnIndex(
+    private async Task<DocsTools> ToolsWithAnIndexAsync(
         string root, IProcessRunner executor, Func<TimeSpan, CancellationToken, Task> pause, bool stopsOnToolFailure = true)
     {
-        Scaffold(root);
+        await ScaffoldAsync(root);
         MemoryMcpDeclaration.RequireCodeGraph(_host.Files, root);
         if (!stopsOnToolFailure)
         {
@@ -432,8 +432,8 @@ public sealed class McpCodeGraphRefreshTests
             services.AddSingleton<ICodeGraphIndexWorkspace>(new FakeCodeGraphIndexWorkspace());
         });
 
-    private void Scaffold(string root) =>
-        Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(root);
+    private Task ScaffoldAsync(string root) =>
+        Services().GetRequiredService<IDocsScaffoldingService>().ScaffoldAsync(root);
 
     private ICodeGraphFreshnessGate Freshness(
         string root,

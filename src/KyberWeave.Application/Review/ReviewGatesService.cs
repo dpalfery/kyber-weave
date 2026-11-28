@@ -57,46 +57,6 @@ public sealed class ReviewGatesService(
     IPlanTaskTargetService targets) : IReviewGatesService
 {
     /// <inheritdoc />
-    public ReviewCommandResult Run(
-        ReviewGatesRequest request,
-        IProcessExecutor indexExecutor,
-        TextWriter output,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(indexExecutor);
-        ArgumentNullException.ThrowIfNull(output);
-
-        return request.Agent is { } agent
-            ? new AgentGateRun(
-                configs,
-                git,
-                gateRunner,
-                projectFiles,
-                files,
-                environment,
-                pathResolver,
-                taskGates,
-                targets).Run(request, agent, output)
-            : new RepositoryGateRun(
-                trees,
-                cycles,
-                git,
-                evidenceWriter,
-                notSeatedStore,
-                gateRunner,
-                duplicateDetection,
-                graphs,
-                worktreeIndex,
-                files,
-                environment,
-                pathResolver,
-                selector,
-                configs,
-                taskGates).Run(request, indexExecutor, output);
-    }
-
-    /// <inheritdoc />
     public async Task<ReviewCommandResult> RunAsync(
         ReviewGatesRequest request,
         IProcessRunner indexExecutor,
@@ -249,24 +209,6 @@ public sealed class ReviewGatesService(
         /// <param name="Written">The report written to the file, with carried or kept gates.</param>
         private sealed record Executed(GateReport Ran, GateReport Written);
 
-        public ReviewCommandResult Run(
-            ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output)
-        {
-            DiagnosticReport report = new();
-            string root = GatePaths.FullPath(pathResolver, environment, request.Path);
-
-            Inputs? inputs = Prepare(root, request, report, output, out ReviewCommandResult? failure);
-            if (inputs is null)
-                return failure ?? ReviewCommandResultFactory.Reported(1, report);
-
-            Execution? execution = Plan(inputs, request, indexExecutor, report, out failure);
-            if (execution is null)
-                return failure ?? ReviewCommandResultFactory.Reported(1, report);
-
-            Executed executed = Execute(execution, request, report);
-            return Report(inputs, executed, request, output, report);
-        }
-
         private CycleRun Cycle => new(
             this, trees, cycles, selector, files, pathResolver, environment, graphs, duplicateDetection, notSeatedStore, evidenceWriter);
 
@@ -372,174 +314,6 @@ public sealed class ReviewGatesService(
 
             return new Inputs(root, config, declared, cycle);
         }
-
-        /// <summary>
-        /// Resolves the changed set the include patterns are matched against, admits the full-suite gates, refuses a run
-        /// that cannot start and syncs the index. Returns null with the refusal in <paramref name="failure"/>.
-        /// </summary>
-        private Execution? Plan(
-            Inputs inputs,
-            ReviewGatesRequest request,
-            IProcessExecutor indexExecutor,
-            DiagnosticReport report,
-            out ReviewCommandResult? failure)
-        {
-            failure = null;
-            string root = inputs.Root;
-            IReadOnlyList<string>? changed = null;
-            string? unknownReason = null;
-
-            // The changed set is only needed when a gate is scoped by include; it is never computed for gates alone.
-            if (!request.All && ReviewGateReporting.NeedsChangedSet(inputs.Declared))
-            {
-                (changed, unknownReason) = ResolveCouncilChangedSet(root, request);
-                if (changed is null)
-                {
-                    // Fail closed: every gate runs, and the report says why none was skipped for include.
-                    report.Add(new Diagnostic(
-                        ReviewGateReporting.ChangedSetUnknown,
-                        Severity.Info,
-                        $"changed set unknown ({unknownReason}); gates with include ran unscoped.",
-                        "review.gates",
-                        Hint: "Fetch the full history, or name a base that exists with --base."));
-                }
-                else
-                {
-                    List<string> changedRefusals = [];
-                    foreach (string path in changed)
-                        if (taskGates.ValidatePath(root, path) is { } changedProblem)
-                            changedRefusals.Add(changedProblem);
-
-                    if (changedRefusals.Count > 0)
-                    {
-                        failure = ReviewGatesService.RefuseInput(report, changedRefusals);
-                        return null;
-                    }
-                }
-            }
-
-            CouncilGatePlan plan = CouncilGateSelection.Plan(inputs.Declared, changed, ReviewGateReporting.CurrentOs(environment));
-            ReviewGateReporting.AddSkips(report, plan.Skipped);
-
-            // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
-            // error that never starts its gate, so it is reported as not started, never as a gate that ran and failed.
-            FullSuiteSelection fullSuite = FullSuiteGate.Select(plan.Run, request.Council, request.Interactive);
-            foreach (FullSuiteRefusal refusal in fullSuite.Refused)
-                report.Add(new Diagnostic(
-                    ReviewGateReporting.GateNotStarted,
-                    Severity.Error,
-                    $"{refusal.GateId}: refused. {refusal.Message}",
-                    refusal.GateId));
-
-            // --all asks for the whole declared suite at once, so once one of its gates is refused the suite cannot be
-            // delivered and no gate starts: running the rest would spend the run on a review the caller was just told
-            // it may not have, and the report would read as a review that ran. A scoped run is the opposite case — the
-            // pre-push self-review reads the other gates as its evidence — so it keeps running them.
-            if (request.All && fullSuite.Refused.Count > 0)
-            {
-                failure = RefuseWithEmptyReport(request, report);
-                return null;
-            }
-
-            // A council or --all run is the whole review: a gate that cannot start for a missing path leaves a report the
-            // caller would have to read as incomplete, after paying for the index sync and every other gate. The runner
-            // itself says which required paths are missing (same applies-when, same path resolution), so the refusal
-            // lists exactly what the run would have reported as not started. A scoped run keeps going: the pre-push
-            // self-review reads the other gates as its evidence, and the missing one is reported not started as before.
-            if (request.Council || request.All)
-            {
-                IReadOnlyList<MissingGateRequirement> missing = gateRunner.MissingRequirements(
-                    new ReviewConfig { Gates = fullSuite.Admitted, Parallelism = inputs.Config.Review.Parallelism },
-                    root,
-                    changed);
-                if (missing.Count > 0)
-                {
-                    foreach (MissingGateRequirement requirement in missing)
-                        report.Add(new Diagnostic(
-                            ReviewGateReporting.GateNotStarted,
-                            Severity.Error,
-                            $"{requirement.GateId}: required path '{requirement.Path}' is missing, so the gate cannot start. {requirement.Fix}, then run the review again.",
-                            requirement.GateId));
-
-                    // Only the empty report is written here: no evidence and no finished-cycle record. The cycle folder and
-                    // its identity.json were already written when the cycle was detected above; that record names this
-                    // change's branch, base and head, so a rerun with the same --out reads it as the same cycle, in the
-                    // same mode.
-                    failure = RefuseWithEmptyReport(request, report);
-                    return null;
-                }
-            }
-
-            // Before any gate process starts, so a review in a fresh worktree gets an index instead of silently having
-            // none. A repository without governed docs has no index to keep and is not checked.
-            // The index belongs to the tree, so a run pointed at a subdirectory still checks the tree's root.
-            string indexRoot = GatePaths.EnclosingRepositoryRoot(files, pathResolver, environment, root);
-            WorktreeIndexOutcome index = worktreeIndex.Ensure(
-                indexRoot,
-                DoctorOptions.Defaults,
-                indexExecutor,
-                environment.TempDirectory);
-            if (index.Status is not WorktreeIndexStatus.NotGoverned)
-                ReviewGateReporting.AddIndexDiagnostic(report, indexRoot, index);
-
-            return new Execution(inputs, changed, fullSuite.Admitted);
-        }
-
-
-        /// <summary>Runs the admitted gates, carries a verifier cycle's gates and merges an earlier report.</summary>
-        private Executed Execute(
-            Execution execution, ReviewGatesRequest request, DiagnosticReport report)
-        {
-            string root = execution.Inputs.Root;
-            ReviewConfig config = new()
-            {
-                Gates = execution.Admitted,
-                Parallelism = execution.Inputs.Config.Review.Parallelism,
-            };
-
-            // The run deadline is opt-in with --deadline, so CI, task gates and pre-push keep their behaviour: there, a
-            // blocking gate stopped by its own timeout is a failure. --deadline is refused with --gate before this.
-            TimeSpan? deadline = request.Deadline
-                ? TimeSpan.FromSeconds(execution.Inputs.Config.Review.CouncilDeadlineSeconds)
-                : null;
-            GateReport gates = gateRunner.Run(
-                config,
-                root,
-                request.StopOnFailure,
-                execution.Changed,
-                ReviewGatesService.BaseRef(request.BaseRef),
-                deadline);
-
-            foreach (GateResult gate in gates.Gates)
-                ReviewGateReporting.AddGateDiagnostic(report, gate, request.Deadline);
-
-            GateReport written = gates;
-            CouncilCycle? cycle = execution.Inputs.Cycle;
-            if (cycle is { Verifier: true })
-            {
-                written = ReviewGateReporting.WithCarriedGates(execution.Inputs.Config.Review.Gates, gates, cycle.Plan, report);
-                report.AddMetric("carried", written.Gates.Count - gates.Gates.Count);
-            }
-
-            // Gates named one run at a time into the same report add to it. Replacing the file would lose the earlier
-            // runs' results, so a reviewer could never finish a verifier cycle gate by gate.
-            if (request.Gates.Count > 0 && request.Out is not null)
-            {
-                written = ReviewGatesService.MergedWithExisting(
-                    files, pathResolver, environment, execution.Inputs.Config.Review.Gates, written, request.Out);
-                report.AddMetric("kept", written.Gates.Count - gates.Gates.Count);
-            }
-
-            report.AddMetric("gates", gates.Gates.Count);
-            report.AddMetric("failed", gates.Gates.Count(g => !g.Passed && g.NotApplicableReason is null
-                                                             && !(request.Deadline && VerdictEngine.IsStoppedForTime(g))));
-            report.AddMetric("not-applicable", gates.Gates.Count(g => g.NotApplicableReason is not null));
-            if (request.Deadline)
-                report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
-
-            return new Executed(gates, written);
-        }
-
 
         /// <summary>Writes the report, the evidence and the gate-proven skips, and builds the reviewer-facing epilogue.</summary>
         private ReviewCommandResult Report(
@@ -1172,23 +946,6 @@ public sealed class ReviewGatesService(
         /// <param name="Failure">The refusal's result, or null when the run can continue.</param>
         private sealed record AgentPrepared(AgentSetup? Setup, ReviewCommandResult? Failure);
 
-        public ReviewCommandResult Run(ReviewGatesRequest request, string agent, TextWriter output)
-        {
-            DiagnosticReport report = new();
-            AgentSetup? setup = Prepare(request, agent, report, out ReviewCommandResult? failure);
-            if (setup is null)
-                return failure ?? ReviewCommandResultFactory.Reported(1, report);
-
-            if (!TryResolveChanged(setup, report, out IReadOnlyList<string> changed, out failure))
-                return failure ?? ReviewCommandResultFactory.Reported(1, report);
-
-            AgentPlan? plan = PlanGates(setup, changed, request, report, out failure);
-            if (plan is null)
-                return failure ?? ReviewCommandResultFactory.Reported(1, report);
-
-            return Execute(setup, plan, changed, request, output, report);
-        }
-
         /// <summary>Runs one developer agent's task gates without blocking a thread.</summary>
         /// <param name="request">The options the command parsed.</param>
         /// <param name="agent">The developer agent whose task gates run.</param>
@@ -1213,97 +970,6 @@ public sealed class ReviewGatesService(
                 return failure ?? ReviewCommandResultFactory.Reported(1, report);
 
             return await ExecuteAsync(prepared.Setup, plan, changed, request, output, report, cancellationToken).ConfigureAwait(false);
-        }
-
-        /// <summary>
-        /// Checks every input and resolves the agent's gates before any process starts. Returns null with the refusal
-        /// in <paramref name="failure"/> when the run cannot start.
-        /// </summary>
-        private AgentSetup? Prepare(ReviewGatesRequest request, string agent, DiagnosticReport report, out ReviewCommandResult? failure)
-        {
-            failure = null;
-            string root = GatePaths.FullPath(pathResolver, environment, request.Path);
-
-            if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            {
-                failure = ReviewCommandResultFactory.Reported(1, report);
-                return null;
-            }
-
-            // Every input is checked before the agent is looked up, so an unsafe path or slug is refused
-            // the same way whether or not the agent declares gates.
-            List<string> refusals = [];
-            string baseRef = request.BaseRef ?? GitChangeParsing.DefaultBase;
-            if (request.BaseRef is not null && GitChangeParsing.ValidateBase(request.BaseRef) is { } baseProblem)
-                refusals.Add(baseProblem);
-
-            string repoRoot = GatePaths.EnclosingRepositoryRoot(files, pathResolver, environment, root);
-
-            // With --task and no --paths, the task's own files and declared test classes come from the active plan, the
-            // lookup docs packet prints its test command from, so the worker passes nothing it could get wrong.
-            string? targetMissing = null;
-            PlanTaskTargetMatch? target = request.TaskSlug is not null && request.Paths.Count == 0
-                ? targets.Find(repoRoot, config, request.TaskSlug, out targetMissing)
-                : null;
-
-            string? taskSlug = request.TaskSlug;
-            if (taskSlug is not null && TaskSlug.Normalise(taskSlug) is { Length: > 0 } normalised)
-                taskSlug = normalised;
-
-            IReadOnlyList<string> paths = request.Paths;
-            if (target is not null)
-                paths = [.. targets.Files(root, target.Entry, target.Row)];
-
-            // The report goes where the Arbiter reads the evidence. A --fix run that changes a task file never counts,
-            // so it writes none by default; one that changes nothing counts, and writes the passing report below.
-            // The task is validated before its report path is built: a punctuation-only id normalises to nothing,
-            // so building the path first would throw instead of refusing the run with the bad --task message.
-            string? taskProblem = taskGates.ValidateTask(taskSlug);
-            if (taskProblem is not null)
-                refusals.Add(taskProblem);
-
-            string? outPath = request.Out;
-            if (outPath is null && taskSlug is not null && !request.Fix && taskProblem is null)
-                outPath = Path.Combine(root, request.Red ? TaskGateNextStep.FailingReportPath(taskSlug) : TaskGateNextStep.PassingReportPath(taskSlug));
-
-            foreach (string path in paths)
-                if (taskGates.ValidatePath(root, path) is { } pathProblem)
-                    refusals.Add(pathProblem);
-
-            if (refusals.Count > 0)
-            {
-                failure = ReviewGatesService.RefuseInput(report, refusals);
-                return null;
-            }
-
-            List<string> unreadableStandards = [];
-            string? parentTechnology = TaskGateResolver.ParentTechnologyOrNone(
-                files, repoRoot, config, target?.Entry.Technology, unreadableStandards);
-            if (unreadableStandards.Count > 0)
-            {
-                // The task's gates may be keyed on the parent technology, so a standard this process may not read
-                // makes the run's evidence unreliable. Refuse before any gate starts and name the file.
-                failure = ReviewGatesService.RefuseInput(
-                    report,
-                    unreadableStandards,
-                    "Make the standard readable, then run the command again.");
-                return null;
-            }
-
-            TaskGateResolution resolved = TaskGateResolver.Resolve(
-                config.Review,
-                agent,
-                target?.Entry.Technology,
-                parentTechnology);
-
-            IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
-            if (agentGates.Count == 0)
-            {
-                failure = NoGates(request, agent, root, taskSlug, paths, outPath, resolved, report);
-                return null;
-            }
-
-            return new AgentSetup(root, config, baseRef, target, targetMissing, taskSlug, paths, outPath, agentGates, repoRoot, agent);
         }
 
         /// <summary>
@@ -1535,50 +1201,6 @@ public sealed class ReviewGatesService(
             };
 
             return new AgentPlan(plan, runCount, canonicalRoot, caseInsensitivePaths, outputs, observer);
-        }
-
-        /// <summary>Runs the gates, applies the RED judgement, and writes the report.</summary>
-        private ReviewCommandResult Execute(
-            AgentSetup setup,
-            AgentPlan plan,
-            IReadOnlyList<string> changed,
-            ReviewGatesRequest request,
-            TextWriter output,
-            DiagnosticReport report)
-        {
-            string root = setup.Root;
-
-            // A --fix run whose fix commands changed no task file is the verification run, so it is judged as one: the
-            // content of each changed file is taken before the gates run and compared after.
-            Dictionary<string, string?> before = request.Fix ? Snapshot(root, changed) : new(StringComparer.Ordinal);
-            TaskGateRun run = gateRunner.RunTaskGates(
-                plan.Plan.Gates, root, request.Fix, request.StopOnFailure && !request.Red, plan.Observer);
-            bool fixChangedFiles = request.Fix && Snapshot(root, changed).Any(file => file.Value != before[file.Key]);
-
-            // The counting --fix run writes the report a plain run writes, because the report reader finds the task's
-            // evidence there. An explicit --out names an extra file, not a replacement, so the rule holds either way.
-            string? countingReport = !fixChangedFiles && setup.TaskSlug is not null && !request.Red
-                ? Path.Combine(root, TaskGateNextStep.PassingReportPath(setup.TaskSlug))
-                : null;
-            string? outPath = setup.OutPath ?? countingReport;
-
-            GateReport finalReport = run.Report;
-            RedOutcome? redOutcome = null;
-            if (request.Red)
-            {
-                (finalReport, redOutcome) = ReviewGateReporting.ApplyRed(
-                    run.Report, plan.Plan.Gates, plan.Outputs, changed, file => projectFiles.NearestProjectFile(setup.RepoRoot, file), report, root, plan.CanonicalRoot, plan.CaseInsensitivePaths);
-            }
-
-            foreach (GateResult gate in finalReport.Gates)
-                ReviewGateReporting.AddGateDiagnostic(report, gate, timeIsNotRun: false);
-
-            if (!request.Red)
-            {
-                ReviewGateReporting.AddSiblingNotes(report, plan.Plan.Gates, run.Report, plan.Outputs, changed, root, plan.CanonicalRoot, plan.CaseInsensitivePaths);
-            }
-
-            return Report(setup, plan, changed, request, output, report, run, finalReport, redOutcome, fixChangedFiles, countingReport, outPath);
         }
 
         /// <summary>Runs the gates, applies the RED judgement, and writes the report, without blocking a thread.</summary>

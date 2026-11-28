@@ -69,11 +69,11 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void AConfidentPick_IsWrittenForAnUnassignedTaskOnly_AndTheReadyQueueNamesIt()
+    public async Task AConfidentPick_IsWrittenForAnUnassignedTaskOnly_AndTheReadyQueueNamesIt()
     {
         StubProvider provider = new("dev-medium", 0.97);
 
-        PlanTaskFile file = Write(Picker(provider));
+        PlanTaskFile file = await WriteAsync(Picker(provider));
 
         PlanTaskFileEntry picked = file.Tasks![0];
         Assert.Equal("dev-medium", picked.Agent);
@@ -87,9 +87,9 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void APickBelowTheFloor_LeavesTheConductorToChoose()
+    public async Task APickBelowTheFloor_LeavesTheConductorToChoose()
     {
-        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", 0.6)));
+        PlanTaskFile file = await WriteAsync(Picker(new StubProvider("dev-medium", 0.6)));
 
         Assert.Null(file.Tasks![0].Agent);
         Assert.DoesNotContain("agent=", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
@@ -98,50 +98,28 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(double.PositiveInfinity)]
-    public void ANonFiniteConfidence_IsNoPickRatherThanAStoredOne(double confidence)
+    public async Task ANonFiniteConfidence_IsNoPickRatherThanAStoredOne(double confidence)
     {
-        PlanTaskFile file = Write(Picker(new StubProvider("dev-medium", confidence)));
+        PlanTaskFile file = await WriteAsync(Picker(new StubProvider("dev-medium", confidence)));
 
         Assert.Null(file.Tasks![0].Agent);
         Assert.Null(file.Tasks[0].AgentConfidence);
     }
 
     [Fact]
-    public void AModelFault_WritesTheFileWithNoPick()
-    {
-        PlanTaskFile file = Write(Picker(new StubProvider(null, null, fail: true)));
-
-        Assert.Null(file.Tasks![0].Agent);
-    }
-
-    [Fact]
-    public void NoPicker_WritesTheFileAsBefore()
-    {
-        PlanTaskFile file = Write(null);
-
-        Assert.All(file.Tasks!, task => Assert.Null(task.Agent));
-    }
-
-    [Fact]
-    public async Task AConfidentPickAskedAsynchronously_MatchesTheBlockingAnswer()
-    {
-        StubProvider provider = new("dev-medium", 0.97);
-
-        PlanTaskFile file = await WriteAsync(Picker(provider));
-
-        PlanTaskFileEntry picked = file.Tasks![0];
-        Assert.Equal("dev-medium", picked.Agent);
-        Assert.Equal(0.97, picked.AgentConfidence);
-        Assert.Null(file.Tasks[1].Agent);
-        Assert.Equal(1, provider.Calls);
-    }
-
-    [Fact]
-    public async Task AModelFaultAskedAsynchronously_WritesTheFileWithNoPick()
+    public async Task AModelFault_WritesTheFileWithNoPick()
     {
         PlanTaskFile file = await WriteAsync(Picker(new StubProvider(null, null, fail: true)));
 
         Assert.Null(file.Tasks![0].Agent);
+    }
+
+    [Fact]
+    public async Task NoPicker_WritesTheFileAsBefore()
+    {
+        PlanTaskFile file = await WriteAsync(null);
+
+        Assert.All(file.Tasks!, task => Assert.Null(task.Agent));
     }
 
     [Fact]
@@ -159,14 +137,14 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void ACheckKeepsThePickOnDisk_WithoutAskingAgain_AndARewriteDoesNotMoveIt()
+    public async Task ACheckKeepsThePickOnDisk_WithoutAskingAgain_AndARewriteDoesNotMoveIt()
     {
-        Write(Picker(new StubProvider("dev-medium", 0.97)));
+        _ = await WriteAsync(Picker(new StubProvider("dev-medium", 0.97)));
         StubProvider second = new("dev-easy", 0.99);
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store,
-            Picker(second)).Run(Plan, PlanTaskFileMode.Check);
-        PlanTaskFile rewritten = Write(Picker(second));
+        PlanTaskFileOutcome check = await new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store,
+            Picker(second)).RunAsync(Plan, PlanTaskFileMode.Check);
+        PlanTaskFile rewritten = await WriteAsync(Picker(second));
 
         Assert.False(check.Report.HasErrors, string.Join("; ", check.Report.Items.Select(item => item.Message)));
         Assert.Equal("dev-medium", rewritten.Tasks![0].Agent);
@@ -215,14 +193,6 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             new FakeArbiterHttpHandlers(() => throw new InvalidOperationException("No test here creates a transport.")),
             TimeProvider.System,
             () => throw new InvalidOperationException("No test here reads a credential."));
-
-    private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
-    {
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store, picker)
-            .Run(Plan, PlanTaskFileMode.Write);
-        Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
-        return outcome.File!;
-    }
 
     private async Task<PlanTaskFile> WriteAsync(IPlanTaskAgentPicker? picker)
     {

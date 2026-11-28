@@ -40,29 +40,6 @@ public sealed partial class DocumentationAnalyzer(
     private readonly ClaimExtractor _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
     private readonly IReadOnlyList<IClaimCandidateSource> _candidateSources = candidateSources ?? throw new ArgumentNullException(nameof(candidateSources));
 
-    /// <summary>Analyzes eligible documents without changing the corpus.</summary>
-    public DocumentationAnalysisResult Analyze(
-        DocumentSet documents,
-        DocGraphProjection graph,
-        DocsAnalysisConfig config,
-        AnalysisGlossary? glossary = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(documents);
-        ArgumentNullException.ThrowIfNull(graph);
-        ArgumentNullException.ThrowIfNull(config);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        DiagnosticReport diagnostics = new DiagnosticReport();
-        IReadOnlyList<Claim> claims = ExtractEligibleClaims(documents, config, diagnostics);
-        cancellationToken.ThrowIfCancellationRequested();
-        Dictionary<string, AnalysisCandidate> candidates = new Dictionary<string, AnalysisCandidate>(StringComparer.Ordinal);
-
-        AddExactDuplicateClusters(claims, candidates);
-        CandidateTally tally = CollectCandidates(claims, graph, config, glossary, candidates, diagnostics, cancellationToken);
-        return FinishAnalysis(claims, candidates, tally, config, diagnostics, cancellationToken);
-    }
-
     /// <summary>Analyzes eligible documents without changing the corpus or blocking a thread.</summary>
     public async Task<DocumentationAnalysisResult> AnalyzeAsync(
         DocumentSet documents,
@@ -130,38 +107,6 @@ public sealed partial class DocumentationAnalyzer(
         diagnostics.AddMetric("embeddingPromptTokens", tally.EmbeddingPromptTokens);
         diagnostics.AddMetric("embeddingTotalTokens", tally.EmbeddingTotalTokens);
         return new DocumentationAnalysisResult(visible, diagnostics, metrics);
-    }
-
-    private CandidateTally CollectCandidates(
-        IReadOnlyList<Claim> claims,
-        DocGraphProjection graph,
-        DocsAnalysisConfig config,
-        AnalysisGlossary? glossary,
-        Dictionary<string, AnalysisCandidate> candidates,
-        DiagnosticReport diagnostics,
-        CancellationToken cancellationToken)
-    {
-        CandidateTally tally = new CandidateTally();
-        List<ClaimPairCandidate> semanticSeedPairs = new List<ClaimPairCandidate>();
-        CollectSourceCandidates(claims, graph, config, glossary, candidates, tally, semanticSeedPairs, cancellationToken);
-
-        if (config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            EmbeddingResolutionResult resolution = ResolveEmbeddings(claims, config.Embeddings);
-            return FinishEmbeddingCandidates(
-                claims,
-                config,
-                glossary,
-                candidates,
-                diagnostics,
-                tally,
-                semanticSeedPairs,
-                resolution,
-                cancellationToken);
-        }
-
-        return tally;
     }
 
     private async Task<CandidateTally> CollectCandidatesAsync(
@@ -310,30 +255,6 @@ public sealed partial class DocumentationAnalyzer(
         public int EmbeddingTotalTokens { get; set; }
 
         public bool SourceTruncated { get; set; }
-    }
-
-    private EmbeddingResolutionResult ResolveEmbeddings(
-        IReadOnlyList<Claim> claims,
-        DocsAnalysisEmbeddingConfig config)
-    {
-        if (embeddingResolver is null)
-        {
-            return EmbeddingResolutionResults.Unavailable(
-                config.Mode,
-                "No embedding provider is configured in this host.");
-        }
-        if (persistence is null)
-        {
-            return EmbeddingResolutionResults.Unavailable(
-                config.Mode,
-                "No safe analysis persistence provider is configured in this host.");
-        }
-
-        return embeddingResolver.Resolve(
-            claims.Select(claim => new EmbeddingWorkItem(
-                claim.ContextualHash,
-                claim.ContextualText)).ToArray(),
-            config);
     }
 
     private async Task<EmbeddingResolutionResult> ResolveEmbeddingsAsync(

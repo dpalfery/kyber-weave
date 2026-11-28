@@ -719,7 +719,8 @@ public sealed partial class PlanTaskFileGenerator
             List<PlanTaskFileEntry> open = [.. entries.Where(entry => entry.Role is null && entry.Agent is null)];
             if (open.Count > 0)
             {
-                RecordPicks(entries, _picker.Pick(open), picks);
+                throw new NotSupportedException(
+                    "Synchronous task file generation does not support an agent picker; call RunAsync instead.");
             }
         }
 

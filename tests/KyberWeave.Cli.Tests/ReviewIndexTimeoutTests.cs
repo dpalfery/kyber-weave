@@ -103,10 +103,6 @@ public sealed class ReviewIndexTimeoutTests
             Executor = indexExecutor;
             return Task.FromResult(new ReviewCommandResult(0));
         }
-
-        public ReviewCommandResult Run(
-            ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output, CancellationToken cancellationToken) =>
-            new(0);
     }
 
     private sealed class RecordingSeats : IReviewSeatsService
@@ -123,14 +119,6 @@ public sealed class ReviewIndexTimeoutTests
             Executor = indexExecutor;
             return Task.FromResult(new ReviewCommandResult(0));
         }
-
-        public ReviewCommandResult Prepare(
-            ReviewSeatsRequest request,
-            Func<string, KyberWeaveConfig, IReviewDecisionModel> decisionModel,
-            IProcessExecutor indexExecutor,
-            TextWriter output,
-            CancellationToken cancellationToken) =>
-            new(0);
     }
 
     private sealed class NoDecisionModels : IReviewDecisionModelFactory

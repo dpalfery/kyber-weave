@@ -91,24 +91,6 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     }
 
     /// <inheritdoc />
-    public ScaffoldResult Scaffold(
-        string repoRoot,
-        string? docsRoot = null,
-        string owner = "unassigned",
-        bool force = false,
-        bool kyberStandards = false,
-        bool reviewGates = true,
-        IReadOnlyList<string>? standards = null)
-    {
-        ScaffoldPreparation preparation = PrepareScaffold(
-            repoRoot, docsRoot, owner, kyberStandards, standards);
-        ReviewGatesPlan? reviewPlan = reviewGates
-            ? _reviewBlock.Plan(preparation.Root, preparation.Ontology.Technologies)
-            : null;
-        return FinishScaffold(preparation, reviewPlan, force, kyberStandards, standards);
-    }
-
-    /// <inheritdoc />
     public async Task<ScaffoldResult> ScaffoldAsync(
         string repoRoot,
         string? docsRoot = null,

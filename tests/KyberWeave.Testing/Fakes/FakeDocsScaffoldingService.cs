@@ -17,28 +17,6 @@ public sealed class FakeDocsScaffoldingService : IDocsScaffoldingService
     public Exception? Failure { get; set; }
 
     /// <inheritdoc />
-    public ScaffoldResult Scaffold(
-        string repoRoot,
-        string? docsRoot = null,
-        string owner = "unassigned",
-        bool force = false,
-        bool kyberStandards = false,
-        bool reviewGates = true,
-        IReadOnlyList<string>? standards = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-
-        if (Failure is { } failure)
-        {
-            throw failure;
-        }
-
-        ScaffoldedRoots.Add(repoRoot);
-        string root = docsRoot ?? Path.Combine(repoRoot, "docs");
-        return new ScaffoldResult(root, DocsRootSource.Convention, []);
-    }
-
-    /// <inheritdoc />
     public Task<ScaffoldResult> ScaffoldAsync(
         string repoRoot,
         string? docsRoot = null,
@@ -50,7 +28,15 @@ public sealed class FakeDocsScaffoldingService : IDocsScaffoldingService
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Scaffold(
-            repoRoot, docsRoot, owner, force, kyberStandards, reviewGates, standards));
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+
+        if (Failure is { } failure)
+        {
+            throw failure;
+        }
+
+        ScaffoldedRoots.Add(repoRoot);
+        string root = docsRoot ?? Path.Combine(repoRoot, "docs");
+        return Task.FromResult(new ScaffoldResult(root, DocsRootSource.Convention, []));
     }
 }

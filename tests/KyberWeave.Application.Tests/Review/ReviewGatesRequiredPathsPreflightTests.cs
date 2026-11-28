@@ -111,9 +111,9 @@ public sealed class ReviewGatesRequiredPathsPreflightTests : IDisposable
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public void ACouncilOrAllRunWithAMissingPathIsRefusedBeforeAnyWork(bool council, bool all)
+    public async Task ACouncilOrAllRunWithAMissingPathIsRefusedBeforeAnyWork(bool council, bool all)
     {
-        ReviewCommandResult result = Run(council, all);
+        ReviewCommandResult result = await RunAsync(council, all);
 
         Assert.Equal(1, result.ExitCode);
         Diagnostic[] errors = [.. result.Report!.Items.Where(item => item.Code == NotStarted)];
@@ -130,9 +130,9 @@ public sealed class ReviewGatesRequiredPathsPreflightTests : IDisposable
     }
 
     [Fact]
-    public void AScopedRunStillStartsTheOtherGatesAndReportsTheMissingOneNotStarted()
+    public async Task AScopedRunStillStartsTheOtherGatesAndReportsTheMissingOneNotStarted()
     {
-        ReviewCommandResult result = Run(council: false, all: false);
+        ReviewCommandResult result = await RunAsync(council: false, all: false);
 
         Assert.Contains(_services.Processes.Calls, call => call.Program == "plain");
         Assert.DoesNotContain(_services.Processes.Calls, call => call.Program is "dash-lint" or "web-build");
@@ -140,11 +140,11 @@ public sealed class ReviewGatesRequiredPathsPreflightTests : IDisposable
     }
 
     [Fact]
-    public void ACouncilRunWithEveryPathPresentRunsItsGates()
+    public async Task ACouncilRunWithEveryPathPresentRunsItsGates()
     {
         MakeAllPresent();
 
-        ReviewCommandResult result = Run(council: true, all: false);
+        ReviewCommandResult result = await RunAsync(council: true, all: false);
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotEmpty(_index.Calls);
@@ -154,12 +154,12 @@ public sealed class ReviewGatesRequiredPathsPreflightTests : IDisposable
     }
 
     [Fact]
-    public void ARefusedCouncilRunFollowedByARerunIsTheSameCycleInFullMode()
+    public async Task ARefusedCouncilRunFollowedByARerunIsTheSameCycleInFullMode()
     {
-        ReviewCommandResult refused = Run(council: true, all: false);
+        ReviewCommandResult refused = await RunAsync(council: true, all: false);
         MakeAllPresent();
 
-        ReviewCommandResult rerun = Run(council: true, all: false);
+        ReviewCommandResult rerun = await RunAsync(council: true, all: false);
 
         Assert.Equal(1, refused.ExitCode);
         Assert.Equal(0, rerun.ExitCode);
@@ -183,12 +183,13 @@ public sealed class ReviewGatesRequiredPathsPreflightTests : IDisposable
         _services.Files.CreateDirectory(Path.Combine(_repo, "dash", "web", "node_modules"));
     }
 
-    private ReviewCommandResult Run(bool council, bool all) =>
-        _services.ReviewGates.Run(
+    private Task<ReviewCommandResult> RunAsync(bool council, bool all) =>
+        _services.ReviewGates.RunAsync(
             new ReviewGatesRequest(
                 _repo, null, Out, null, null, [], [], All: all, Deadline: false, Council: council,
                 StopOnFailure: false, Full: false, TaskSlug: null, Fix: false, Red: false,
                 HumanOutput: false, Interactive: false),
             _index,
-            TextWriter.Null);
+            TextWriter.Null,
+            CancellationToken.None);
 }

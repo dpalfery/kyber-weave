@@ -73,88 +73,6 @@ public sealed class CodeGraphIndexProvisioner(
     /// <summary>The <c>doctor</c> option an ensure remedy names.</summary>
     private const string EnsureFlag = "ensure";
 
-    /// <summary>Runs the CodeGraph checks, preparing the index in every mode except <see cref="DoctorMode.Check"/>.</summary>
-    /// <param name="root">The resolved repository root.</param>
-    /// <param name="mode">The run's mode.</param>
-    /// <param name="options">The budgets and the CodeGraph executable name.</param>
-    /// <param name="executor">Runs the CodeGraph child. Production passes an executor bounded by the index timeout.</param>
-    /// <param name="lockDirectory">Where the lock file lives.</param>
-    /// <param name="restore">
-    ///     Which tracked files an ensure run restores after writing them. The default restores every file the run
-    ///     wrote; <see cref="CodeGraphRestore.InitConfigFilesOnly"/> restores only <see cref="CodeGraphIndexRules.InitConfigFiles"/> and
-    ///     names every other newly dirty file as left alone. Only the ensure mode reads it.
-    /// </param>
-    public CodeGraphOutcome Run(
-        string root,
-        DoctorMode mode,
-        DoctorOptions options,
-        IProcessExecutor executor,
-        string lockDirectory,
-        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(executor);
-
-        List<DoctorCheck> checks = [];
-
-        if (!DetectBinary(options, executor, out bool missing, out string? binaryReason))
-        {
-            checks.Add(new DoctorCheck(
-                "codegraph.binary",
-                false,
-                binaryReason,
-                "install the codegraph CLI so that 'codegraph' is on PATH, then run: kyber-weave doctor --check"));
-            return new CodeGraphOutcome(checks, BinaryMissing: missing);
-        }
-
-        checks.Add(new DoctorCheck("codegraph.binary", true, "found on PATH", null));
-
-        string indexDirectory = Path.Combine(root, IndexDirectoryName);
-
-        if (mode == DoctorMode.Check)
-        {
-            checks.Add(CheckIndex(indexDirectory, files.DirectoryExists(indexDirectory)));
-            return new CodeGraphOutcome(checks, BinaryMissing: false);
-        }
-
-        if (mode == DoctorMode.Ensure)
-        {
-            checks.AddRange(Ensure(root, indexDirectory, options, executor, lockDirectory, restore, out bool initialised));
-            return new CodeGraphOutcome(checks, BinaryMissing: false, initialised);
-        }
-
-        checks.Add(ProvisionCore(root, options, executor, lockDirectory, options.IndexTimeout));
-        return new CodeGraphOutcome(checks, BinaryMissing: false);
-    }
-
-    /// <summary>Brings the index up to date under the cross-process lock for the synchronous run.</summary>
-    private DoctorCheck ProvisionCore(
-        string root,
-        DoctorOptions options,
-        IProcessExecutor executor,
-        string lockDirectory,
-        TimeSpan lockWait)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(executor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(lockDirectory);
-
-        using IDisposable? lockFile = workspace.TryAcquireLock(CodeGraphIndexRules.LockPathFor(paths.GetFullPath(root, environment.CurrentDirectory), lockDirectory), lockWait, out string? lockFailure);
-        if (lockFile is null)
-            return LockRefused(lockFailure, ProvisionFlag);
-
-        string indexDirectory = Path.Combine(root, IndexDirectoryName);
-        if (files.DirectoryExists(indexDirectory) && !workspace.IsWritable(indexDirectory))
-            return Unwritable();
-
-        // Verb choice follows the directory's presence as it stands now, not as it stood before the lock:
-        // a concurrent run may have created the index while this one waited, and re-running init over an
-        // existing directory would be the wrong verb. Both run from the root so the index lands there.
-        string verb = files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb;
-        return VerbCheck(PrepareIndex(root, verb, options, executor), options, IndexCheckId, ProvisionFlag);
-    }
-
     /// <summary>Runs the CodeGraph checks without blocking a thread, preparing the index in every mode except <see cref="DoctorMode.Check"/>.</summary>
     /// <param name="root">The resolved repository root.</param>
     /// <param name="mode">The run's mode.</param>
@@ -269,14 +187,6 @@ public sealed class CodeGraphIndexProvisioner(
     ///     <c>.codegraph/.gitignore</c>, so a new worktree has the folder and no index. <c>sync</c> and
     ///     <c>index</c> both refuse that, and only <c>init</c> can fix it.
     /// </remarks>
-    private static ChildRun PrepareIndex(string root, string verb, DoctorOptions options, IProcessExecutor executor)
-    {
-        ChildRun run = RunChild(root, verb, options, executor, subject: ".");
-        return run.NotInitialised && verb != InitVerb
-            ? RunChild(root, InitVerb, options, executor, subject: ".")
-            : run;
-    }
-
     private static async Task<ChildRun> PrepareIndexAsync(
         string root,
         string verb,
@@ -309,88 +219,6 @@ public sealed class CodeGraphIndexProvisioner(
     ///         reason no repair runs while the lock is held, whatever failed.
     ///     </para>
     /// </remarks>
-    private List<DoctorCheck> Ensure(
-        string root,
-        string indexDirectory,
-        DoctorOptions options,
-        IProcessExecutor executor,
-        string lockDirectory,
-        CodeGraphRestore restore,
-        out bool initialised)
-    {
-        List<DoctorCheck> checks = [];
-        initialised = false;
-
-        using IDisposable? lockFile = workspace.TryAcquireLock(
-            CodeGraphIndexRules.LockPathFor(paths.GetFullPath(root, environment.CurrentDirectory), lockDirectory), options.IndexTimeout, out string? lockFailure);
-        if (lockFile is null)
-        {
-            checks.Add(LockRefused(lockFailure, EnsureFlag));
-            return checks;
-        }
-
-        // The tracked files already modified before this run, sampled after acquiring the lock so
-        // that operator edits made while waiting on another run are never rewound.
-        HashSet<string>? dirtyBefore = TrackedChanges(root, executor);
-
-        if (files.DirectoryExists(indexDirectory) && !workspace.IsWritable(indexDirectory))
-        {
-            checks.Add(Unwritable());
-            return checks;
-        }
-
-        // Verb choice follows the directory as it stands inside the lock, for the same reason Provision re-derives it.
-        string verb = files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb;
-        ChildRun prepared = PrepareIndex(root, verb, options, executor);
-        foreach (TimeSpan pause in options.HeldLockRetryPauses)
-        {
-            if (!FoundIndexLockHeld(prepared, options))
-                break;
-
-            Task.Delay(pause, timeProvider).GetAwaiter().GetResult();
-            prepared = PrepareIndex(root, verb, options, executor);
-        }
-
-        bool initRan = prepared.Verb == InitVerb;
-        if (!prepared.Ok && !prepared.NotInitialised && !FoundIndexLockHeld(prepared, options)
-            && Repair(root, indexDirectory, options, executor) is { } repair)
-        {
-            prepared = repair.Ok
-                ? PrepareIndex(root, files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb, options, executor)
-                : repair;
-            initRan |= prepared.Verb == InitVerb;
-        }
-
-        bool lockHeld = FoundIndexLockHeld(prepared, options);
-        initialised = prepared.Ok && prepared.Verb == InitVerb;
-        checks.Add(lockHeld ? IndexLockHeldWarning() : VerbCheck(prepared, options, IndexCheckId, EnsureFlag));
-
-        // Only init rewrites tracked files, so only an init leaves something of this run's own to undo. After a sync
-        // or a repair, passed or failed, a newly dirty file is someone else's edit in this tree, and restoring it
-        // would revert their work: a review syncs a tree others may be in.
-        if (initRan && RestoreWritten(root, dirtyBefore, executor, restore) is { } restoreCheck)
-            checks.Add(restoreCheck);
-
-        // A repair already ran, and one is the whole budget. Proving an index that could not be prepared would report
-        // the same breakage twice and pay a second child run for it. A held lock is not breakage: the index on disk
-        // is the one to prove.
-        if (!prepared.Ok && !lockHeld)
-            return checks;
-
-        // D22: one explore call, not a retrieval loop. It proves the index answers; a second query would make every
-        // worker start pay for another index read, which is the cost this command exists to reduce.
-        ChildRun proof = RunChild(root, ExploreVerb, options, executor, subject: ExploreQuery);
-        if (!proof.Ok && Repair(root, indexDirectory, options, executor) is { } proofRepair)
-        {
-            proof = proofRepair.Ok
-                ? RunChild(root, ExploreVerb, options, executor, subject: ExploreQuery)
-                : proofRepair;
-        }
-
-        checks.Add(VerbCheck(proof, options, ExploreCheckId, EnsureFlag));
-        return checks;
-    }
-
     private async Task<(List<DoctorCheck> Checks, bool Initialised)> EnsureAsync(
         string root,
         string indexDirectory,
@@ -486,11 +314,6 @@ public sealed class CodeGraphIndexProvisioner(
     ///     Rebuilds the index with <c>codegraph index</c>, unless CodeGraph's own lock is held.
     /// </summary>
     /// <returns>The rebuild's run, or null when it was not started because another live process holds the lock.</returns>
-    private ChildRun? Repair(string root, string indexDirectory, DoctorOptions options, IProcessExecutor executor) =>
-        workspace.IsCodeGraphLockHeld(indexDirectory)
-            ? null
-            : RunChild(root, IndexVerb, options, executor, subject: ".");
-
     private async Task<ChildRun?> RepairAsync(
         string root,
         string indexDirectory,
@@ -517,46 +340,6 @@ public sealed class CodeGraphIndexProvisioner(
     ///     Detects the binary by running its version probe. A start failure means the file is not on PATH, which is
     ///     the case that needs the user's approval; any other failure is a broken binary, not a missing one.
     /// </summary>
-    private static bool DetectBinary(
-        DoctorOptions options,
-        IProcessExecutor executor,
-        out bool missing,
-        out string? reason)
-    {
-        missing = false;
-        reason = null;
-        try
-        {
-            ProcessResult result = executor.Run(StartInfo(options.CodeGraphExecutable, null, "--version"), string.Empty);
-            if (result.ExitCode == 0)
-                return true;
-
-            // The file exists and runs, but cannot report its version. That is a broken binary, not an absent one:
-            // installing it is not the remedy, so this is an ordinary failure and not the exit-3 approval path.
-            string detail = FirstLine(result.StandardError) ?? FirstLine(result.StandardOutput) ?? "no output";
-            reason = $"'{options.CodeGraphExecutable} --version' exited {result.ExitCode}: {detail}";
-            return false;
-        }
-        catch (Win32Exception)
-        {
-            missing = true;
-            reason = $"'{options.CodeGraphExecutable}' is not on PATH";
-            return false;
-        }
-        catch (TimeoutException)
-        {
-            reason = $"'{options.CodeGraphExecutable} --version' did not finish";
-            return false;
-        }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
-        {
-            // Starting a process can fail for reasons other than "not found", and the doctor reports rather than
-            // throws. Only the Win32Exception above means the user has to decide whether to install it.
-            reason = $"'{options.CodeGraphExecutable}' could not be run to report its version";
-            return false;
-        }
-    }
-
     private static async Task<(bool Found, bool Missing, string? Reason)> DetectBinaryAsync(
         DoctorOptions options,
         IProcessRunner executor,
@@ -608,64 +391,6 @@ public sealed class CodeGraphIndexProvisioner(
         return new DoctorCheck(IndexCheckId, true, "index present at .codegraph/", null);
     }
 
-    /// <summary>
-    ///     Restores the tracked files that appeared while the index was being prepared, and touches nothing that was
-    ///     already modified.
-    /// </summary>
-    /// <returns>
-    ///     The <c>codegraph.restore</c> check, or null when the preparation wrote no tracked file or when baseline
-    ///     tracked changes could not be read.
-    /// </returns>
-    /// <remarks>
-    ///     Under <see cref="CodeGraphRestore.InitConfigFilesOnly"/> the run restores only the files
-    ///     <see cref="CodeGraphIndexRules.InitConfigFiles"/> names. Any other newly dirty file is an edit the run did not cause as a
-    ///     known side effect, so it stays in place and is named in a passing check; the post-checkout hook fires
-    ///     during checkouts where a person may have uncommitted work.
-    /// </remarks>
-    private static DoctorCheck? RestoreWritten(
-        string root,
-        HashSet<string>? dirtyBefore,
-        IProcessExecutor executor,
-        CodeGraphRestore restore)
-    {
-        if (dirtyBefore is null)
-            return null;
-
-        HashSet<string>? dirtyAfter = TrackedChanges(root, executor);
-        if (dirtyAfter is null)
-            return null;
-
-        List<string> written = [];
-        foreach (string path in dirtyAfter)
-        {
-            if (!dirtyBefore.Contains(path))
-                written.Add(path);
-        }
-
-        if (written.Count == 0)
-            return null;
-
-        written.Sort(StringComparer.Ordinal);
-
-        if (restore == CodeGraphRestore.InitConfigFilesOnly)
-            return RestoreInitConfigFiles(root, written, executor);
-
-        List<string> failed = [];
-        foreach (string path in written)
-        {
-            if (!RestoreOne(root, path, executor))
-                failed.Add(path);
-        }
-
-        return failed.Count == 0
-            ? new DoctorCheck(
-                RestoreCheckId,
-                true,
-                $"restored the tracked files the index wrote: {string.Join(", ", written)}",
-                null)
-            : RestoreFailure(failed);
-    }
-
     private static async Task<DoctorCheck?> RestoreWrittenAsync(
         string root,
         HashSet<string>? dirtyBefore,
@@ -712,31 +437,6 @@ public sealed class CodeGraphIndexProvisioner(
             : RestoreFailure(failed);
     }
 
-    /// <summary>
-    ///     Restores the newly written files that <see cref="CodeGraphIndexRules.InitConfigFiles"/> names, and names the rest as left alone.
-    /// </summary>
-    /// <param name="root">The repository root.</param>
-    /// <param name="written">The newly dirty tracked files, sorted ordinally.</param>
-    /// <param name="executor">Runs git.</param>
-    /// <returns>The <c>codegraph.restore</c> check: failing only when a file <c>codegraph init</c> wrote could not be restored.</returns>
-    private static DoctorCheck RestoreInitConfigFiles(string root, List<string> written, IProcessExecutor executor)
-    {
-        List<string> toRestore = written.Where(path => CodeGraphIndexRules.InitConfigFiles.Contains(path, StringComparer.Ordinal)).ToList();
-        List<string> leftAlone = written.Where(path => !toRestore.Contains(path, StringComparer.Ordinal)).ToList();
-
-        List<string> failed = toRestore.Where(path => !RestoreOne(root, path, executor)).ToList();
-        if (failed.Count > 0)
-            return RestoreFailure(failed);
-
-        List<string> parts = [];
-        if (toRestore.Count > 0)
-            parts.Add($"restored the tracked files the index wrote: {string.Join(", ", toRestore)}");
-        if (leftAlone.Count > 0)
-            parts.Add($"left alone, not written by codegraph init: {string.Join(", ", leftAlone)}");
-
-        return new DoctorCheck(RestoreCheckId, true, string.Join("; ", parts), null);
-    }
-
     private static async Task<DoctorCheck> RestoreInitConfigFilesAsync(
         string root,
         List<string> written,
@@ -776,22 +476,6 @@ public sealed class CodeGraphIndexProvisioner(
             $"the index wrote tracked files that could not be restored: {string.Join(", ", failed)}",
             $"git restore --source=HEAD --staged --worktree -- {string.Join(' ', failed.Select(QuoteShellPath))}");
 
-    /// <summary>Restores one path from <c>HEAD</c>, in both the working tree and the index.</summary>
-    private static bool RestoreOne(string root, string path, IProcessExecutor executor)
-    {
-        try
-        {
-            ProcessResult result = executor.Run(
-                StartInfo("git", root, "restore", "--source=HEAD", "--staged", "--worktree", "--", path),
-                string.Empty);
-            return result.ExitCode == 0;
-        }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or TimeoutException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
     private static async Task<bool> RestoreOneAsync(
         string root,
         string path,
@@ -811,53 +495,6 @@ public sealed class CodeGraphIndexProvisioner(
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or TimeoutException or UnauthorizedAccessException)
         {
             return false;
-        }
-    }
-
-    /// <summary>
-    ///     The repository-relative paths git reports as modified, staged, deleted or renamed, from
-    ///     <c>git status --porcelain -uno</c>, or null when git status fails.
-    /// </summary>
-    /// <remarks>
-    ///     Untracked entries are excluded by <c>-uno</c>. This set exists so the ensure run can tell the edits it
-    ///     caused from the edits that were already there, and a path git does not track cannot be restored. A git
-    ///     that cannot run yields null rather than an empty set: failing to read the working tree must not be
-    ///     confused with a clean tree, which would cause existing modifications to be restored as index-written.
-    /// </remarks>
-    private static HashSet<string>? TrackedChanges(string root, IProcessExecutor executor)
-    {
-        try
-        {
-            ProcessResult result = executor.Run(
-                StartInfo("git", root, "status", "--porcelain", "-uno"),
-                string.Empty);
-            if (result.ExitCode != 0)
-                return null;
-
-            HashSet<string> paths = new(StringComparer.Ordinal);
-            foreach (string line in result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                // Porcelain v1 is two status columns, a space, then the path. Anything shorter than that is not an
-                // entry this code can name, and naming a fragment would restore a path that does not exist.
-                if (line.Length <= 3)
-                    continue;
-
-                string path = line[3..].Trim().Trim('"');
-
-                // A rename reports both paths; the one to restore is the one that exists now.
-                int arrow = path.IndexOf(" -> ", StringComparison.Ordinal);
-                if (arrow >= 0)
-                    path = path[(arrow + 4)..].Trim().Trim('"');
-
-                if (path.Length > 0)
-                    paths.Add(path);
-            }
-
-            return paths;
-        }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or TimeoutException or UnauthorizedAccessException)
-        {
-            return null;
         }
     }
 
@@ -905,45 +542,6 @@ public sealed class CodeGraphIndexProvisioner(
     }
 
     /// <summary>Runs one CodeGraph verb from the root and records what the check line needs to know about it.</summary>
-    /// <param name="root">The repository root, which is the child's working directory.</param>
-    /// <param name="verb">The CodeGraph verb.</param>
-    /// <param name="options">The CodeGraph executable and index budget.</param>
-    /// <param name="executor">Runs the child.</param>
-    /// <param name="subject">The verb's argument: the path to prepare, or the question to explore.</param>
-    private static ChildRun RunChild(
-        string root,
-        string verb,
-        DoctorOptions options,
-        IProcessExecutor executor,
-        string subject)
-    {
-        try
-        {
-            ProcessResult result = executor.Run(
-                StartInfo(options.CodeGraphExecutable, root, verb, subject),
-                string.Empty);
-            if (result.ExitCode == 0)
-                return new ChildRun(verb, subject, ChildRunFailure.None, 0, null, Corrupt: false);
-
-            string detail = FirstLine(result.StandardError) ?? FirstLine(result.StandardOutput) ?? "no output";
-            return new ChildRun(verb, subject, ChildRunFailure.Exited, result.ExitCode, detail, IsCorrupt(result))
-            {
-                NotInitialised = (result.StandardError + "\n" + result.StandardOutput)
-                    .Contains("CodeGraph not initialized", StringComparison.OrdinalIgnoreCase)
-            };
-        }
-        catch (TimeoutException)
-        {
-            return new ChildRun(verb, subject, ChildRunFailure.TimedOut, 0, null, Corrupt: false);
-        }
-        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException or UnauthorizedAccessException)
-        {
-            // The binary resolved a moment ago in DetectBinary, so a start failure here is a race with the
-            // environment rather than a missing prerequisite. Report it as a failed check.
-            return new ChildRun(verb, subject, ChildRunFailure.CouldNotStart, 0, null, Corrupt: false);
-        }
-    }
-
     private static async Task<ChildRun> RunChildAsync(
         string root,
         string verb,

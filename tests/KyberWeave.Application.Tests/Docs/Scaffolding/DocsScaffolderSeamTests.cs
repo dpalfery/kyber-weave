@@ -41,31 +41,31 @@ public sealed class DocsScaffolderSeamTests
         new KyberStandardsTemplateReader(_resources));
 
     [Fact]
-    public void ItScaffoldsARelativeRootUnderTheInjectedWorkingDirectory()
+    public async Task ItScaffoldsARelativeRootUnderTheInjectedWorkingDirectory()
     {
-        ScaffoldResult result = Scaffolder().Scaffold("repo", "docs", reviewGates: false);
+        ScaffoldResult result = await Scaffolder().ScaffoldAsync("repo", "docs", reviewGates: false);
 
         Assert.True(_disk.FileExists($"{Root}/docs/catalog.md"));
         Assert.Contains(result.Files, file => file.RelativePath == "docs/catalog.md");
     }
 
     [Fact]
-    public void ItRefusesADocsRootThatLeavesTheRepository()
+    public async Task ItRefusesADocsRootThatLeavesTheRepository()
     {
-        ArgumentException error = Assert.Throws<ArgumentException>(() =>
-            Scaffolder().Scaffold("repo", "../outside", reviewGates: false));
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            Scaffolder().ScaffoldAsync("repo", "../outside", reviewGates: false));
 
         Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
         Assert.False(_disk.DirectoryExists("/kw/outside"));
     }
 
     [Fact]
-    public void AShippedSkillsListThatIsNotASequenceOfNamesStopsTheScaffold()
+    public async Task AShippedSkillsListThatIsNotASequenceOfNamesStopsTheScaffold()
     {
         _resources.Add("Standards.csharp.skills.yml", "name: not-a-list\n");
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
-            Scaffolder().Scaffold("repo", "docs", reviewGates: false, standards: ["csharp"]));
+        InvalidDataException error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            Scaffolder().ScaffoldAsync("repo", "docs", reviewGates: false, standards: ["csharp"]));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
         Assert.Contains("skills list", error.Message, StringComparison.Ordinal);
@@ -77,12 +77,12 @@ public sealed class DocsScaffolderSeamTests
     /// The parser's own wording is not pinned here — only that a reason follows the sentence.
     /// </summary>
     [Fact]
-    public void AShippedSkillsListThatIsNotYamlNamesTheParserReason()
+    public async Task AShippedSkillsListThatIsNotYamlNamesTheParserReason()
     {
         _resources.Add("Standards.csharp.skills.yml", "- go-gates\n  bad: [\n");
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
-            Scaffolder().Scaffold("repo", "docs", reviewGates: false, standards: ["csharp"]));
+        InvalidDataException error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            Scaffolder().ScaffoldAsync("repo", "docs", reviewGates: false, standards: ["csharp"]));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
         Assert.Contains("skills list", error.Message, StringComparison.Ordinal);
@@ -92,12 +92,12 @@ public sealed class DocsScaffolderSeamTests
     }
 
     [Fact]
-    public void AShippedSkillsListNamingASkillTheBuildDoesNotShipStopsTheScaffold()
+    public async Task AShippedSkillsListNamingASkillTheBuildDoesNotShipStopsTheScaffold()
     {
         _resources.Add("Standards.csharp.skills.yml", "- never-shipped\n");
 
-        InvalidDataException error = Assert.Throws<InvalidDataException>(() =>
-            Scaffolder().Scaffold("repo", "docs", reviewGates: false, standards: ["csharp"]));
+        InvalidDataException error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            Scaffolder().ScaffoldAsync("repo", "docs", reviewGates: false, standards: ["csharp"]));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
         Assert.Contains("never-shipped", error.Message, StringComparison.Ordinal);

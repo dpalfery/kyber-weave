@@ -6,22 +6,6 @@ namespace KyberWeave.Contracts.Services;
 /// <summary>Checks and, when the mode allows, prepares the repository's CodeGraph index.</summary>
 public interface ICodeGraphProvisioner
 {
-    /// <summary>Runs the CodeGraph checks, preparing the index in every mode except <see cref="DoctorMode.Check"/>.</summary>
-    /// <param name="root">The resolved repository root.</param>
-    /// <param name="mode">The run's mode.</param>
-    /// <param name="options">The budgets and the CodeGraph executable name.</param>
-    /// <param name="executor">Runs the CodeGraph child, bounded by the index timeout.</param>
-    /// <param name="lockDirectory">Where the lock file lives.</param>
-    /// <param name="restore">Which tracked files an ensure run restores after writing them.</param>
-    /// <returns>The checks and whether the binary is missing.</returns>
-    CodeGraphOutcome Run(
-        string root,
-        DoctorMode mode,
-        DoctorOptions options,
-        IProcessExecutor executor,
-        string lockDirectory,
-        CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles);
-
     /// <summary>Runs the CodeGraph checks without blocking a thread, preparing the index in every mode except <see cref="DoctorMode.Check"/>.</summary>
     /// <param name="root">The resolved repository root.</param>
     /// <param name="mode">The run's mode.</param>

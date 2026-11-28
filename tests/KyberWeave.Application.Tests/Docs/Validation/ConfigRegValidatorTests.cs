@@ -47,9 +47,9 @@ public sealed class ConfigRegValidatorTests
     }
 
     [Fact]
-    public void AnAdoptedRegistryPointingAtNothingIsCONFIGREG001()
+    public async Task AnAdoptedRegistryPointingAtNothingIsCONFIGREG001()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         _repo.Memory.DeleteTreeNoFollow(Path.Combine(_repo.Root, "docs", "adr"));
 
         DiagnosticReport report = Validate(Configured());
@@ -64,9 +64,9 @@ public sealed class ConfigRegValidatorTests
     /// fail the host's own runs. The warning names the one command that finishes the migration.
     /// </summary>
     [Fact]
-    public void ALegacyReadmeStandardIsAWarningNamingTheMigrationCommand()
+    public async Task ALegacyReadmeStandardIsAWarningNamingTheMigrationCommand()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         KyberWeaveConfig config = Configured("dotnet");
         string agents = Path.Combine(_repo.Root, "AGENTS.md");
         Write("AGENTS.md", ConfigRegMarkdown.Splice(
@@ -99,9 +99,9 @@ public sealed class ConfigRegValidatorTests
     }
 
     [Fact]
-    public void AFreshlyScaffoldedRepositoryHasNoRegistryFindings()
+    public async Task AFreshlyScaffoldedRepositoryHasNoRegistryFindings()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
 
         DiagnosticReport report = Validate(Configured());
 
@@ -114,9 +114,9 @@ public sealed class ConfigRegValidatorTests
     /// not fall through to a contradiction finding on the text alone.
     /// </summary>
     [Fact]
-    public void ProseInsideTheGeneratedBlockIsNotChecked()
+    public async Task ProseInsideTheGeneratedBlockIsNotChecked()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         string agents = Path.Combine(_repo.Root, "AGENTS.md");
         string original = _repo.Memory.ReadAllText(agents);
         string edited = original.Replace(
@@ -132,9 +132,9 @@ public sealed class ConfigRegValidatorTests
     }
 
     [Fact]
-    public void ARenderedBlockThatNoLongerMatchesConfigurationIsCONFIGREG002()
+    public async Task ARenderedBlockThatNoLongerMatchesConfigurationIsCONFIGREG002()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
 
         // The repository declared a technology after the block was rendered: configuration
         // now publishes a property the file does not carry.
@@ -144,9 +144,9 @@ public sealed class ConfigRegValidatorTests
     }
 
     [Fact]
-    public void AnAutonomyValueIsNotPathCheckedAsARegistryProperty()
+    public async Task AnAutonomyValueIsNotPathCheckedAsARegistryProperty()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         KyberWeaveConfig config = Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" });
         Write("AGENTS.md", ConfigRegMarkdown.Splice(
             _repo.Memory.ReadAllText(Path.Combine(_repo.Root, "AGENTS.md")),
@@ -158,9 +158,9 @@ public sealed class ConfigRegValidatorTests
     }
 
     [Fact]
-    public void AMissingAutonomyLineIsCONFIGREG002()
+    public async Task AMissingAutonomyLineIsCONFIGREG002()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
 
         DiagnosticReport report = Validate(
             Configured().WithConfigReg(new ConfigRegConfig { Autonomy = "autonomous" }));
@@ -200,13 +200,13 @@ public sealed class ConfigRegValidatorTests
     /// </para>
     /// </remarks>
     [Fact]
-    public void AnOnboardingSettingPublishesAModePropertyTheValidatorAccepts()
+    public async Task AnOnboardingSettingPublishesAModePropertyTheValidatorAccepts()
     {
         Write(
             Path.Combine(".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\n  technologies:\n    - csharp\nonboarding: done\n");
 
-        _repo.Scaffolding.Scaffold(_repo.Root);
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root);
 
         string agents = _repo.Memory.ReadAllText(Path.Combine(_repo.Root, "AGENTS.md"));
         KyberWeaveConfig config = _repo.Config.Load(_repo.Root);
@@ -227,13 +227,13 @@ public sealed class ConfigRegValidatorTests
     /// <c>onboarding: none</c> or an empty value.
     /// </remarks>
     [Fact]
-    public void AnUnsetOnboardingSettingPublishesNoRegistryLine()
+    public async Task AnUnsetOnboardingSettingPublishesNoRegistryLine()
     {
         Write(
             Path.Combine(".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\n  technologies:\n    - csharp\n");
 
-        _repo.Scaffolding.Scaffold(_repo.Root);
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root);
 
         Assert.DoesNotContain(
             "onboarding",
@@ -242,9 +242,9 @@ public sealed class ConfigRegValidatorTests
     }
 
     [Fact]
-    public void AnUnclosedMarkerIsReportedRatherThanOverwritten()
+    public async Task AnUnclosedMarkerIsReportedRatherThanOverwritten()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         string agents = Path.Combine(_repo.Root, "AGENTS.md");
         _repo.Memory.WriteAllText(agents,
             $"# Working here\n\n{ConfigRegMarkdown.StartMarker}\n- **<docs-root>**: `docs`\n\n## Mine\n\nKeep me.\n");
@@ -262,9 +262,9 @@ public sealed class ConfigRegValidatorTests
     /// opted-in repository fail its own gate for adopting the feature.
     /// </summary>
     [Fact]
-    public void AnEnabledIntakeSettingRendersAModePropertyThatIsNotPathChecked()
+    public async Task AnEnabledIntakeSettingRendersAModePropertyThatIsNotPathChecked()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         KyberWeaveConfig config = IntakeEnabled();
         Write("AGENTS.md", ConfigRegMarkdown.Splice(
             _repo.Memory.ReadAllText(Path.Combine(_repo.Root, "AGENTS.md")),
@@ -286,9 +286,9 @@ public sealed class ConfigRegValidatorTests
     /// <c>docs init</c> fixes it, which is what <c>KW-CONFIG-REG-002</c> asks for.
     /// </summary>
     [Fact]
-    public void AnEnabledIntakeSettingMakesTheScaffoldedBlockStale()
+    public async Task AnEnabledIntakeSettingMakesTheScaffoldedBlockStale()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
 
         DiagnosticReport report = Validate(IntakeEnabled());
 
@@ -302,9 +302,9 @@ public sealed class ConfigRegValidatorTests
     /// the property and the command that fixes it, because the block is generated output.
     /// </summary>
     [Fact]
-    public void AChangedWorkerRosterMakesTheScaffoldedBlockStaleAndNamesDocsInit()
+    public async Task AChangedWorkerRosterMakesTheScaffoldedBlockStaleAndNamesDocsInit()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
 
         DiagnosticReport report = Validate(Tiered());
 
@@ -319,9 +319,9 @@ public sealed class ConfigRegValidatorTests
     /// validates: the finding above is about staleness, not about the roster being unpublishable.
     /// </summary>
     [Fact]
-    public void AChosenWorkerRosterIsPublishedAndValidates()
+    public async Task AChosenWorkerRosterIsPublishedAndValidates()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         KyberWeaveConfig config = Tiered();
         Write(
             "AGENTS.md",
@@ -355,9 +355,9 @@ public sealed class ConfigRegValidatorTests
     /// pointed at nothing.
     /// </summary>
     [Fact]
-    public void PathValuedRegistryEntriesAreStillPathCheckedWhenIntakeIsEnabled()
+    public async Task PathValuedRegistryEntriesAreStillPathCheckedWhenIntakeIsEnabled()
     {
-        _repo.Scaffolding.Scaffold(_repo.Root, "docs");
+        await _repo.Scaffolding.ScaffoldAsync(_repo.Root, "docs");
         _repo.Memory.DeleteTreeNoFollow(Path.Combine(_repo.Root, "docs", "adr"));
 
         DiagnosticReport report = Validate(IntakeEnabled());

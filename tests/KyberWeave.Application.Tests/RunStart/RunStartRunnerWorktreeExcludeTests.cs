@@ -247,14 +247,6 @@ public sealed class RunStartRunnerWorktreeExcludeTests
 
     private sealed class NoIndexGuard : IWorktreeIndexGuard
     {
-        public WorktreeIndexOutcome Ensure(
-            string root,
-            DoctorOptions options,
-            IProcessExecutor executor,
-            string lockDirectory,
-            CodeGraphRestore restore = CodeGraphRestore.AllWrittenFiles) =>
-            throw new NotSupportedException();
-
         public Task<WorktreeIndexOutcome> EnsureAsync(
             string root,
             DoctorOptions options,

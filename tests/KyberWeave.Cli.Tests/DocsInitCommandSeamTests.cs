@@ -250,18 +250,6 @@ public sealed class DocsInitCommandSeamTests : IDisposable
     {
         public Exception? Failure { get; set; }
 
-        public ScaffoldResult Scaffold(
-            string repoRoot,
-            string? docsRoot = null,
-            string owner = "unassigned",
-            bool force = false,
-            bool kyberStandards = false,
-            bool reviewGates = true,
-            IReadOnlyList<string>? standards = null) =>
-            Failure is not null
-                ? throw Failure
-                : new ScaffoldResult("docs", DocsRootSource.Configuration, [new ScaffoldedFile("docs/catalog.md", ScaffoldOutcome.Created)]);
-
         public Task<ScaffoldResult> ScaffoldAsync(
             string repoRoot,
             string? docsRoot = null,
@@ -273,8 +261,13 @@ public sealed class DocsInitCommandSeamTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(Scaffold(
-                repoRoot, docsRoot, owner, force, kyberStandards, reviewGates, standards));
+            if (Failure is not null)
+                throw Failure;
+
+            return Task.FromResult(new ScaffoldResult(
+                "docs",
+                DocsRootSource.Configuration,
+                [new ScaffoldedFile("docs/catalog.md", ScaffoldOutcome.Created)]));
         }
     }
 
