@@ -730,6 +730,7 @@ internal sealed class RunStartProbe : IDisposable
                 _ = services.AddSingleton<IProcessEnvironment>(environment);
                 _ = services.AddSingleton<IGitCommandRunner>(git);
                 _ = services.AddSingleton<IProcessExecutor>(executor);
+                _ = services.AddSingleton<IProcessRunner>(executor);
             }).Run(argv), width: UnwrappedWidth);
 
         return new ProbeResult(run.Result, run.Output, run.Output + "\n" + run.ErrorOutput);
@@ -926,8 +927,34 @@ internal sealed class RunStartProbe : IDisposable
     }
 
     /// <summary>Runs the CodeGraph index step's children against the probe's PATH, so the stub answers to its name.</summary>
-    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessExecutor
+    private sealed class ProbeExecutor(RunStartProbe probe, string path) : IProcessExecutor, IProcessRunner
     {
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+        {
+            ProcessStartInfo startInfo = new(request.Program)
+            {
+                WorkingDirectory = request.WorkingDirectory ?? string.Empty,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (string argument in request.Arguments)
+                startInfo.ArgumentList.Add(argument);
+
+            // A test fake of the async seam: it runs the probe's child the same way the sync view does.
+            ProcessResult result = Run(startInfo, request.StandardInput ?? string.Empty);
+            return Task.FromResult(new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)
+            {
+                StandardOutput = result.StandardOutput,
+                StandardError = result.StandardError,
+            });
+        }
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => ResolveOnPath(program, path);
+
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
         {
             string program = startInfo.FileName;

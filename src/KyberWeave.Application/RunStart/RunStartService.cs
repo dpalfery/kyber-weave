@@ -397,7 +397,8 @@ public sealed class RunStartService(
     {
         // A new worktree has no index of its own, so the index goes where the run works. A failure here does not
         // undo the branch: the operator repairs the index and the run continues in that tree.
-        IProcessRunner indexExecutor = requestedExecutor ?? new BoundedIndexExecutor(processes, DoctorOptions.Defaults.IndexTimeout);
+        // Every index child is bounded, whichever runner was handed in: a stalled codegraph must not hang run start.
+        IProcessRunner indexExecutor = new BoundedIndexExecutor(requestedExecutor ?? processes, DoctorOptions.Defaults.IndexTimeout);
         WorktreeIndexOutcome index = await worktreeIndex.EnsureAsync(
             indexTree,
             DoctorOptions.Defaults,
@@ -725,7 +726,7 @@ public sealed class RunStartService(
     private sealed class BoundedIndexExecutor(IProcessRunner inner, TimeSpan timeout) : IProcessRunner
     {
         public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken) =>
-            inner.RunAsync(request with { Timeout = timeout }, cancellationToken);
+            inner.RunAsync(request with { Timeout = request.Timeout ?? timeout }, cancellationToken);
 
         public bool IsAlive(int processId) => inner.IsAlive(processId);
 
