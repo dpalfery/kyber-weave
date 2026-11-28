@@ -1,6 +1,8 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Review;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -112,6 +114,86 @@ public sealed class DocsScaffolderSeamTests
 
         Assert.NotNull(plan);
         Assert.True(plan.ShouldWrite);
+    }
+
+    [Fact]
+    public async Task ScaffoldAsyncListsFilesWithoutBlockingAndScaffoldsReviewGates()
+    {
+        _disk.CreateDirectory(Root);
+        RecordingLister lister = new();
+        FileRepositoryTreeProbe tree = new(_disk, _paths, _environment);
+        FileKyberWeaveConfigRepository configs = new(tree, _disk, _paths, _environment);
+        DocsScaffolder scaffolder = new(
+            _store,
+            configs,
+            lister,
+            tree,
+            _paths,
+            _environment,
+            TimeProvider.System,
+            new KyberStandardsTemplateReader(_resources));
+
+        using CancellationTokenSource cts = new();
+        ScaffoldResult result = await scaffolder.ScaffoldAsync(
+            "repo",
+            "docs",
+            standards: ["csharp"],
+            cancellationToken: cts.Token);
+
+        Assert.Equal(0, lister.SyncCalls);
+        Assert.Equal(1, lister.AsyncCalls);
+        Assert.Equal(cts.Token, lister.LastToken);
+        Assert.NotNull(result.ReviewGates);
+        Assert.True(result.ReviewGates.Written);
+        Assert.True(_disk.FileExists($"{Root}/docs/catalog.md"));
+    }
+
+    [Fact]
+    public async Task ScaffoldAsyncHonorsCancellationBeforeListing()
+    {
+        _disk.CreateDirectory(Root);
+        RecordingLister lister = new();
+        DocsScaffolder scaffolder = new(
+            _store,
+            new FakeKyberWeaveConfigRepository(),
+            lister,
+            new NoProbe(),
+            _paths,
+            _environment,
+            TimeProvider.System,
+            new KyberStandardsTemplateReader(_resources));
+
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            scaffolder.ScaffoldAsync("repo", "docs", cancellationToken: cts.Token));
+
+        Assert.Equal(0, lister.SyncCalls);
+        Assert.Equal(0, lister.AsyncCalls);
+        Assert.False(_disk.FileExists($"{Root}/docs/catalog.md"));
+    }
+
+    private sealed class RecordingLister : IRepositoryFileLister
+    {
+        public int SyncCalls { get; private set; }
+        public int AsyncCalls { get; private set; }
+        public CancellationToken LastToken { get; private set; }
+
+        public IReadOnlyList<string> List(string repositoryRoot)
+        {
+            SyncCalls++;
+            return [];
+        }
+
+        public Task<IReadOnlyList<string>> ListAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default)
+        {
+            AsyncCalls++;
+            LastToken = cancellationToken;
+            return Task.FromResult<IReadOnlyList<string>>([]);
+        }
     }
 
     private sealed class NoFiles : IRepositoryFileLister
