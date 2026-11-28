@@ -511,7 +511,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             {
                 throw new InvalidOperationException(
                     "The documentation analysis cache could not be accessed. " + FailureDetail(exception) +
-                    " Check that the cache file and its folder are readable and writable.",
+                    " " + OperationalRemedy(exception),
                     exception);
             }
             catch (SqliteException exception)
@@ -871,6 +871,21 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
             || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase)
             || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The remedy for an operational failure, by its cause: access, space, disk I/O, or an interrupt.</summary>
+    /// <param name="exception">A failure <see cref="IsOperationalFailure"/> accepted.</param>
+    /// <returns>One sentence naming what to fix.</returns>
+    private static string OperationalRemedy(SqliteException exception)
+    {
+        string reason = exception.Message;
+        if (exception.SqliteErrorCode == 13 || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase))
+            return "Free disk space on the volume that holds the cache.";
+        if (exception.SqliteErrorCode == 10 || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase))
+            return "The disk reported an I/O error; check the volume that holds the cache.";
+        if (exception.SqliteErrorCode == 9 || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase))
+            return "The operation was interrupted; run the command again.";
+        return "Check that the cache file and its folder are readable and writable.";
     }
 
     private static string FailureDetail(SqliteException exception)
