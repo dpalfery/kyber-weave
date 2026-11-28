@@ -139,12 +139,13 @@ public sealed class StdioSession : IDisposable
     ///     blocking the calling thread.
     /// </summary>
     /// <param name="wait">The longest to wait for stderr to close.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
     /// <returns>The first non-empty stderr line, or <c>null</c> when there is none.</returns>
-    public async Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait)
+    public async Task<string?> WaitForFirstErrorLineAsync(TimeSpan wait, CancellationToken cancellationToken = default)
     {
         try
         {
-            await _firstErrorLine.WaitAsync(wait, _time).ConfigureAwait(false);
+            await _firstErrorLine.WaitAsync(wait, _time, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
@@ -182,7 +183,7 @@ public sealed class StdioSession : IDisposable
     {
         ThrowIfDisposed();
         if (_pendingRead is not null)
-            throw new InvalidOperationException("A previous read timed out; the session must be disposed, not read again.");
+            throw new InvalidOperationException("A previous read timed out or was cancelled; the session must be disposed, not read again.");
 
         TimeSpan remaining = _budget - _time.GetElapsedTime(_started);
         if (remaining <= TimeSpan.Zero)
@@ -227,7 +228,7 @@ public sealed class StdioSession : IDisposable
     {
         ThrowIfDisposed();
         if (_pendingRead is not null)
-            throw new InvalidOperationException("A previous read timed out; the session must be disposed, not read again.");
+            throw new InvalidOperationException("A previous read timed out or was cancelled; the session must be disposed, not read again.");
 
         TimeSpan remaining = _budget - _time.GetElapsedTime(_started);
         if (remaining <= TimeSpan.Zero)
@@ -249,6 +250,13 @@ public sealed class StdioSession : IDisposable
             // while the first one is in flight.
             _pendingRead = read;
             throw new TimeoutException("The child did not answer within the session budget.");
+        }
+        catch (OperationCanceledException) when (!read.IsCompleted)
+        {
+            // Cancelled while the read is still outstanding: keep it pending, as for a timeout, so no second
+            // read starts on the stream. The session is then unusable: dispose it.
+            _pendingRead = read;
+            throw;
         }
 
         return await read.ConfigureAwait(false)

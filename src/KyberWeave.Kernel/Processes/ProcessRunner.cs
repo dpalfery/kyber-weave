@@ -212,7 +212,7 @@ public static class ProcessRunner
                     await delay.ConfigureAwait(false);
                     timedOut = true;
                     TryKillTree(process);
-                    await WaitForIoBoundedAsync(io, clock).ConfigureAwait(false);
+                    await WaitForIoBoundedAsync(io).ConfigureAwait(false);
                     throw new TimeoutException(
                         $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds.");
                 }
@@ -524,11 +524,12 @@ public static class ProcessRunner
         return safe;
     }
 
-    private static async Task WaitForIoBoundedAsync(Task io, TimeProvider time)
+    private static async Task WaitForIoBoundedAsync(Task io)
     {
-        // The killed tree may never reap. Give the pipe reads the same five-second bound as Run,
-        // but do not surface their failure from a path that already reports a timeout.
-        Task delay = Task.Delay(TimeSpan.FromSeconds(5), time);
+        // The killed tree may never reap. Give the pipe reads the same five-second bound as Run, on the real
+        // clock like the reap bound in RunAsync's finally, so a caller's clock that stops advancing cannot
+        // hold the timeout path open. A failure here is not surfaced: the path already reports a timeout.
+        Task delay = Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None);
         _ = await Task.WhenAny(io, delay).ConfigureAwait(false);
     }
 
