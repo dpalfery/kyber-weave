@@ -918,6 +918,9 @@ internal sealed class RunStartProbe : IDisposable
             ProbeResult result = probe.RunGit(workingDirectory, [.. arguments], path);
             return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
         }
+
+        public Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Run(workingDirectory, arguments));
     }
 
     /// <summary>Runs the CodeGraph index step's children against the probe's PATH, so the stub answers to its name.</summary>

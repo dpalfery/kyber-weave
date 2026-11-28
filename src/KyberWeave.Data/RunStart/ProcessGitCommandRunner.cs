@@ -43,4 +43,29 @@ public sealed class ProcessGitCommandRunner(TimeSpan timeout) : IGitCommandRunne
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout);
         return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
     }
+
+    /// <inheritdoc />
+    public async Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        ProcessStartInfo startInfo = new(_gitExecutable)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = workingDirectory
+        };
+
+        foreach (string argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        ProcessResult result = await ProcessRunner.RunAsync(
+            startInfo,
+            string.Empty,
+            timeout,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return new GitOutcome(result.ExitCode, result.StandardOutput, result.StandardError);
+    }
 }

@@ -228,5 +228,8 @@ public sealed class ArbiterRepositoryLocatorTests
     private sealed class FakeGit(Func<string, IReadOnlyList<string>, GitOutcome> run) : IGitCommandRunner
     {
         public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments) => run(workingDirectory, arguments);
+
+        public Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+            Task.FromResult(run(workingDirectory, arguments));
     }
 }

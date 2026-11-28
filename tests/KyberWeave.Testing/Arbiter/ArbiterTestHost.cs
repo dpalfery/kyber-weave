@@ -73,6 +73,10 @@ internal sealed class FakeGitCommandRunner(Func<string, IReadOnlyList<string>, G
 {
     /// <inheritdoc />
     public GitOutcome Run(string workingDirectory, IReadOnlyList<string> arguments) => run(workingDirectory, arguments);
+
+    /// <inheritdoc />
+    public Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+        Task.FromResult(run(workingDirectory, arguments));
 }
 
 /// <summary>A credential store that forwards to whichever store a test currently holds.</summary>

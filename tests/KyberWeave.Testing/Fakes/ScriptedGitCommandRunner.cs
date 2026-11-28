@@ -31,6 +31,10 @@ internal sealed class ScriptedGitCommandRunner : IGitCommandRunner
         return _respond(workingDirectory, arguments);
     }
 
+    /// <inheritdoc />
+    public Task<GitOutcome> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Run(workingDirectory, arguments));
+
     /// <summary>Whether any invocation carried this exact argv.</summary>
     /// <param name="arguments">The argv to look for.</param>
     public bool Called(params string[] arguments) =>

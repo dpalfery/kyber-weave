@@ -1060,8 +1060,8 @@
     {
       "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
       "text": "ProcessStartInfo startInfo = new(_gitExecutable)",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. The executable is git resolved once to a full path from PATH (bare git when not found). Started by the ProcessRunner.Run call below, with the timeout the runner was built with (kyber-weave run start binds it to 120 s). argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
+      "count": 2,
+      "bound": "Builds only; nothing starts on this line. The executable is git resolved once to a full path from PATH (bare git when not found). One build per member, started by the ProcessRunner.Run and ProcessRunner.RunAsync calls below, with the timeout the runner was built with (kyber-weave run start binds it to 120 s). argv only, in the repository root, in a local checkout; the only network call is the one `git fetch origin --prune` the step exists for."
     },
     {
       "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
