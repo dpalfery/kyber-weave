@@ -284,7 +284,7 @@ public sealed class ArbiterServeService(
         return sb.ToString().TrimEnd();
     }
 
-    public string Status()
+    public async Task<string> StatusAsync(CancellationToken cancellationToken = default)
     {
         (KyberWeaveConfig? config, string? error) = Load();
         string provenance = Provenance(config);
@@ -316,7 +316,7 @@ public sealed class ArbiterServeService(
             // message only, never the stack, and never the key - it reports presence.
             key = !remote
                 ? "not needed (none or loopback provider)"
-                : context.KeyResolved(config)
+                : await context.KeyResolvedAsync(config, cancellationToken).ConfigureAwait(false)
                     ? "found"
                     : "missing (KW-ARB-KEY-001)";
         }

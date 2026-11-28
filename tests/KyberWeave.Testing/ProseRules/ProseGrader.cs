@@ -91,7 +91,7 @@ internal sealed class ProseGrader : IDisposable
         _recorder = new RecordingHandler(transport);
         _model = model;
         _floor = floor;
-        _client = new SystemOneClient(_recorder, endpoint, model, timeoutMs, TimeProvider.System, _ => key);
+        _client = new SystemOneClient(_recorder, endpoint, model, timeoutMs, TimeProvider.System, (_, _) => Task.FromResult<string?>(key));
     }
 
     /// <summary>Input tokens the provider reported so far.</summary>

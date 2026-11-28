@@ -131,7 +131,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
         };
 
     private ArbiterServeContext Context(string root, RecordingEngine engine, bool keyResolved = false) =>
-        new(root, engine, TextWriter.Null, _ => EnabledConfig(), _ => keyResolved);
+        new(root, engine, TextWriter.Null, _ => EnabledConfig(), (_, _) => Task.FromResult(keyResolved));
 
     /// <summary>
     /// Answers the shipped <c>KW-ARB-CLAIM-001</c> question in call order, so a test
@@ -169,7 +169,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
             _host.Engine(_ => provider, homeDirectory: () => root),
             TextWriter.Null,
             _ => EnabledConfig(),
-            _ => false));
+            (_, _) => Task.FromResult(false)));
 
     private string RecordedLines(string fileName) =>
         string.Join("\n", _host.State.Log.LinesOf(_host.ArbiterDirectory, fileName));
@@ -255,14 +255,14 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void EveryResponseLeadsWithTheProvenanceLine()
+    public async Task EveryResponseLeadsWithTheProvenanceLine()
     {
         string root = _host.RepoRoot;
         ArbiterTools tools = _host.Tools(Context(root, new RecordingEngine()));
         string prefix = $"provenance: root={FullPath(root)} ";
 
         Assert.StartsWith(prefix, tools.Rules(), StringComparison.Ordinal);
-        Assert.StartsWith(prefix, tools.Status(), StringComparison.Ordinal);
+        Assert.StartsWith(prefix, await tools.StatusAsync(), StringComparison.Ordinal);
         Assert.StartsWith(
             prefix,
             tools.Evaluate("lens.spawn", new ArbiterFacts { Target = "review-lens", Lens = ["security"] }),
@@ -385,7 +385,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
         _ = _host.WriteRepoConfig("arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
         ArbiterHookDecisionEngine realEngine = _host.Engine(homeDirectory: () => root);
         ArbiterTools tools = _host.Tools(new ArbiterServeContext(
-            root, realEngine, TextWriter.Null, _ => EnabledConfig(), _ => false));
+            root, realEngine, TextWriter.Null, _ => EnabledConfig(), (_, _) => Task.FromResult(false)));
 
         const string finding =
             "- id: security/key-in-argv\n" +
@@ -514,13 +514,13 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void StatusReportsTheRootRuleSetAndKeyStateButNeverTheKey()
+    public async Task StatusReportsTheRootRuleSetAndKeyStateButNeverTheKey()
     {
         string root = _host.RepoRoot;
         ArbiterTools tools = _host.Tools(new ArbiterServeContext(
-            root, new RecordingEngine(), TextWriter.Null, _ => RemoteConfig(), _ => true));
+            root, new RecordingEngine(), TextWriter.Null, _ => RemoteConfig(), (_, _) => Task.FromResult(true)));
 
-        string status = tools.Status();
+        string status = await tools.StatusAsync();
 
         Assert.Contains("rule-count: ", status, StringComparison.Ordinal);
         Assert.Contains("rule-set: ", status, StringComparison.Ordinal);
@@ -529,7 +529,7 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
     }
 
     [Fact]
-    public void StatusReportsTheEffectiveProviderAfterTheUserOverride()
+    public async Task StatusReportsTheEffectiveProviderAfterTheUserOverride()
     {
         // The hook resolves the key against the user override, so status must report the
         // provider and origin the key is resolved for, not the repository's (review 20.1, c).
@@ -543,10 +543,10 @@ public sealed class ArbiterMcpPackagingTests : IDisposable
             new RecordingEngine(),
             TextWriter.Null,
             _ => RemoteConfig(),
-            _ => true,
+            (_, _) => Task.FromResult(true),
             config => new FileArbiterUserSettings(_host.Files).ApplyTo(config.Arbiter.Provider, home)));
 
-        string status = tools.Status();
+        string status = await tools.StatusAsync();
 
         Assert.Contains("model=nimble-override", status, StringComparison.Ordinal);
         Assert.Contains("origin=https://override.example.test", status, StringComparison.Ordinal);

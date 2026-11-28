@@ -152,18 +152,18 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
-    public void ProviderNone_BuildsNoPicker_AndMakesNoCall()
+    public async Task ProviderNone_BuildsNoPicker_AndMakesNoCall()
     {
         string home = _repo.FullPath("home");
         FakeArbiterUserSettings settings = new();
         ConfiguredArbiterProviderFactory providers = Configured(settings);
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Null(await providers.TryCreateAsync(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
         Assert.Equal([home], settings.Asked);
     }
 
     [Fact]
-    public void AMalformedUserOverride_FallsBackToTheRepositoryProvider()
+    public async Task AMalformedUserOverride_FallsBackToTheRepositoryProvider()
     {
         // A broken override file must not break task-file generation: the repository's own provider stands, and
         // provider none then builds no picker rather than letting the parse failure escape.
@@ -173,17 +173,17 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             Override = (_, _) => throw new YamlException("The user override could not be read."),
         });
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Null(await providers.TryCreateAsync(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void AnEmptyHomeDirectory_IsTreatedAsNoOverride(string home)
+    public async Task AnEmptyHomeDirectory_IsTreatedAsNoOverride(string home)
     {
         ConfiguredArbiterProviderFactory providers = Configured(new FakeArbiterUserSettings());
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
+        Assert.Null(await providers.TryCreateAsync(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
     }
 
     private static ConfiguredArbiterProviderFactory Configured(FakeArbiterUserSettings settings) =>

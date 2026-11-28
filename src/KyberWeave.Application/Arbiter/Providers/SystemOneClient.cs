@@ -31,7 +31,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     private readonly Uri _endpoint;
     private readonly string _model;
     private readonly int _timeoutMs;
-    private readonly Func<Uri, string?>? _keyResolver;
+    private readonly Func<Uri, CancellationToken, Task<string?>>? _keyResolver;
     private readonly Func<ArbiterRule, ArbiterFactSet, string?>? _instructionsResolver;
 
     /// <summary>Creates a client over an injected handler, so tests stay offline.</summary>
@@ -40,7 +40,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     /// <param name="model">The answering model, which also selects the budget.</param>
     /// <param name="timeoutMs">The per-call budget covering retries.</param>
     /// <param name="clock">Dates the retry deadline and the <c>Retry-After</c> wait.</param>
-    /// <param name="keyResolver">Returns the key for the endpoint's origin, or null.</param>
+    /// <param name="keyResolver">Returns the key for the endpoint's origin, or null, without blocking a thread.</param>
     /// <param name="instructionsResolver">Resolves a rule's instructions from the facts of the trigger being asked.</param>
     public SystemOneClient(
         HttpMessageHandler handler,
@@ -48,7 +48,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         string model,
         int timeoutMs,
         TimeProvider clock,
-        Func<Uri, string?>? keyResolver = null,
+        Func<Uri, CancellationToken, Task<string?>>? keyResolver = null,
         Func<ArbiterRule, ArbiterFactSet, string?>? instructionsResolver = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -75,14 +75,14 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
     /// <param name="model">The answering model, which also selects the budget.</param>
     /// <param name="timeoutMs">The per-call budget covering retries.</param>
     /// <param name="clock">Dates the retry deadline and the <c>Retry-After</c> wait.</param>
-    /// <param name="keyResolver">Returns the key for the endpoint's origin, or null.</param>
+    /// <param name="keyResolver">Returns the key for the endpoint's origin, or null, without blocking a thread.</param>
     public static SystemOneClient CreateForProduct(
         HttpMessageHandler handler,
         Uri endpoint,
         string model,
         int timeoutMs,
         TimeProvider clock,
-        Func<Uri, string?>? keyResolver) =>
+        Func<Uri, CancellationToken, Task<string?>>? keyResolver) =>
         new(handler, endpoint, model, timeoutMs, clock, keyResolver, LensInstructions.Resolve);
 
     /// <inheritdoc />
@@ -126,7 +126,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         int attempt = 0;
         while (true)
         {
-            using HttpRequestMessage request = CreateRequest(requestUri, built.BodyJson);
+            using HttpRequestMessage request = await CreateRequestAsync(requestUri, built.BodyJson, cancellationToken).ConfigureAwait(false);
             HttpResponseMessage? response = await SendAsync(request, timeout.Token, cancellationToken).ConfigureAwait(false);
             if (response is null)
             {
@@ -180,7 +180,7 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         }
     }
 
-    private HttpRequestMessage CreateRequest(Uri requestUri, string bodyJson)
+    private async Task<HttpRequestMessage> CreateRequestAsync(Uri requestUri, string bodyJson, CancellationToken cancellationToken)
     {
         HttpRequestMessage request = new(HttpMethod.Post, requestUri)
         {
@@ -188,7 +188,9 @@ public sealed class SystemOneClient : IArbiterProvider, IDisposable
         };
         // Origin-bound: the key goes out only for a remote endpoint whose
         // origin resolved one. A loopback endpoint therefore sends none.
-        string? key = _keyResolver?.Invoke(requestUri);
+        string? key = _keyResolver is null
+            ? null
+            : await _keyResolver(requestUri, cancellationToken).ConfigureAwait(false);
         if (!requestUri.IsLoopback && !string.IsNullOrWhiteSpace(key))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);

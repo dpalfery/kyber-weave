@@ -1455,11 +1455,12 @@ internal sealed class ArbiterProviderComposer
         _homeDirectory = homeDirectory;
     }
 
-    internal Func<Uri, string?> KeyResolverFor(KyberWeaveConfig config)
+    internal Func<Uri, CancellationToken, Task<string?>> KeyResolverFor(KyberWeaveConfig config)
     {
         ICredentialStore store = _credentialStoreFactory();
         string? userOverrideEndpoint = UserOverrideEndpoint(config);
-        return uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, _environment, userOverrideEndpoint);
+        return (uri, cancellationToken) => ArbiterKeyResolver.ResolveAsync(
+            uri.ToString(), store, _environment, userOverrideEndpoint, cancellationToken);
     }
 
     internal IArbiterProvider CreateProvider(KyberWeaveConfig config)
@@ -1477,7 +1478,7 @@ internal sealed class ArbiterProviderComposer
                 $"'{config.Arbiter.Provider.Endpoint}' is not an absolute URL.");
         }
 
-        Func<Uri, string?> keyResolver = KeyResolverFor(config);
+        Func<Uri, CancellationToken, Task<string?>> keyResolver = KeyResolverFor(config);
         return _providers.CreateSystemOne(
             endpoint,
             config.Arbiter.Provider.Model,

@@ -22,8 +22,9 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
     private const int LocalMachinePersist = 2;
 
     /// <inheritdoc />
-    public string? Read(string origin)
+    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException(
@@ -36,7 +37,7 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
 
         if (!NativeMethods.CredReadW(target, GenericType, 0, out nint credential) || credential == 0)
         {
-            return null;
+            return new ValueTask<string?>((string?)null);
         }
 
         try
@@ -44,7 +45,7 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
             NativeCredential stored = Marshal.PtrToStructure<NativeCredential>(credential);
             if (stored.CredentialBlobSize <= 0 || stored.CredentialBlob == 0)
             {
-                return null;
+                return new ValueTask<string?>((string?)null);
             }
 
             byte[] bytes = new byte[stored.CredentialBlobSize];
@@ -52,7 +53,7 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
             try
             {
                 string key = Encoding.UTF8.GetString(bytes);
-                return string.IsNullOrEmpty(key) ? null : key;
+                return new ValueTask<string?>(string.IsNullOrEmpty(key) ? null : key);
             }
             finally
             {
@@ -66,8 +67,9 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
     }
 
     /// <inheritdoc />
-    public void Write(string origin, string key)
+    public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException(
@@ -111,20 +113,7 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
             Marshal.FreeHGlobal(targetPtr);
             Array.Clear(bytes);
         }
-    }
 
-    /// <inheritdoc />
-    public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<string?>(Read(origin));
-    }
-
-    /// <inheritdoc />
-    public ValueTask WriteAsync(string origin, string key, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        Write(origin, key);
         return new ValueTask();
     }
 
@@ -132,23 +121,6 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
     public ValueTask DeleteAsync(string origin, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Delete(origin);
-        return new ValueTask();
-    }
-
-    private static string TargetFor(string origin) => $"{Service}:{origin}";
-
-    private static void RejectLineBreak(string value, string parameterName)
-    {
-        if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
-        {
-            throw new ArgumentException("A credential origin or key cannot contain a line break.", parameterName);
-        }
-    }
-
-    /// <inheritdoc />
-    public void Delete(string origin)
-    {
         if (!OperatingSystem.IsWindows())
         {
             throw new PlatformNotSupportedException(
@@ -159,16 +131,26 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
         RejectLineBreak(origin, nameof(origin));
 
         if (NativeMethods.CredDeleteW(TargetFor(origin), GenericType, 0))
-            return;
+            return new ValueTask();
 
         // Deleting an absent entry is already the desired end state, so item-not-found
         // succeeds; any other failure surfaces, or a lost key would read as removed.
         const int errorNotFound = 1168;
         if (Marshal.GetLastWin32Error() == errorNotFound)
-            return;
+            return new ValueTask();
 
         throw new InvalidOperationException(
             "The Windows credential store delete failed.");
+    }
+
+    private static string TargetFor(string origin) => $"{Service}:{origin}";
+
+    private static void RejectLineBreak(string value, string parameterName)
+    {
+        if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A credential origin or key cannot contain a line break.", parameterName);
+        }
     }
 
     /// <summary>Raw <c>advapi32</c> entry points. Windows-only; callers gate first.</summary>

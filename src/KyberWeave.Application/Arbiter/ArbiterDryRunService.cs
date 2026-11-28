@@ -23,16 +23,25 @@ public sealed class ArbiterDryRunService(
     TimeProvider clock) : IArbiterDryRunService
 {
     /// <inheritdoc />
-    public IArbiterProvider? CreateProvider(
+    public Task<ArbiterProviderCreation?> CreateProviderAsync(
         KyberWeaveConfig config,
         string? providerOverride,
         DiagnosticReport report,
-        out Func<Uri, string?> keyResolver)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(report);
 
-        keyResolver = keys.CreateKeyResolver(config);
+        return BuildProviderAsync(config, providerOverride, report, cancellationToken);
+    }
+
+    private async Task<ArbiterProviderCreation?> BuildProviderAsync(
+        KyberWeaveConfig config,
+        string? providerOverride,
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
+    {
+        Func<Uri, CancellationToken, Task<string?>> keyResolver = keys.CreateKeyResolverAsync(config);
 
         ArbiterProviderKind kind = config.Arbiter.Provider.Kind;
         if (providerOverride is not null)
@@ -59,7 +68,7 @@ public sealed class ArbiterDryRunService(
 
         if (kind == ArbiterProviderKind.None)
         {
-            return new NoneProvider();
+            return new ArbiterProviderCreation(new NoneProvider(), keyResolver);
         }
 
         if (!Uri.TryCreate(config.Arbiter.Provider.Endpoint, UriKind.Absolute, out Uri? endpoint))
@@ -73,12 +82,13 @@ public sealed class ArbiterDryRunService(
             return null;
         }
 
-        return providers.CreateSystemOne(
+        IArbiterProvider provider = providers.CreateSystemOne(
             handlers.Create(),
             endpoint,
             config.Arbiter.Provider.Model,
             config.Arbiter.Provider.TimeoutMs,
             keyResolver);
+        return new ArbiterProviderCreation(provider, keyResolver);
     }
 
     /// <inheritdoc />
@@ -86,28 +96,30 @@ public sealed class ArbiterDryRunService(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "The provider's lifetime transfers to the returned session, which the eval command disposes.")]
-    public IArbiterEvaluatorSession? CreateEvaluator(
+    public async Task<IArbiterEvaluatorSession?> CreateEvaluatorAsync(
         KyberWeaveConfig config,
         string repositoryRoot,
         string? providerOverride,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(report);
 
-        IArbiterProvider? provider = CreateProvider(config, providerOverride, report, out Func<Uri, string?> keyResolver);
-        if (provider is null)
+        ArbiterProviderCreation? creation = await CreateProviderAsync(config, providerOverride, report, cancellationToken)
+            .ConfigureAwait(false);
+        if (creation is null)
             return null;
 
         string arbiterDirectory = ArbiterStateDirectory.ForProject(repositoryRoot);
         IArbiterEvaluator evaluator = evaluators.Create(
-            provider,
-            keyResolver,
+            creation.Provider,
+            creation.KeyResolver,
             arbiterDirectory,
             new ArbiterCliGitFacts(),
             new ArbiterCliPlanReader(planFacts, repositoryRoot),
             clock);
-        return new ArbiterEvaluatorSession(evaluator, provider as IDisposable);
+        return new ArbiterEvaluatorSession(evaluator, creation.Provider as IDisposable);
     }
 
     /// <summary>One dry-run evaluator with its owned transport.</summary>

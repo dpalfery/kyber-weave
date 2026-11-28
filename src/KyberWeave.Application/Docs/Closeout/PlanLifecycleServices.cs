@@ -16,14 +16,6 @@ public sealed class PlanCloseoutService(
     IProcessEnvironment environment) : IPlanCloseoutService
 {
     /// <inheritdoc />
-    public PlanCloseoutOutcome Run(string repoRoot, KyberWeaveConfig config, string planPath, DateOnly archiveDate, bool archive)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        ArgumentNullException.ThrowIfNull(config);
-        return CreateCloseout(repoRoot, config).Run(planPath, archiveDate, archive);
-    }
-
-    /// <inheritdoc />
     public Task<PlanCloseoutOutcome> RunAsync(
         string repoRoot,
         KyberWeaveConfig config,
@@ -51,22 +43,6 @@ public sealed class PlanFinalizeService(
     IPathResolver paths,
     IProcessEnvironment environment) : IPlanFinalizeService
 {
-    /// <inheritdoc />
-    public PlanFinalizeOutcome Run(
-        string repoRoot,
-        KyberWeaveConfig config,
-        string planPath,
-        PlanApprovalMode mode,
-        string? approval,
-        DateOnly approvalDate)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        ArgumentNullException.ThrowIfNull(config);
-        // The decision model, when one is configured, picks each unassigned task's agent as the task file is written.
-        using IPlanTaskAgentPicker? picker = pickers.ForConfig(config);
-        return CreateFinalize(repoRoot, config, picker).Run(planPath, mode, approval, approvalDate);
-    }
-
     /// <inheritdoc />
     public async Task<PlanFinalizeOutcome> RunAsync(
         string repoRoot,

@@ -36,7 +36,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     public const string HookErrorCode = "KW-ARB-HOOK-001";
 
     private readonly IArbiterProvider _provider;
-    private readonly Func<Uri, string?> _keyResolver;
+    private readonly Func<Uri, CancellationToken, Task<string?>> _keyResolver;
     private readonly IArbiterLedger _ledger;
     private readonly IArbiterDecisionLog _decisionLog;
     private readonly IArbiterGitFacts _gitFacts;
@@ -52,7 +52,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
     /// <summary>Creates an evaluator over already-constructed collaborators.</summary>
     /// <param name="provider">The step-1 provider.</param>
-    /// <param name="keyResolver">Resolves the provider key for an endpoint; the key is never logged.</param>
+    /// <param name="keyResolver">Resolves the provider key for an endpoint without blocking; the key is never logged.</param>
     /// <param name="ledger">The in-flight ledger.</param>
     /// <param name="decisionLog">The decision log.</param>
     /// <param name="gitFacts">Git-derived facts.</param>
@@ -71,7 +71,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <param name="files">The file system the standards are read through to resolve a technology's parent; null resolves none.</param>
     public ArbiterEvaluator(
         IArbiterProvider provider,
-        Func<Uri, string?> keyResolver,
+        Func<Uri, CancellationToken, Task<string?>> keyResolver,
         IArbiterLedger ledger,
         IArbiterDecisionLog decisionLog,
         IArbiterGitFacts gitFacts,
@@ -159,7 +159,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             }
 
             // Origin-bound key check: the key is resolved but never stored or logged.
-            Recording.ResolveKey(_keyResolver, config);
+            await Recording.ResolveKeyAsync(_keyResolver, config, cancellationToken).ConfigureAwait(false);
 
             List<ArbiterDispatchEvaluation> dispatches = new(classifications.Count);
             int count = Math.Min(classifications.Count, prompts.Count);
@@ -1879,7 +1879,10 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         internal static ArbiterRunScope? RunScopeOf(IArbiterGitFacts gitFacts, ArbiterEvent ev) =>
             (gitFacts as IArbiterRunScopeSource)?.RunScopeOf(ev.Cwd);
 
-        internal static void ResolveKey(Func<Uri, string?> keyResolver, KyberWeaveConfig config)
+        internal static async Task ResolveKeyAsync(
+            Func<Uri, CancellationToken, Task<string?>> keyResolver,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken)
         {
             // The none provider sends nothing, so it has no key to prove. Reading the OS
             // credential store for it would fail on hosts without that store, such as a
@@ -1892,7 +1895,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             if (Uri.TryCreate(config.Arbiter.Provider.Endpoint, UriKind.Absolute, out Uri? endpoint))
             {
                 // The key itself is never stored, logged, or interpolated anywhere.
-                _ = keyResolver(endpoint);
+                _ = await keyResolver(endpoint, cancellationToken).ConfigureAwait(false);
             }
         }
 

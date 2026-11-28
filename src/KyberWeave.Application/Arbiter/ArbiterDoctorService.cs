@@ -51,30 +51,6 @@ public sealed class ArbiterDoctorService(
     private static readonly TimeSpan SameDeploymentWindow = TimeSpan.FromMinutes(10);
 
     /// <inheritdoc />
-    public ArbiterDoctorReport Inspect(string repositoryPath, string? configFile, DiagnosticReport report)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-
-        _ = configs.TryResolve(repositoryPath, configFile, report, out KyberWeaveConfig config, out string? configPath);
-        string home = environment.HomeDirectory;
-        IReadOnlyList<string> globalTargets = userConfig.ReadGlobalTargets(home);
-        string root = locator.ResolveRepositoryRoot(repositoryPath);
-        HarnessGatingReport gatingReport = gating.Build(root, home, config, globalTargets);
-
-        List<ArbiterDoctorLine> lines = [];
-        BeginChecks(config, configPath, home, report);
-        CheckKey(config, report, lines);
-        CheckLogIgnored(root, report, lines);
-        CheckBinary(report, lines);
-        CheckGuard(config, root, report, lines);
-        CheckProjectHooks(gatingReport, report, lines);
-        CheckModelTargets(config, home, globalTargets, report, lines);
-        CheckAdvisoryPostDispatchTargets(lines);
-
-        return Report(config, globalTargets, gatingReport, lines);
-    }
-
-    /// <inheritdoc />
     public async Task<ArbiterDoctorReport> InspectAsync(
         string repositoryPath,
         string? configFile,
@@ -399,33 +375,6 @@ public sealed class ArbiterDoctorService(
         report.AddRange(RuleValidator.CheckProviderTimeout(config.Arbiter.Provider, effective));
     }
 
-    private void CheckKey(KyberWeaveConfig config, DiagnosticReport report, List<ArbiterDoctorLine> lines)
-    {
-        ArbiterProviderConfig provider = config.Arbiter.Provider;
-        if (provider.Kind == ArbiterProviderKind.None || ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint))
-        {
-            lines.Add(new ArbiterDoctorLine(ArbiterDoctorStatus.Ok, "Key", null, "none needed (none or loopback provider)."));
-            return;
-        }
-
-        string? key;
-        try
-        {
-            key = keys.ResolveKey(config, provider.Endpoint);
-        }
-        catch (SecretServiceUnavailableException exception)
-        {
-            ReportKeyStoreUnavailable(exception, report, lines);
-            return;
-        }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            key = null;
-        }
-
-        ReportKey(key, provider, report, lines);
-    }
-
     private async Task CheckKeyAsync(
         KyberWeaveConfig config,
         DiagnosticReport report,
@@ -506,9 +455,6 @@ public sealed class ArbiterDoctorService(
             "arbiter.provider"));
     }
 
-    private void CheckLogIgnored(string root, DiagnosticReport report, List<ArbiterDoctorLine> lines) =>
-        ReportLogIgnored(IsIgnoredByGit(root), report, lines);
-
     private async Task CheckLogIgnoredAsync(
         string root,
         DiagnosticReport report,
@@ -540,20 +486,6 @@ public sealed class ArbiterDoctorService(
             $"{ArbiterStateDirectory.ProjectRelativeDirectory}/ is not ignored by git; the ledger and decision log must not be committed.",
             ArbiterStateDirectory.ProjectRelativeDirectory,
             Hint: $"Add {ArbiterStateDirectory.ProjectRelativeDirectory}/ to .gitignore."));
-    }
-
-    private bool IsIgnoredByGit(string root)
-    {
-        try
-        {
-            GitOutcome result = git.Run(root, ["check-ignore", "-q", ArbiterStateDirectory.ProjectRelativeDirectory]);
-            return result.ExitCode == 0;
-        }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
-        {
-            // Without git there is no evidence the log is ignored: warn, the safe direction.
-            return false;
-        }
     }
 
     private async Task<bool> IsIgnoredByGitAsync(string root, CancellationToken cancellationToken)

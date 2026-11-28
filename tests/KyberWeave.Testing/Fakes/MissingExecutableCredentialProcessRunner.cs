@@ -12,14 +12,6 @@ namespace KyberWeave.Tests.Fakes;
 internal sealed class MissingExecutableCredentialProcessRunner : ICredentialProcessRunner
 {
     /// <inheritdoc/>
-    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
-    {
-        ArgumentNullException.ThrowIfNull(startInfo);
-        ArgumentNullException.ThrowIfNull(standardInput);
-        throw Missing(startInfo);
-    }
-
-    /// <inheritdoc/>
     public Task<ProcessResult> RunAsync(
         ProcessStartInfo startInfo,
         string standardInput,

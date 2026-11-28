@@ -53,7 +53,7 @@ public sealed class ArbiterEvaluatorLatencyTests
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             new InFlightLedger(Directory, _log),
             new DecisionLog(Directory, _log),
             new PassThroughGitFacts(),

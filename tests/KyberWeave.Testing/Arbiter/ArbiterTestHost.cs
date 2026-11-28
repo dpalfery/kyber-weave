@@ -84,15 +84,6 @@ internal sealed class FakeGitCommandRunner(Func<string, IReadOnlyList<string>, G
 internal sealed class ForwardingCredentialStore(Func<ICredentialStore> current) : ICredentialStore
 {
     /// <inheritdoc />
-    public string? Read(string origin) => current().Read(origin);
-
-    /// <inheritdoc />
-    public void Write(string origin, string key) => current().Write(origin, key);
-
-    /// <inheritdoc />
-    public void Delete(string origin) => current().Delete(origin);
-
-    /// <inheritdoc />
     public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default) =>
         current().ReadAsync(origin, cancellationToken);
 

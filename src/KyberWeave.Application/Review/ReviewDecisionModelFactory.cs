@@ -75,9 +75,11 @@ public sealed class ReviewDecisionModelFactory(
         }
 
         DiagnosticReport ignored = new();
-        IArbiterProvider? client = arbiter.CreateProvider(config, null, ignored, out _);
-        return client is null
+        ArbiterProviderCreation? creation = await arbiter
+            .CreateProviderAsync(config, null, ignored, cancellationToken)
+            .ConfigureAwait(false);
+        return creation is null
             ? Create(null, [], null, clock, "the provider could not be built", cachePath)
-            : Create(client, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
+            : Create(creation.Provider, config.Arbiter.Rules, ArbiterStateDirectory.ForProject(repositoryRoot), clock, cachePath: cachePath);
     }
 }

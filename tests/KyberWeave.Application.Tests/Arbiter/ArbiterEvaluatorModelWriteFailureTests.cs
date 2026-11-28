@@ -78,7 +78,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests
             Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
             Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
         },
-        _ => null,
+        (_, _) => Task.FromResult<string?>(null),
         _arbiter.LedgerStore,
         _arbiter.DecisionLog,
         new NoGitFacts(),

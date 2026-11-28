@@ -28,7 +28,7 @@ public sealed class ArbiterCredentialStoreArgvTests
         ["lookup", "service", "kyber-weave-arbiter", "account", "https://api.typesafe.ai"];
 
     [Fact]
-    public void MacRead_TreatsTheItemNotFoundStatusAsAnAbsentKey()
+    public async Task MacRead_TreatsTheItemNotFoundStatusAsAnAbsentKey()
     {
         // `security find-generic-password` exits 44 (errSecItemNotFound) when nothing
         // matches. Verified against the real tool: it exits 44, not 1.
@@ -36,7 +36,7 @@ public sealed class ArbiterCredentialStoreArgvTests
         runner.NextResult = new ProcessResult(44, string.Empty, "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.");
         MacKeychainCredentialStore store = new(runner);
 
-        Assert.Null(store.Read("https://api.typesafe.ai"));
+        Assert.Null(await store.ReadAsync("https://api.typesafe.ai"));
     }
 
     [Theory]
@@ -47,25 +47,25 @@ public sealed class ArbiterCredentialStoreArgvTests
     [InlineData(2)]
     [InlineData(36)]
     [InlineData(127)]
-    public void MacRead_RaisesRatherThanReportingAnAbsentKey(int exitCode)
+    public async Task MacRead_RaisesRatherThanReportingAnAbsentKey(int exitCode)
     {
         FakeCredentialProcessRunner runner = new();
         runner.NextResult = new ProcessResult(exitCode, string.Empty, "security: some other failure");
         MacKeychainCredentialStore store = new(runner);
 
-        InvalidOperationException error = Assert.Throws<KeychainUnavailableException>(
-            () => store.Read("https://api.typesafe.ai"));
+        InvalidOperationException error = await Assert.ThrowsAsync<KeychainUnavailableException>(
+            () => store.ReadAsync("https://api.typesafe.ai").AsTask());
         Assert.Contains(exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MacWriteKeepsKeyOnStdinOnly()
+    public async Task MacWriteKeepsKeyOnStdinOnly()
     {
         FakeCredentialProcessRunner runner = new();
         runner.NextResult = new ProcessResult(0, string.Empty, string.Empty);
         MacKeychainCredentialStore store = new(runner);
 
-        store.Write("https://api.typesafe.ai", SentinelKey);
+        await store.WriteAsync("https://api.typesafe.ai", SentinelKey);
 
         CapturedCredentialCall call = Assert.Single(runner.Calls);
         Assert.Equal("security", call.FileName);
@@ -78,51 +78,51 @@ public sealed class ArbiterCredentialStoreArgvTests
     }
 
     [Fact]
-    public void MacWriteRejectsANonAsciiKeyBeforeRunningSecurity()
+    public async Task MacWriteRejectsANonAsciiKeyBeforeRunningSecurity()
     {
         FakeCredentialProcessRunner runner = new();
         MacKeychainCredentialStore store = new(runner);
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => store.Write("https://api.typesafe.ai", "sk-ünïcø∂é"));
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.WriteAsync("https://api.typesafe.ai", "sk-ünïcø∂é").AsTask());
 
         Assert.Empty(runner.Calls);
         Assert.Contains("ASCII", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void MacReadRejectsAnOriginWithALineBreakBeforeRunningSecurity()
+    public async Task MacReadRejectsAnOriginWithALineBreakBeforeRunningSecurity()
     {
         FakeCredentialProcessRunner runner = new();
         MacKeychainCredentialStore store = new(runner);
 
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("https://kyber-weave\ncontract.invalid"));
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync("https://kyber-weave\ncontract.invalid").AsTask());
 
         Assert.Empty(runner.Calls);
     }
 
     [Fact]
-    public void LinuxRejectsALineBreakInTheOriginOrKeyBeforeRunningSecretTool()
+    public async Task LinuxRejectsALineBreakInTheOriginOrKeyBeforeRunningSecretTool()
     {
         FakeCredentialProcessRunner runner = new();
         SecretServiceCredentialStore store = new(runner);
 
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("https://kyber-weave\ncontract.invalid"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("https://kyber-weave\rcontract.invalid", "sk-contract"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete("https://kyber-weave\ncontract.invalid"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("https://api.typesafe.ai", "line-one\nline-two"));
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync("https://kyber-weave\ncontract.invalid").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync("https://kyber-weave\rcontract.invalid", "sk-contract").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.DeleteAsync("https://kyber-weave\ncontract.invalid").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync("https://api.typesafe.ai", "line-one\nline-two").AsTask());
 
         Assert.Empty(runner.Calls);
     }
 
     [Fact]
-    public void MacReadUsesExactArgvAndReturnsTrimmedStdout()
+    public async Task MacReadUsesExactArgvAndReturnsTrimmedStdout()
     {
         FakeCredentialProcessRunner runner = new();
         runner.NextResult = new ProcessResult(0, "stored-key\n", string.Empty);
         MacKeychainCredentialStore store = new(runner);
 
-        string? key = store.Read("https://api.typesafe.ai");
+        string? key = await store.ReadAsync("https://api.typesafe.ai");
 
         Assert.Equal("stored-key", key);
         CapturedCredentialCall call = Assert.Single(runner.Calls);
@@ -131,29 +131,29 @@ public sealed class ArbiterCredentialStoreArgvTests
     }
 
     [Fact]
-    public void MacReadReturnsNullWhenEntryMissing()
+    public async Task MacReadReturnsNullWhenEntryMissing()
     {
         FakeCredentialProcessRunner failing = new();
         failing.NextResult = new ProcessResult(44, string.Empty, "not found");
         MacKeychainCredentialStore missing = new(failing);
 
-        Assert.Null(missing.Read("https://api.typesafe.ai"));
+        Assert.Null(await missing.ReadAsync("https://api.typesafe.ai"));
 
         FakeCredentialProcessRunner empty = new();
         empty.NextResult = new ProcessResult(0, "\n", string.Empty);
         MacKeychainCredentialStore blank = new(empty);
 
-        Assert.Null(blank.Read("https://api.typesafe.ai"));
+        Assert.Null(await blank.ReadAsync("https://api.typesafe.ai"));
     }
 
     [Fact]
-    public void LinuxWriteKeepsKeyOnStdinOnly()
+    public async Task LinuxWriteKeepsKeyOnStdinOnly()
     {
         FakeCredentialProcessRunner runner = new();
         runner.NextResult = new ProcessResult(0, string.Empty, string.Empty);
         SecretServiceCredentialStore store = new(runner);
 
-        store.Write("https://api.typesafe.ai", SentinelKey);
+        await store.WriteAsync("https://api.typesafe.ai", SentinelKey);
 
         CapturedCredentialCall call = Assert.Single(runner.Calls);
         Assert.Equal("secret-tool", call.FileName);
@@ -163,13 +163,13 @@ public sealed class ArbiterCredentialStoreArgvTests
     }
 
     [Fact]
-    public void LinuxReadUsesExactArgvAndReturnsTrimmedStdout()
+    public async Task LinuxReadUsesExactArgvAndReturnsTrimmedStdout()
     {
         FakeCredentialProcessRunner runner = new();
         runner.NextResult = new ProcessResult(0, "stored-key\n", string.Empty);
         SecretServiceCredentialStore store = new(runner);
 
-        string? key = store.Read("https://api.typesafe.ai");
+        string? key = await store.ReadAsync("https://api.typesafe.ai");
 
         Assert.Equal("stored-key", key);
         CapturedCredentialCall call = Assert.Single(runner.Calls);
@@ -178,28 +178,28 @@ public sealed class ArbiterCredentialStoreArgvTests
     }
 
     [Fact]
-    public void LinuxReadReturnsNullWhenEntryMissing()
+    public async Task LinuxReadReturnsNullWhenEntryMissing()
     {
         FakeCredentialProcessRunner failing = new();
         failing.NextResult = new ProcessResult(1, string.Empty, "no match");
         SecretServiceCredentialStore missing = new(failing);
 
-        Assert.Null(missing.Read("https://api.typesafe.ai"));
+        Assert.Null(await missing.ReadAsync("https://api.typesafe.ai"));
     }
 
     [Fact]
-    public void LinuxReadWithEmptyStderrIsAFailureNotAnAbsentKey()
+    public async Task LinuxReadWithEmptyStderrIsAFailureNotAnAbsentKey()
     {
         FakeCredentialProcessRunner failing = new();
         failing.NextResult = new ProcessResult(1, string.Empty, string.Empty);
         SecretServiceCredentialStore store = new(failing);
 
-        Assert.Throws<SecretServiceUnavailableException>(
-            () => store.Read("https://api.typesafe.ai"));
+        _ = await Assert.ThrowsAsync<SecretServiceUnavailableException>(
+            () => store.ReadAsync("https://api.typesafe.ai").AsTask());
     }
 
     [Fact]
-    public void LinuxReadSurfacesALookupFailureInsteadOfReportingAnAbsentKey()
+    public async Task LinuxReadSurfacesALookupFailureInsteadOfReportingAnAbsentKey()
     {
         FakeCredentialProcessRunner failing = new();
         failing.NextResult = new ProcessResult(
@@ -208,15 +208,15 @@ public sealed class ArbiterCredentialStoreArgvTests
             "Cannot autolaunch D-Bus without X11 $DISPLAY");
         SecretServiceCredentialStore store = new(failing);
 
-        SecretServiceUnavailableException ex =
-            Assert.Throws<SecretServiceUnavailableException>(() => store.Read("https://api.typesafe.ai"));
+        SecretServiceUnavailableException ex = await Assert.ThrowsAsync<SecretServiceUnavailableException>(
+            () => store.ReadAsync("https://api.typesafe.ai").AsTask());
 
         Assert.Contains("exit code 1", ex.Message, StringComparison.Ordinal);
         Assert.Contains("D-Bus", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WindowsStoreDeclaresAdvapi32EntryPointsAndIsGatedByOperatingSystem()
+    public async Task WindowsStoreDeclaresAdvapi32EntryPointsAndIsGatedByOperatingSystem()
     {
         Type? native = typeof(WindowsCredentialStore).GetNestedType("NativeMethods", BindingFlags.NonPublic);
         Assert.NotNull(native);
@@ -231,15 +231,15 @@ public sealed class ArbiterCredentialStoreArgvTests
         WindowsCredentialStore store = new();
         if (OperatingSystem.IsWindows())
         {
-            string? missing = store.Read("https://missing-origin.invalid");
+            string? missing = await store.ReadAsync("https://missing-origin.invalid");
             Assert.Null(missing);
         }
         else
         {
-            PlatformNotSupportedException readFailure =
-                Assert.Throws<PlatformNotSupportedException>(() => store.Read("https://api.typesafe.ai"));
-            PlatformNotSupportedException writeFailure =
-                Assert.Throws<PlatformNotSupportedException>(() => store.Write("https://api.typesafe.ai", SentinelKey));
+            PlatformNotSupportedException readFailure = await Assert.ThrowsAsync<PlatformNotSupportedException>(
+                () => store.ReadAsync("https://api.typesafe.ai").AsTask());
+            PlatformNotSupportedException writeFailure = await Assert.ThrowsAsync<PlatformNotSupportedException>(
+                () => store.WriteAsync("https://api.typesafe.ai", SentinelKey).AsTask());
             Assert.DoesNotContain(SentinelKey, readFailure.Message, StringComparison.Ordinal);
             Assert.DoesNotContain(SentinelKey, writeFailure.Message, StringComparison.Ordinal);
         }

@@ -241,7 +241,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
 
     private ArbiterEvaluator Evaluator() => new(
         new OutsideTaskProvider(),
-        _ => null,
+        (_, _) => Task.FromResult<string?>(null),
         RealArbiterState.Ledger(_arbiter),
         RealArbiterState.Decisions(_arbiter),
         ArbiterTestServices.HookGitFacts(_repo.Path, _home.Path, _arbiter),

@@ -21,8 +21,9 @@ public interface IArbiterServeService
     string Rules(string? trigger = null);
 
     /// <summary>Reports whether the Arbiter is ready: root, rule set, provider and whether its key resolves.</summary>
+    /// <param name="cancellationToken">Cancels the credential-store lookup.</param>
     /// <returns>The provenance line and the status.</returns>
-    string Status();
+    Task<string> StatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Lists the sections of one repository document a task needs.</summary>
     /// <param name="path">The repository-relative document path.</param>

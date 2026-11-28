@@ -85,13 +85,12 @@ public sealed class ArbiterInstallServiceSeamsTests
         Assert.Equal(0, applied.ExitCode);
         Assert.Empty(applied.Events.OfType<ArbiterInstallError>());
         Assert.Equal(1, store.AsyncWrites);
-        Assert.Equal(0, store.SyncWrites);
         Assert.Equal("typed-key", await store.ReadAsync(OverrideOrigin, TestContext.Current.CancellationToken));
     }
 
     /// <summary>
-    /// The asynchronous preparation reads the credential store through its asynchronous member, and does not touch the
-    /// synchronous one, so no thread blocks on the store.
+    /// The asynchronous preparation reads the credential store through its asynchronous member, so no thread blocks on
+    /// the store.
     /// </summary>
     [Fact]
     public async Task PrepareAsync_ReadsTheStoredKeyThroughTheAsyncStore()
@@ -107,7 +106,6 @@ public sealed class ArbiterInstallServiceSeamsTests
 
         Assert.Equal(0, prepared.ExitCode);
         Assert.True(store.AsyncReads > 0, "The asynchronous preparation must read the store through ReadAsync.");
-        Assert.Equal(0, store.SyncReads);
     }
 
     /// <summary>An absolute option is its own root, whatever the working directory is.</summary>
@@ -1281,32 +1279,16 @@ public sealed class ArbiterInstallServiceSeamsTests
             throw new InvalidOperationException("A preparation must not scaffold.");
     }
 
-    /// <summary>A credential store that reports which member was used, so a test can prove the async path took the async one.</summary>
+    /// <summary>A credential store that counts the async reads and writes a test proves the run made.</summary>
     private sealed class RecordingStore : ICredentialStore
     {
         private readonly FakeCredentialStore _inner = new();
 
-        public int SyncReads { get; private set; }
-
         public int AsyncReads { get; private set; }
-
-        public int SyncWrites { get; private set; }
 
         public int AsyncWrites { get; private set; }
 
         public void Seed(string origin, string key) => _inner.Seed(origin, key);
-
-        public string? Read(string origin)
-        {
-            SyncReads++;
-            return _inner.Read(origin);
-        }
-
-        public void Write(string origin, string key)
-        {
-            SyncWrites++;
-            _inner.Write(origin, key);
-        }
 
         public ValueTask<string?> ReadAsync(string origin, CancellationToken cancellationToken = default)
         {

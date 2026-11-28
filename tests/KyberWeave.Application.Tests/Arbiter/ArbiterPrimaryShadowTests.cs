@@ -63,7 +63,7 @@ public sealed class ArbiterPrimaryShadowTests
         DateTimeOffset fixedNow = new(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
         return new ArbiterEvaluator(
             provider,
-            _ => null,
+            (_, _) => Task.FromResult<string?>(null),
             _arbiter.LedgerStore,
             _arbiter.DecisionLog,
             gitFacts,

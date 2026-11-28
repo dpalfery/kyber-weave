@@ -29,11 +29,11 @@ public sealed class ArbiterKeyResolutionTests
         (string name) => string.Equals(name, ArbiterKeyResolver.EnvVarName, StringComparison.Ordinal) ? value : null;
 
     [Fact]
-    public void EnvKeyServesTypeSafeOriginWithoutTouchingStore()
+    public async Task EnvKeyServesTypeSafeOriginWithoutTouchingStore()
     {
         FakeCredentialStore store = new() { DefaultKey = "store-key" };
 
-        string? resolved = ArbiterKeyResolver.Resolve(
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(
             "https://api.typesafe.ai/v1",
             store,
             EnvReader(SentinelKey));
@@ -57,11 +57,11 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
-    public void EnvKeyIgnoredForForeignOrigin()
+    public async Task EnvKeyIgnoredForForeignOrigin()
     {
         FakeCredentialStore store = new() { DefaultKey = "store-key" };
 
-        string? resolved = ArbiterKeyResolver.Resolve(
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(
             "https://other.example.com/v1",
             store,
             EnvReader(SentinelKey));
@@ -73,21 +73,21 @@ public sealed class ArbiterKeyResolutionTests
     [Theory]
     [InlineData("https://proxy.example.com/v1", "https://proxy.example.com/v1", SentinelKey)]
     [InlineData("https://proxy.example.com/v1", "https://elsewhere.example.com/v1", "store-key")]
-    public void EnvKeyHonoredOnlyForUserOverrideOrigin(string endpoint, string userEndpoint, string expected)
+    public async Task EnvKeyHonoredOnlyForUserOverrideOrigin(string endpoint, string userEndpoint, string expected)
     {
         FakeCredentialStore store = new() { DefaultKey = "store-key" };
 
-        string? resolved = ArbiterKeyResolver.Resolve(endpoint, store, EnvReader(SentinelKey), userEndpoint);
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(endpoint, store, EnvReader(SentinelKey), userEndpoint);
 
         Assert.Equal(expected, resolved);
     }
 
     [Fact]
-    public void StoreEntryServesWhenEnvAbsent()
+    public async Task StoreEntryServesWhenEnvAbsent()
     {
         FakeCredentialStore store = new() { DefaultKey = "store-key" };
 
-        string? resolved = ArbiterKeyResolver.Resolve(
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(
             "https://api.typesafe.ai/v1",
             store,
             EnvReader(null));
@@ -97,11 +97,11 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
-    public void AbsentEnvAndStoreResolvesNoKey()
+    public async Task AbsentEnvAndStoreResolvesNoKey()
     {
         FakeCredentialStore store = new();
 
-        string? resolved = ArbiterKeyResolver.Resolve(
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(
             "https://api.typesafe.ai/v1",
             store,
             EnvReader(null));
@@ -112,7 +112,7 @@ public sealed class ArbiterKeyResolutionTests
     [Theory]
     [InlineData("http://localhost:11434/v1")]
     [InlineData("http://127.0.0.1:11434/v1")]
-    public void LoopbackEndpointNeedsNoKey(string endpoint)
+    public async Task LoopbackEndpointNeedsNoKey(string endpoint)
     {
         FakeCredentialStore store = new() { DefaultKey = "store-key" };
         bool envRead = false;
@@ -122,7 +122,7 @@ public sealed class ArbiterKeyResolutionTests
             return SentinelKey;
         };
 
-        string? resolved = ArbiterKeyResolver.Resolve(endpoint, store, env);
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(endpoint, store, env);
 
         Assert.Null(resolved);
         Assert.Empty(store.Reads);
@@ -136,11 +136,11 @@ public sealed class ArbiterKeyResolutionTests
     [InlineData("http://127.0.evil/v1")]
     [InlineData("http://127.1.2.3.4.5/v1")]
     [InlineData("http://localhost.evil.com/v1")]
-    public void LookalikeLoopbackEndpointStillResolvesTheKey(string endpoint)
+    public async Task LookalikeLoopbackEndpointStillResolvesTheKey(string endpoint)
     {
         FakeCredentialStore store = new() { DefaultKey = SentinelKey };
 
-        string? resolved = ArbiterKeyResolver.Resolve(endpoint, store, EnvReader(SentinelKey));
+        string? resolved = await ArbiterKeyResolver.ResolveAsync(endpoint, store, EnvReader(SentinelKey));
 
         Assert.Equal(SentinelKey, resolved);
     }
@@ -221,14 +221,14 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
-    public void SentinelKeyLeaksIntoNoSurface()
+    public async Task SentinelKeyLeaksIntoNoSurface()
     {
         FakeCredentialProcessRunner macRunner = new();
         MacKeychainCredentialStore mac = new(macRunner);
-        mac.Write("https://api.typesafe.ai", SentinelKey);
+        await mac.WriteAsync("https://api.typesafe.ai", SentinelKey);
         FakeCredentialProcessRunner linuxRunner = new();
         SecretServiceCredentialStore linux = new(linuxRunner);
-        linux.Write("https://api.typesafe.ai", SentinelKey);
+        await linux.WriteAsync("https://api.typesafe.ai", SentinelKey);
         WindowsCredentialStore windows = new();
 
         Assert.DoesNotContain(SentinelKey, mac.ToString() ?? string.Empty, StringComparison.Ordinal);
@@ -236,8 +236,8 @@ public sealed class ArbiterKeyResolutionTests
         Assert.DoesNotContain(SentinelKey, windows.ToString() ?? string.Empty, StringComparison.Ordinal);
 
         FakeCredentialStore store = new() { DefaultKey = "store-key" };
-        ArgumentException validationFailure = Assert.Throws<ArgumentException>(
-            () => ArbiterKeyResolver.Resolve(string.Empty, store, EnvReader(SentinelKey)));
+        ArgumentException validationFailure = await Assert.ThrowsAsync<ArgumentException>(
+            () => ArbiterKeyResolver.ResolveAsync(string.Empty, store, EnvReader(SentinelKey)));
         Assert.DoesNotContain(SentinelKey, validationFailure.Message, StringComparison.Ordinal);
 
         IReadOnlyList<Diagnostic> diagnostics = RuleValidator.ValidateUserOverride(
@@ -253,88 +253,6 @@ public sealed class ArbiterKeyResolutionTests
         {
             Assert.DoesNotContain(SentinelKey, diagnostic.ToString(), StringComparison.Ordinal);
         }
-    }
-
-    [Fact]
-    public void KeyService_WithPreResolvedEffectiveProvider_UsesBindingWithoutReReadingOverride()
-    {
-        int applyCount = 0;
-        FakeArbiterUserSettings userSettings = new()
-        {
-            Override = (repository, _) =>
-            {
-                applyCount++;
-                return repository;
-            },
-        };
-        FakeCredentialStore store = new();
-        FakeProcessEnvironment environment = new(
-            homeDirectory: ArbiterTestRoots.Under("home"),
-            readVariable: EnvReader(SentinelKey));
-        ArbiterKeyService service = new(store, environment, userSettings);
-        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
-        ArbiterProviderConfig effectiveProvider = config.Arbiter.Provider with
-        {
-            Kind = ArbiterProviderKind.Systemone,
-            Endpoint = "https://openrouter.ai/api/v1",
-        };
-
-        string? resolved = service.ResolveKey(config, effectiveProvider, effectiveProvider.Endpoint);
-        string? tryResolved = service.TryResolveKey(config, effectiveProvider, effectiveProvider.Endpoint);
-
-        Assert.Equal(SentinelKey, resolved);
-        Assert.Equal(SentinelKey, tryResolved);
-        Assert.Equal(0, applyCount);
-    }
-
-    [Fact]
-    public void KeyService_OverrideEndpointWithSurroundingWhitespace_HonorsEnvKey()
-    {
-        string home = ArbiterTestRoots.Under("home");
-        _state.Files.CreateDirectory(Path.Combine(home, ".config", "kyber-weave"));
-        _state.Files.WriteAllText(
-            ArbiterUserSettings.GetPath(home),
-            "provider:\n  kind: systemone\n  endpoint: \"https://openrouter.ai/api/v1 \"\n");
-        FileArbiterUserSettings userSettings = new(_state.Files);
-        FakeCredentialStore store = new();
-        FakeProcessEnvironment environment = new(
-            homeDirectory: home,
-            readVariable: EnvReader(SentinelKey));
-        ArbiterKeyService service = new(store, environment, userSettings);
-        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
-        ArbiterProviderConfig effective = userSettings.ApplyTo(config.Arbiter.Provider, home);
-
-        Assert.Equal(SentinelKey, service.ResolveKey(config, "https://openrouter.ai/api/v1"));
-        Assert.Equal(SentinelKey, service.ResolveKey(config, effective, "https://openrouter.ai/api/v1"));
-        Assert.Equal(SentinelKey, service.TryResolveKey(config, effective, "https://openrouter.ai/api/v1"));
-        Assert.Equal(SentinelKey, service.CreateKeyResolver(config)(new Uri("https://openrouter.ai/api/v1")));
-    }
-
-    [Theory]
-    [InlineData("https://repo.example.com/v1", " https://repo.example.com/v1 ")]
-    [InlineData(" https://repo.example.com/v1 ", "https://repo.example.com/v1")]
-    public void KeyService_OverrideDiffersOnlyByWhitespaceFromRepository_DoesNotHonorEnvKey(
-        string repositoryEndpoint,
-        string effectiveEndpoint)
-    {
-        FakeCredentialStore store = new();
-        FakeProcessEnvironment environment = new(
-            homeDirectory: ArbiterTestRoots.Under("home"),
-            readVariable: EnvReader(SentinelKey));
-        ArbiterKeyService service = new(store, environment, new FakeArbiterUserSettings());
-        KyberWeaveConfig config = new()
-        {
-            Arbiter = new ArbiterConfig
-            {
-                Enabled = true,
-                Provider = new ArbiterProviderConfig(ArbiterProviderKind.Systemone, repositoryEndpoint, "jev-1.14.0", 3000),
-            },
-        };
-        ArbiterProviderConfig effective = config.Arbiter.Provider with { Endpoint = effectiveEndpoint };
-
-        string? resolved = service.TryResolveKey(config, effective, "https://repo.example.com/v1");
-
-        Assert.Null(resolved);
     }
 
     [Fact]

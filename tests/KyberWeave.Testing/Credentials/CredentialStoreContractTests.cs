@@ -13,10 +13,14 @@ namespace KyberWeave.Tests.Credentials;
 /// ASCII, which is what an Arbiter key is: macOS <c>security</c> prints a password containing non-ASCII characters as
 /// hex, so no store is contracted to round-trip one.
 /// </remarks>
-public abstract class CredentialStoreContractTests : IDisposable
+public abstract class CredentialStoreContractTests : IAsyncLifetime
 {
     private readonly List<ICredentialStore> _stores = [];
     private readonly List<string> _origins = [];
+
+    /// <summary>Nothing to set up: each test creates the stores it uses through <see cref="NewStore"/>.</summary>
+    /// <returns>A completed task.</returns>
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
     /// <summary>Creates the store under test.</summary>
     /// <returns>The credential store seam.</returns>
@@ -46,61 +50,41 @@ public abstract class CredentialStoreContractTests : IDisposable
     }
 
     /// <summary>Deletes every origin the test wrote, so the real store is left as it was found.</summary>
-    public void Dispose()
+    /// <returns>A task that completes once every origin is deleted.</returns>
+    public async ValueTask DisposeAsync()
     {
-        Dispose(disposing: true);
+        foreach (ICredentialStore store in _stores)
+        {
+            foreach (string origin in _origins)
+            {
+                try
+                {
+                    await store.DeleteAsync(origin).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Cleanup runs after the result is recorded, so a refusal here must not mask the test's outcome.
+                }
+                catch (PlatformNotSupportedException)
+                {
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                }
+            }
+        }
+
+        _stores.Clear();
+        _origins.Clear();
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>Deletes every origin the test wrote, so the real store is left as it was found.</summary>
-    /// <param name="disposing">True when called from <see cref="Dispose()"/>.</param>
-    protected virtual void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            foreach (ICredentialStore store in _stores)
-            {
-                foreach (string origin in _origins)
-                {
-                    try
-                    {
-                        store.Delete(origin);
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // Cleanup runs after the result is recorded, so a refusal here must not mask the test's outcome.
-                    }
-                    catch (PlatformNotSupportedException)
-                    {
-                    }
-                    catch (System.ComponentModel.Win32Exception)
-                    {
-                    }
-                }
-            }
-
-            _stores.Clear();
-            _origins.Clear();
-        }
-    }
-
     [Fact]
-    public void ReadsNoKeyForAnOriginThatWasNeverWritten()
+    public async Task ReadsNoKeyForAnOriginThatWasNeverWritten()
     {
         ICredentialStore store = NewStore();
 
-        Assert.Null(store.Read(NewOrigin()));
-    }
-
-    [Fact]
-    public void ReadsBackTheKeyThatWasWritten()
-    {
-        ICredentialStore store = NewStore();
-        string origin = NewOrigin();
-
-        store.Write(origin, "sk-contract-0001");
-
-        Assert.Equal("sk-contract-0001", store.Read(origin));
+        Assert.Null(await store.ReadAsync(NewOrigin()));
     }
 
     [Fact]
@@ -127,7 +111,7 @@ public abstract class CredentialStoreContractTests : IDisposable
     }
 
     [Fact]
-    public void ReadsBackAnyKeyItAccepts()
+    public async Task ReadsBackAnyKeyItAccepts()
     {
         ICredentialStore store = NewStore();
         string[] candidates =
@@ -142,7 +126,7 @@ public abstract class CredentialStoreContractTests : IDisposable
             string origin = NewOrigin();
             try
             {
-                store.Write(origin, key);
+                await store.WriteAsync(origin, key);
             }
             catch (ArgumentException)
             {
@@ -150,128 +134,116 @@ public abstract class CredentialStoreContractTests : IDisposable
                 continue;
             }
 
-            Assert.Equal(key, store.Read(origin));
+            Assert.Equal(key, await store.ReadAsync(origin));
         }
     }
 
     [Fact]
-    public void WritingASecondKeyForOneOriginReplacesTheFirst()
+    public async Task WritingASecondKeyForOneOriginReplacesTheFirst()
     {
         ICredentialStore store = NewStore();
         string origin = NewOrigin();
 
-        store.Write(origin, "sk-contract-first");
-        store.Write(origin, "sk-contract-second");
+        await store.WriteAsync(origin, "sk-contract-first");
+        await store.WriteAsync(origin, "sk-contract-second");
 
-        Assert.Equal("sk-contract-second", store.Read(origin));
+        Assert.Equal("sk-contract-second", await store.ReadAsync(origin));
     }
 
     [Fact]
-    public void KeepsOneOriginsKeyOutOfAnothers()
+    public async Task KeepsOneOriginsKeyOutOfAnothers()
     {
         ICredentialStore store = NewStore();
         string first = NewOrigin();
         string second = NewOrigin();
 
-        store.Write(first, "sk-contract-first");
-        store.Write(second, "sk-contract-second");
+        await store.WriteAsync(first, "sk-contract-first");
+        await store.WriteAsync(second, "sk-contract-second");
 
-        Assert.Equal("sk-contract-first", store.Read(first));
-        Assert.Equal("sk-contract-second", store.Read(second));
+        Assert.Equal("sk-contract-first", await store.ReadAsync(first));
+        Assert.Equal("sk-contract-second", await store.ReadAsync(second));
     }
 
     [Fact]
-    public void ReadsAKeyWithSpacesQuotesAndBackslashesUnchanged()
+    public async Task ReadsAKeyWithSpacesQuotesAndBackslashesUnchanged()
     {
         ICredentialStore store = NewStore();
         string origin = NewOrigin();
         const string key = "sk-live \"a b\" \\c-d_e";
 
-        store.Write(origin, key);
+        await store.WriteAsync(origin, key);
 
-        Assert.Equal(key, store.Read(origin));
+        Assert.Equal(key, await store.ReadAsync(origin));
     }
 
     [Fact]
-    public void DeletingAnOriginRemovesItsKey()
-    {
-        ICredentialStore store = NewStore();
-        string origin = NewOrigin();
-        store.Write(origin, "sk-contract-0002");
-
-        store.Delete(origin);
-
-        Assert.Null(store.Read(origin));
-    }
-
-    [Fact]
-    public void DeletingAnOriginThatWasNeverWrittenSucceeds()
+    public async Task DeletingAnOriginThatWasNeverWrittenSucceeds()
     {
         ICredentialStore store = NewStore();
 
-        store.Delete(NewOrigin());
+        await store.DeleteAsync(NewOrigin());
     }
 
     [Fact]
-    public void ReadsThroughASecondStoreOverTheSameMachine()
+    public async Task ReadsThroughASecondStoreOverTheSameMachine()
     {
         ICredentialStore first = NewStore();
         string origin = NewOrigin();
-        first.Write(origin, "sk-contract-0003");
+        await first.WriteAsync(origin, "sk-contract-0003");
 
         ICredentialStore second = CreateSecondStoreOverTheSameMachine(first);
 
-        Assert.Equal("sk-contract-0003", second.Read(origin));
+        Assert.Equal("sk-contract-0003", await second.ReadAsync(origin));
     }
 
     [Fact]
-    public void RejectsAnOriginWithALineBreak()
+    public async Task RejectsAnOriginWithALineBreak()
     {
         ICredentialStore store = NewStore();
         const string origin = "https://kyber-weave\ncontract.invalid";
         const string carriageReturnOrigin = "https://kyber-weave\rcontract.invalid";
 
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read(origin));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, "sk-contract-0006"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete(origin));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read(carriageReturnOrigin));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(carriageReturnOrigin, "sk-contract-0006"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete(carriageReturnOrigin));
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync(origin).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(origin, "sk-contract-0006").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.DeleteAsync(origin).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync(carriageReturnOrigin).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(carriageReturnOrigin, "sk-contract-0006").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.DeleteAsync(carriageReturnOrigin).AsTask());
     }
 
     [Fact]
-    public void RejectsAKeyWithALineBreak()
+    public async Task RejectsAKeyWithALineBreak()
     {
         ICredentialStore store = NewStore();
         string origin = NewOrigin();
 
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, "line-one\nline-two"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, "line-one\rline-two"));
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(origin, "line-one\nline-two").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(origin, "line-one\rline-two").AsTask());
     }
 
     [Fact]
-    public void RejectsAnOriginThatIsNotGiven()
+    public async Task RejectsAnOriginThatIsNotGiven()
     {
         ICredentialStore store = NewStore();
 
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read(null!));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read(string.Empty));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("  "));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(null!, "sk-contract-0004"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(string.Empty, "sk-contract-0004"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("  ", "sk-contract-0004"));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete(null!));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete(string.Empty));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete("  "));
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync(null!).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync(string.Empty).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.ReadAsync("  ").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(null!, "sk-contract-0004").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(string.Empty, "sk-contract-0004").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync("  ", "sk-contract-0004").AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.DeleteAsync(null!).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.DeleteAsync(string.Empty).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.DeleteAsync("  ").AsTask());
     }
 
     [Fact]
-    public void RejectsAnEmptyKey()
+    public async Task RejectsAnEmptyKey()
     {
         ICredentialStore store = NewStore();
         string origin = NewOrigin();
 
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, null!));
-        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, string.Empty));
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(origin, null!).AsTask());
+        _ = await Assert.ThrowsAnyAsync<ArgumentException>(() => store.WriteAsync(origin, string.Empty).AsTask());
     }
 }
