@@ -790,15 +790,15 @@ public class MinimalApiEndpointTests
     {
         await using Host host = await Host.StartAsync(b =>
             b.Otlp
-                .Setup(o => o.AdmitTracesAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new IngestAdmissionResult(true, 200)));
+                .Setup(o => o.AdmitTraces(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>()))
+                .Returns(new IngestAdmissionResult(true, 200)));
 
         using StringContent payload = new("{\"resourceSpans\":[]}", Encoding.UTF8, "application/json");
         HttpResponseMessage response = await host.Client.PostAsync(new Uri("/v1/traces", UriKind.Relative), payload);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         host.Builder.Otlp.Verify(
-            o => o.AdmitTracesAsync(It.IsAny<ReadOnlyMemory<byte>>(), "application/json", It.IsAny<CancellationToken>()),
+            o => o.AdmitTraces(It.IsAny<ReadOnlyMemory<byte>>(), "application/json"),
             Times.Once);
     }
 
@@ -808,7 +808,7 @@ public class MinimalApiEndpointTests
         await using Host host = await Host.StartAsync(b =>
         {
             b.Otlp
-                .Setup(o => o.AdmitTracesAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(o => o.AdmitTraces(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>()))
                 .Throws(new OtlpPayloadTooLargeException("payload exceeds the limit"));
             b.SettingsRuntime.MaxOtlpBodyBytes = 8;
         });
@@ -826,8 +826,8 @@ public class MinimalApiEndpointTests
     {
         await using Host host = await Host.StartAsync(b =>
             b.Otlp
-                .Setup(o => o.AdmitTracesAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new IngestAdmissionResult(false, 503, RetryAfterSeconds: 2, ErrorMessage: "buffer full")));
+                .Setup(o => o.AdmitTraces(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>()))
+                .Returns(new IngestAdmissionResult(false, 503, RetryAfterSeconds: 2, ErrorMessage: "buffer full")));
 
         using StringContent payload = new("{\"resourceSpans\":[]}", Encoding.UTF8, "application/json");
         HttpResponseMessage response = await host.Client.PostAsync(new Uri("/v1/traces", UriKind.Relative), payload);
@@ -846,7 +846,7 @@ public class MinimalApiEndpointTests
 
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
         host.Builder.Otlp.Verify(
-            o => o.AdmitTracesAsync(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            o => o.AdmitTraces(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<string>()),
             Times.Never);
     }
 

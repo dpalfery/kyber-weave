@@ -887,7 +887,7 @@ public static class DashEndpointMappings
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, MutationForbiddenMessage);
 
-        JobOutcome outcome = await jobs.TriggerRefreshAsync(cancellationToken).ConfigureAwait(false);
+        JobOutcome outcome = jobs.TriggerRefresh();
         return JobOutcomeResult(outcome);
     }
 
@@ -899,7 +899,7 @@ public static class DashEndpointMappings
         if (!DashHttp.IsAllowedMutation(request))
             return DashHttp.Error(StatusCodes.Status403Forbidden, MutationForbiddenMessage);
 
-        JobOutcome outcome = await jobs.TriggerImportHistoryAsync(cancellationToken).ConfigureAwait(false);
+        JobOutcome outcome = jobs.TriggerImportHistory();
         return JobOutcomeResult(outcome);
     }
 

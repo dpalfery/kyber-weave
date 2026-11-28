@@ -289,7 +289,7 @@ public static partial class Program
         {
             try
             {
-                await collector.FlushPendingAsync(CancellationToken.None).ConfigureAwait(false);
+                collector.FlushPending();
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException)
             {

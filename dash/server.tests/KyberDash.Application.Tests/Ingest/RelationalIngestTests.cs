@@ -657,7 +657,7 @@ public class RelationalIngestTests
             ? new SqliteExecutionException("sqlite3 error 19: UNIQUE constraint failed: record.id", 19, "UNIQUE constraint failed: record.id")
             : null;
 
-        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerImportHistory();
 
         Assert.Equal("partial", outcome.Outcome);
         Assert.Equal(1, outcome.FailedUnits);
@@ -686,7 +686,7 @@ public class RelationalIngestTests
             ? new DashValidationException("STORE_JSON_TEXT_REFUSED", "Refused JSON object or array text in 'content_part_text.part_text'.")
             : null;
 
-        JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+        JobOutcome outcome = harness.Jobs.TriggerImportHistory();
 
         Assert.Equal("partial", outcome.Outcome);
         Assert.Equal(1, outcome.FailedUnits);
@@ -718,7 +718,7 @@ public class RelationalIngestTests
             UnitWriteHarness harness = new();
             harness.Writer.WriteBatchFailure = _ => failure;
 
-            JobOutcome outcome = await harness.Jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+            JobOutcome outcome = harness.Jobs.TriggerImportHistory();
 
             Assert.Equal("failed", outcome.Outcome);
             Assert.Empty(harness.Writer.WriteProblemCalls);

@@ -1043,15 +1043,15 @@ public static class SettingsCleanDoctorReportTests
 
             using JobSchedulerService jobs = new(store, store, projection.Object, ingestion.Object, settings, serverState, Options(serverState));
 
-            JobOutcome idle = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+            JobOutcome idle = jobs.TriggerRefresh();
             Assert.Equal("succeeded", idle.Outcome);
 
             settings.WriteBooleanSetting(SettingsService.JobsPausedKey, true);
-            JobOutcome paused = await jobs.TriggerRefreshAsync(TestContext.Current.CancellationToken);
+            JobOutcome paused = jobs.TriggerRefresh();
             Assert.Equal("declined", paused.Outcome);
             Assert.True(jobs.GetStatus().Paused);
 
-            JobOutcome imported = await jobs.TriggerImportHistoryAsync(TestContext.Current.CancellationToken);
+            JobOutcome imported = jobs.TriggerImportHistory();
             Assert.Equal("succeeded", imported.Outcome);
             ingestion.Verify(service => service.RefreshHarnessSources(CanonRefreshEngine.DefaultHistoryWeeks), Times.Once);
         }

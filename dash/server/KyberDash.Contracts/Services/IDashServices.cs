@@ -83,25 +83,16 @@ public interface IOtlpCollectorService
     event EventHandler? StoreUpdated;
 
     /// <summary>Decodes and queues an OTLP traces request payload.</summary>
-    Task<IngestAdmissionResult> AdmitTracesAsync(
-        ReadOnlyMemory<byte> payload,
-        string contentType,
-        CancellationToken cancellationToken = default);
+    IngestAdmissionResult AdmitTraces(ReadOnlyMemory<byte> payload, string contentType);
 
     /// <summary>Decodes and queues an OTLP logs request payload.</summary>
-    Task<IngestAdmissionResult> AdmitLogsAsync(
-        ReadOnlyMemory<byte> payload,
-        string contentType,
-        CancellationToken cancellationToken = default);
+    IngestAdmissionResult AdmitLogs(ReadOnlyMemory<byte> payload, string contentType);
 
     /// <summary>Decodes and queues an OTLP metrics request payload.</summary>
-    Task<IngestAdmissionResult> AdmitMetricsAsync(
-        ReadOnlyMemory<byte> payload,
-        string contentType,
-        CancellationToken cancellationToken = default);
+    IngestAdmissionResult AdmitMetrics(ReadOnlyMemory<byte> payload, string contentType);
 
     /// <summary>Flushes queued telemetry items into the canonical store and returns flushed item count.</summary>
-    Task<int> FlushPendingAsync(CancellationToken cancellationToken = default);
+    int FlushPending();
 
     /// <summary>Pauses ingestion and drains active flushes.</summary>
     void PauseIngestion();
@@ -448,10 +439,10 @@ public interface IJobSchedulerService : IAsyncDisposable, IDisposable
     JobHostStatus GetStatus();
 
     /// <summary>Triggers an immediate incremental refresh pass.</summary>
-    Task<JobOutcome> TriggerRefreshAsync(CancellationToken cancellationToken = default);
+    JobOutcome TriggerRefresh();
 
     /// <summary>Triggers an immediate history backfill pass.</summary>
-    Task<JobOutcome> TriggerImportHistoryAsync(CancellationToken cancellationToken = default);
+    JobOutcome TriggerImportHistory();
 
     /// <summary>Starts the periodic background maintenance timer.</summary>
     void Start();
