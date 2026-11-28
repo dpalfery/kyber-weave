@@ -123,6 +123,42 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     }
 
     [Fact]
+    public async Task AConfidentPickAskedAsynchronously_MatchesTheBlockingAnswer()
+    {
+        StubProvider provider = new("dev-medium", 0.97);
+
+        PlanTaskFile file = await WriteAsync(Picker(provider));
+
+        PlanTaskFileEntry picked = file.Tasks![0];
+        Assert.Equal("dev-medium", picked.Agent);
+        Assert.Equal(0.97, picked.AgentConfidence);
+        Assert.Null(file.Tasks[1].Agent);
+        Assert.Equal(1, provider.Calls);
+    }
+
+    [Fact]
+    public async Task AModelFaultAskedAsynchronously_WritesTheFileWithNoPick()
+    {
+        PlanTaskFile file = await WriteAsync(Picker(new StubProvider(null, null, fail: true)));
+
+        Assert.Null(file.Tasks![0].Agent);
+    }
+
+    [Fact]
+    public async Task ACancelledAsyncPick_StopsTheWrite()
+    {
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        StubProvider provider = new("dev-medium", 0.97, cancelOnToken: true);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => new PlanTaskFileGenerator(_repo.Root, KyberWeaveConfigDefaults.Product, _repo.Store, Picker(provider))
+                .RunAsync(Plan, PlanTaskFileMode.Write, cancelled.Token));
+        Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
     public void ACheckKeepsThePickOnDisk_WithoutAskingAgain_AndARewriteDoesNotMoveIt()
     {
         Write(Picker(new StubProvider("dev-medium", 0.97)));
@@ -188,7 +224,23 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         return outcome.File!;
     }
 
-    private sealed class StubProvider(string? answer, double? confidence, bool fail = false) : IArbiterProvider
+    private async Task<PlanTaskFile> WriteAsync(IPlanTaskAgentPicker? picker)
+    {
+        PlanTaskFileOutcome outcome = await new PlanTaskFileGenerator(
+                _repo.Root,
+                KyberWeaveConfigDefaults.Product,
+                _repo.Store,
+                picker)
+            .RunAsync(Plan, PlanTaskFileMode.Write);
+        Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
+        return Assert.IsType<PlanTaskFile>(outcome.File);
+    }
+
+    private sealed class StubProvider(
+        string? answer,
+        double? confidence,
+        bool fail = false,
+        bool cancelOnToken = false) : IArbiterProvider
     {
         public List<string> Asked { get; } = [];
 
@@ -200,6 +252,11 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default)
         {
+            if (cancelOnToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             Calls++;
             Asked.AddRange(rules.Select(rule => rule.Id));
             if (fail)

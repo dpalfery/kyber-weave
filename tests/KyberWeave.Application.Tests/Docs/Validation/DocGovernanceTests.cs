@@ -766,6 +766,38 @@ public class DocDriftLinterTests
         Assert.Empty(sqlite.Calls);
         Assert.True(report.HasCritical);
     }
+
+    [Fact]
+    public async Task AMissingIndexAskedAsynchronously_IsReportedTheSameWay()
+    {
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
+            ---
+            id: reference/thing
+            title: A Thing
+            doc-type: reference
+            status: current
+            owner: Maintainers
+            last-reviewed: 2026-07-21
+            code-refs:
+              - AnySymbol
+            ---
+            """);
+
+        ScriptedProcessExecutor sqlite = new(_ => new ProcessResult(0, string.Empty, string.Empty));
+        CodeGraphResolverAdapter resolver = new(
+            Path.Combine(fixture.Root, ".codegraph", "codegraph.db"),
+            fixture.Memory!,
+            fixture.Paths,
+            fixture.Environment,
+            sqlite,
+            new CodeGraphIndexStaleness(fixture.Memory!, new ScriptedProcessRunner()));
+
+        DiagnosticReport report = await new DocDriftLinter(resolver).ValidateAsync(fixture.Load());
+
+        Assert.False(resolver.IsAvailable);
+        Assert.Empty(sqlite.Calls);
+        Assert.True(report.HasCritical);
+    }
 }
 
 public class DiagnosticSubjectTests

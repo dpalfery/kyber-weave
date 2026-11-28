@@ -309,10 +309,22 @@ public sealed class ArbiterGlobalHookInsertionTests
 
         public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
 
+        public Task<ITaskPromptService> ForRepositoryAsync(
+            string repositoryRoot,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<ITaskPromptService>(this);
+
         public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
         {
             Requests.Add(request);
             return new TaskPromptResult(true, TaskPrompt, "csharp-dev", "medium", "plan", request.Technology, [], null);
         }
+
+        public Task<TaskPromptResult> BuildAsync(
+            TaskPromptRequest request,
+            KyberWeaveConfig config,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Build(request, config));
     }
 }

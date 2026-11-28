@@ -17,4 +17,17 @@ public interface ITaskPromptServiceFactory
     /// <param name="repositoryRoot">The checkout whose rules, skills and standards the prompt carries.</param>
     /// <param name="config">The effective host configuration, which places the docs root and holds the budget.</param>
     ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config);
+
+    /// <summary>
+    /// Builds the service over <paramref name="repositoryRoot"/>'s documentation, opening the CodeGraph ports without
+    /// blocking a thread.
+    /// </summary>
+    /// <param name="repositoryRoot">The checkout whose rules, skills and standards the prompt carries.</param>
+    /// <param name="config">The effective host configuration, which places the docs root and holds the budget.</param>
+    /// <param name="cancellationToken">Cancels the index read.</param>
+    /// <returns>The service over that checkout.</returns>
+    Task<ITaskPromptService> ForRepositoryAsync(
+        string repositoryRoot,
+        KyberWeaveConfig config,
+        CancellationToken cancellationToken = default);
 }

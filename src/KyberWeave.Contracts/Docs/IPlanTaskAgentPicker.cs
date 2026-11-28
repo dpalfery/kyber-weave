@@ -10,4 +10,16 @@ public interface IPlanTaskAgentPicker : IDisposable
     /// </summary>
     /// <param name="tasks">The tasks that need an agent: the plan assigned them no role.</param>
     IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks);
+
+    /// <summary>
+    /// The same answer, asked without blocking a thread: the tasks' questions go to the model at once and are awaited
+    /// together. A picker that cannot reach its model returns no entries at all rather than failing; a cancellation
+    /// stops the asks and is raised to the caller.
+    /// </summary>
+    /// <param name="tasks">The tasks that need an agent: the plan assigned them no role.</param>
+    /// <param name="cancellationToken">Cancels the model calls.</param>
+    /// <returns>The answer per asked task id, with the same rules as <see cref="Pick"/>.</returns>
+    Task<IReadOnlyDictionary<string, PlanTaskAgentChoice>> PickAsync(
+        IReadOnlyList<PlanTaskFileEntry> tasks,
+        CancellationToken cancellationToken = default);
 }
