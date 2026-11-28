@@ -96,19 +96,20 @@ public sealed class RunIntegrateGitTests : IDisposable
     }
 
     [Fact]
-    public void TwoTaskWorktreesAreIntegratedAndRemovedOneFastForwardThenOneCherryPick()
+    public async Task TwoTaskWorktreesAreIntegratedAndRemovedOneFastForwardThenOneCherryPick()
     {
         Commit(_first, "one.txt", "first task\n", "feat: first task");
         Directory.CreateDirectory(Path.Combine(_first, ".agent_scratchpad", "T1"));
-        File.WriteAllText(Path.Combine(_first, ".agent_scratchpad", "T1", "report.md"), "gate passed\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            Path.Combine(_first, ".agent_scratchpad", "T1", "report.md"), "gate passed\n", Encoding.UTF8);
         Commit(_second, "two.txt", "second task\n", "feat: second task");
         string firstTip = GitOutput(_first, "rev-parse", "HEAD").Trim();
         string secondTip = GitOutput(_second, "rev-parse", "HEAD").Trim();
 
-        RunIntegrateOutcome first = Integrate("T1", _first);
+        RunIntegrateOutcome first = await Integrate("T1", _first);
         string afterFirst = GitOutput(_run, "rev-parse", "HEAD").Trim();
 
-        RunIntegrateOutcome second = Integrate("T2", _second);
+        RunIntegrateOutcome second = await Integrate("T2", _second);
         string afterSecond = GitOutput(_run, "rev-parse", "HEAD").Trim();
 
         Assert.True(first.Status == RunIntegrateStatus.Integrated, first.Message);
@@ -128,51 +129,53 @@ public sealed class RunIntegrateGitTests : IDisposable
     }
 
     [Fact]
-    public void AnUnrelatedUncommittedFileInTheRunWorktreeSurvivesAFastForwardUnchanged()
+    public async Task AnUnrelatedUncommittedFileInTheRunWorktreeSurvivesAFastForwardUnchanged()
     {
         Commit(_first, "one.txt", "first task\n", "feat: first task");
-        File.WriteAllText(Path.Combine(_run, "README.md"), "the architect's uncommitted revision\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            Path.Combine(_run, "README.md"), "the architect's uncommitted revision\n", Encoding.UTF8);
 
-        RunIntegrateOutcome outcome = Integrate("T1", _first);
+        RunIntegrateOutcome outcome = await Integrate("T1", _first);
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(
             "the architect's uncommitted revision\n",
-            File.ReadAllText(Path.Combine(_run, "README.md"), Encoding.UTF8));
+            await File.ReadAllTextAsync(Path.Combine(_run, "README.md"), Encoding.UTF8));
         Assert.Contains(" M README.md", GitOutput(_run, "status", "--porcelain", "--untracked-files=no"), StringComparison.Ordinal);
         Assert.Contains(outcome.Notes ?? [], note => note.Contains("README.md", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void AnUnrelatedUncommittedFileInTheRunWorktreeSurvivesACherryPickUnchanged()
+    public async Task AnUnrelatedUncommittedFileInTheRunWorktreeSurvivesACherryPickUnchanged()
     {
         Commit(_second, "two.txt", "second task\n", "feat: second task");
         // The run branch moves after the task branch was cut, so the task needs a cherry-pick.
         Commit(_run, "run.txt", "run moved on\n", "feat: the run moved on");
-        File.WriteAllText(Path.Combine(_run, "README.md"), "the architect's uncommitted revision\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            Path.Combine(_run, "README.md"), "the architect's uncommitted revision\n", Encoding.UTF8);
 
-        RunIntegrateOutcome outcome = Integrate("T2", _second);
+        RunIntegrateOutcome outcome = await Integrate("T2", _second);
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(
             "the architect's uncommitted revision\n",
-            File.ReadAllText(Path.Combine(_run, "README.md"), Encoding.UTF8));
+            await File.ReadAllTextAsync(Path.Combine(_run, "README.md"), Encoding.UTF8));
         Assert.Contains("feat: second task", GitOutput(_run, "log", "--format=%s", "-1"), StringComparison.Ordinal);
         Assert.False(CherryPickStateExists());
     }
 
-    private RunIntegrateOutcome Integrate(string taskId, string taskWorktree) =>
-        _service.Integrate(new RunIntegrateRequest(taskId, taskWorktree, _run, _work, _work));
+    private async Task<RunIntegrateOutcome> Integrate(string taskId, string taskWorktree) =>
+        await _service.IntegrateAsync(new RunIntegrateRequest(taskId, taskWorktree, _run, _work, _work));
 
     [Fact]
-    public void ACommitTheRunBranchAlreadyHasUnderAnotherShaIsDroppedAndTheTaskWorktreeRemoved()
+    public async Task ACommitTheRunBranchAlreadyHasUnderAnotherShaIsDroppedAndTheTaskWorktreeRemoved()
     {
         Commit(_first, "one.txt", "shared change\n", "feat: the task's change");
         // The run branch carries the same change under its own sha, so the task's commit applies empty.
         Commit(_run, "one.txt", "shared change\n", "feat: the same change, recommitted");
         string runBefore = GitOutput(_run, "rev-parse", "HEAD").Trim();
 
-        RunIntegrateOutcome outcome = Integrate("T1", _first);
+        RunIntegrateOutcome outcome = await Integrate("T1", _first);
 
         Assert.True(outcome.Status == RunIntegrateStatus.Integrated, outcome.Message);
         Assert.Equal(runBefore, GitOutput(_run, "rev-parse", "HEAD").Trim());
@@ -183,20 +186,21 @@ public sealed class RunIntegrateGitTests : IDisposable
     }
 
     [Fact]
-    public void ACherryPickThatCannotOverwriteAnUntrackedFileIsAbortedAndTheNextIntegrateWorks()
+    public async Task ACherryPickThatCannotOverwriteAnUntrackedFileIsAbortedAndTheNextIntegrateWorks()
     {
         Commit(_second, "two.txt", "second task\n", "feat: second task");
         // An untracked file at the path the task's commit adds makes git refuse the pick before any conflict.
-        File.WriteAllText(Path.Combine(_run, "two.txt"), "the operator's untracked file\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            Path.Combine(_run, "two.txt"), "the operator's untracked file\n", Encoding.UTF8);
 
-        RunIntegrateOutcome blocked = Integrate("T2", _second);
+        RunIntegrateOutcome blocked = await Integrate("T2", _second);
 
         Assert.Equal(RunIntegrateStatus.Failed, blocked.Status);
         Assert.False(CherryPickStateExists(), "a failed cherry-pick must leave no sequencer or CHERRY_PICK_HEAD behind");
         Assert.True(Directory.Exists(_second));
 
         File.Delete(Path.Combine(_run, "two.txt"));
-        RunIntegrateOutcome retried = Integrate("T2", _second);
+        RunIntegrateOutcome retried = await Integrate("T2", _second);
 
         Assert.True(retried.Status == RunIntegrateStatus.Integrated, retried.Message);
         Assert.Contains("feat: second task", GitOutput(_run, "log", "--format=%s", "-1"), StringComparison.Ordinal);
@@ -204,13 +208,13 @@ public sealed class RunIntegrateGitTests : IDisposable
     }
 
     [Fact]
-    public void TheCanonicalCheckoutIsRefusedAsTheTaskWorktree()
+    public async Task TheCanonicalCheckoutIsRefusedAsTheTaskWorktree()
     {
         Commit(_work, "canonical.txt", "wrong place\n", "feat: work in the canonical checkout");
         string canonicalHead = GitOutput(_work, "rev-parse", "HEAD").Trim();
         string runHead = GitOutput(_run, "rev-parse", "HEAD").Trim();
 
-        RunIntegrateOutcome outcome = Integrate("T1", _work);
+        RunIntegrateOutcome outcome = await Integrate("T1", _work);
 
         Assert.Equal(RunIntegrateStatus.RefusedInput, outcome.Status);
         Assert.Contains("canonical checkout", outcome.Message!, StringComparison.Ordinal);
