@@ -110,7 +110,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         string sql = "SELECT records_write_seq FROM store_write_marker WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<long> rows = Query<long>(sql, NewParameters(), reader => reader.GetInt64(reader.GetOrdinal("records_write_seq")));
+        IReadOnlyList<long> rows = QueryRows<long>(sql, NewParameters(), reader => reader.GetInt64(reader.GetOrdinal("records_write_seq")));
         return rows.Count == 0 ? 0L : rows[0];
     }
 
@@ -143,7 +143,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         string sql = "SELECT retention_days FROM content_retention WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<int> rows = Query<int>(sql, NewParameters(), reader => reader.GetInt32(reader.GetOrdinal("retention_days")));
+        IReadOnlyList<int> rows = QueryRows<int>(sql, NewParameters(), reader => reader.GetInt32(reader.GetOrdinal("retention_days")));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -176,7 +176,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         string sql = "SELECT projection_schema_version, records_marker FROM projection_state WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<ProjectionStateView> rows = Query<ProjectionStateView>(
+        IReadOnlyList<ProjectionStateView> rows = QueryRows<ProjectionStateView>(
             sql,
             NewParameters(),
             reader => new ProjectionStateView(
@@ -207,7 +207,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             "SELECT 'SES', rowid, session_id, '' FROM projection_dirty_session " +
             "ORDER BY 1 ASC, 2 ASC;\n";
 
-        IReadOnlyList<DirtyProjectionRow> rows = Query<DirtyProjectionRow>(
+        IReadOnlyList<DirtyProjectionRow> rows = QueryRows<DirtyProjectionRow>(
             sql,
             NewParameters(),
             reader =>
@@ -305,7 +305,7 @@ public partial class SqliteRelationalStore : IOperationalStore
 
         sql.Append(" ORDER BY rowid ASC;\n");
 
-        return Query<SessionKeyAlias>(
+        return QueryRows<SessionKeyAlias>(
             sql.ToString(),
             parameters,
             reader => new SessionKeyAlias(
@@ -517,7 +517,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             ? "SELECT COUNT(*) AS problem_count FROM ingest_problem;\n"
             : $"SELECT COUNT(*) AS problem_count FROM ingest_problem_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
 
-        return Query<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("problem_count")))[0];
+        return QueryRows<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("problem_count")))[0];
     }
 
     /// <inheritdoc />
@@ -601,7 +601,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             ? "SELECT COUNT(*) AS span_count FROM quarantined_span;\n"
             : $"SELECT COUNT(*) AS span_count FROM quarantined_span_harness WHERE harness_id = {AddParameter(parameters, harnessId)};\n";
 
-        return Query<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("span_count")))[0];
+        return QueryRows<int>(sql, parameters, reader => reader.GetInt32(reader.GetOrdinal("span_count")))[0];
     }
 
     /// <inheritdoc />
@@ -611,7 +611,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         Dictionary<string, object?> parameters = NewParameters();
         string sql = $"SELECT token_count FROM token_cache WHERE hash = {AddParameter(parameters, hash)} LIMIT 1;\n";
 
-        IReadOnlyList<long> rows = Query<long>(sql, parameters, reader => reader.GetInt64(reader.GetOrdinal("token_count")));
+        IReadOnlyList<long> rows = QueryRows<long>(sql, parameters, reader => reader.GetInt64(reader.GetOrdinal("token_count")));
         return rows.Count == 0 ? null : rows[0];
     }
 
@@ -647,7 +647,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     public StoredModelCatalogSnapshot GetModelContextWindowCatalog()
     {
         string status = "empty";
-        IReadOnlyList<string> statusRows = Query<string>(
+        IReadOnlyList<string> statusRows = QueryRows<string>(
             "SELECT status FROM context_window_catalog_state WHERE singleton_id = 1;\n",
             NewParameters(),
             reader => reader.GetString(reader.GetOrdinal("status")));
@@ -662,7 +662,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             "LEFT JOIN model_context_window_catalog_vendor_refresh vr ON vr.vendor = v.vendor " +
             "LEFT JOIN model_context_window_catalog_vendor_error ve ON ve.vendor = v.vendor " +
             "ORDER BY v.rowid ASC;\n";
-        IReadOnlyList<StoredModelCatalogVendorStatus> vendors = Query<StoredModelCatalogVendorStatus>(
+        IReadOnlyList<StoredModelCatalogVendorStatus> vendors = QueryRows<StoredModelCatalogVendorStatus>(
             vendorSql,
             NewParameters(),
             reader => new StoredModelCatalogVendorStatus(
@@ -677,7 +677,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             "FROM model_context_window_catalog e " +
             "LEFT JOIN model_context_window_source_revision r ON r.lookup_id = e.lookup_id " +
             "ORDER BY e.rowid ASC;\n";
-        IReadOnlyList<StoredModelContextWindowEntry> entries = Query<StoredModelContextWindowEntry>(
+        IReadOnlyList<StoredModelContextWindowEntry> entries = QueryRows<StoredModelContextWindowEntry>(
             entrySql,
             NewParameters(),
             reader => new StoredModelContextWindowEntry(
@@ -874,7 +874,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         AppendLimitOffset(sql, parameters, limit, offset: null);
         sql.Append(";\n");
 
-        return Query<StoredMetricPoint>(
+        return QueryRows<StoredMetricPoint>(
             sql.ToString(),
             parameters,
             reader => new StoredMetricPoint(
@@ -919,7 +919,7 @@ public partial class SqliteRelationalStore : IOperationalStore
 
         sql.Append(" ORDER BY ingest_id ASC;\n");
 
-        return Query<IngestLogEntry>(
+        return QueryRows<IngestLogEntry>(
             sql.ToString(),
             parameters,
             reader => new IngestLogEntry(
@@ -988,7 +988,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             $"WHERE rp.harness_id = {AddParameter(parameters, harnessId)} AND rp.source_key = {AddParameter(parameters, sourceKey)} " +
             "ORDER BY rp.rowid ASC;\n";
 
-        return Query<RecordProvenanceRow>(
+        return QueryRows<RecordProvenanceRow>(
             sql,
             parameters,
             reader => new RecordProvenanceRow(
@@ -1025,12 +1025,12 @@ public partial class SqliteRelationalStore : IOperationalStore
 
         lock (writeGate)
         {
-            Query<long>(
+            QueryRows<long>(
                 "PRAGMA wal_checkpoint(TRUNCATE);\n",
                 NewParameters(),
                 reader => reader.GetInt64(reader.GetOrdinal("checkpointed")));
-            Query<long>("VACUUM;\n", NewParameters(), _ => 0L);
-            Query<long>(
+            QueryRows<long>("VACUUM;\n", NewParameters(), _ => 0L);
+            QueryRows<long>(
                 "PRAGMA wal_checkpoint(TRUNCATE);\n",
                 NewParameters(),
                 reader => reader.GetInt64(reader.GetOrdinal("checkpointed")));
@@ -1045,7 +1045,7 @@ public partial class SqliteRelationalStore : IOperationalStore
     {
         string sql = $"SELECT {columnName} FROM {tableName} WHERE singleton_id = 1 LIMIT 1;\n";
 
-        IReadOnlyList<string> rows = Query<string>(
+        IReadOnlyList<string> rows = QueryRows<string>(
             sql,
             NewParameters(),
             reader => reader.GetString(reader.GetOrdinal(columnName)));
@@ -1066,7 +1066,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             "LEFT JOIN refresh_run_summary rrs ON rrs.refresh_run_id = rr.refresh_run_id " +
             $"LEFT JOIN refresh_run_history_window rrhw ON rrhw.refresh_run_id = rr.refresh_run_id{whereClause} {orderAndLimit};\n";
 
-        return Query<RefreshRunRow>(
+        return QueryRows<RefreshRunRow>(
             sql,
             parameters,
             reader => new RefreshRunRow(
@@ -1095,7 +1095,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             $"LEFT JOIN source_checkpoint_error sce ON sce.harness_id = sc.harness_id AND sce.source_key = sc.source_key{whereClause} " +
             "ORDER BY sc.rowid ASC;\n";
 
-        return Query<SourceCheckpoint>(
+        return QueryRows<SourceCheckpoint>(
             sql,
             parameters,
             reader => new SourceCheckpoint(
@@ -1139,7 +1139,7 @@ public partial class SqliteRelationalStore : IOperationalStore
         AppendLimitOffset(sql, parameters, limit, offset);
         sql.Append(";\n");
 
-        return Query<StoredIngestProblem>(
+        return QueryRows<StoredIngestProblem>(
             sql.ToString(),
             parameters,
             reader =>
@@ -1188,7 +1188,7 @@ public partial class SqliteRelationalStore : IOperationalStore
             "JOIN selected s ON s.span_id = qns.span_id " +
             "ORDER BY 1 DESC, 2 ASC;\n");
 
-        IReadOnlyList<QuarantinedSpanRow> rows = Query<QuarantinedSpanRow>(
+        IReadOnlyList<QuarantinedSpanRow> rows = QueryRows<QuarantinedSpanRow>(
             sql.ToString(),
             parameters,
             reader =>
