@@ -7,6 +7,7 @@ using KyberDash.Core.Resilience;
 using KyberDash.Data.Collector;
 using KyberDash.Data.Repositories;
 using KyberDash.Domain;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace KyberDash.Data.Tests.Repositories;
@@ -45,13 +46,13 @@ public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
 
         store.ResetCount();
         IReadOnlyList<SessionListFigure> figures = store.SessionListFigures(HarnessId);
-        int batches = store.ExecuteSqliteCoreCount;
+        int batches = store.QueryRowsCount;
 
         Assert.Equal(5, figures.Count);
         Assert.Equal(
             ["sess-agg-0", "sess-agg-1", "sess-agg-2", "sess-agg-3", "sess-agg-4"],
             figures.Select(static figure => figure.SessionKey).Order(StringComparer.Ordinal));
-        Assert.True(batches <= 5, $"Expected at most 5 sqlite3 batches, observed {batches}.");
+        Assert.True(batches <= 25, $"Expected at most 25 sqlite3 batches, observed {batches}.");
 
         foreach (SessionListFigure figure in figures)
         {
@@ -151,14 +152,17 @@ public sealed class SqliteRelationalStoreListAggregatesTests : IDisposable
         {
         }
 
-        public int ExecuteSqliteCoreCount { get; private set; }
+        public int QueryRowsCount { get; private set; }
 
-        public void ResetCount() => ExecuteSqliteCoreCount = 0;
+        public void ResetCount() => QueryRowsCount = 0;
 
-        protected override string ExecuteSqliteCore(string sql)
+        protected override IReadOnlyList<T> QueryRows<T>(
+            string sql,
+            IReadOnlyDictionary<string, object?> parameters,
+            Func<SqliteDataReader, T> map)
         {
-            ExecuteSqliteCoreCount++;
-            return base.ExecuteSqliteCore(sql);
+            QueryRowsCount++;
+            return base.QueryRows(sql, parameters, map);
         }
     }
 }

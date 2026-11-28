@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Text;
+using System.Linq;
 using System.Threading;
+using KyberDash.Core.Repositories;
 using KyberDash.Domain.Schema;
 
 namespace KyberDash.Data.Repositories;
@@ -66,6 +67,11 @@ public partial class SqliteRelationalStore
 
     private Action? Initialize()
     {
+        if (GetType() == typeof(SqliteRelationalStore) && !fileSystem.FileExists(DatabasePath))
+        {
+            EnsureDatabaseDirectory();
+        }
+
         if (fileSystem.FileExists(DatabasePath))
         {
             int? existingVersion = ProbeExistingDatabaseSchemaVersion();
@@ -105,21 +111,16 @@ public partial class SqliteRelationalStore
     /// </summary>
     private void InvalidateCheckpointsWhenSpanClaimsAreNew()
     {
-        string probe = ExecuteSqlite(
-            ".headers off\n" +
-            ".mode tabs\n" +
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('source_checkpoint', 'record_source_claim');");
+        IReadOnlyList<string> tableNames = ReadNameRows(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('source_checkpoint', 'record_source_claim');\n");
 
-        HashSet<string> present = new(TabLines(probe).Select(static line => line.Trim()), StringComparer.Ordinal);
+        HashSet<string> present = new(tableNames.Select(static name => name.Trim()), StringComparer.Ordinal);
         if (!present.Contains("source_checkpoint") || present.Contains("record_source_claim"))
         {
             return;
         }
 
-        ExecuteSqlite(
-            "BEGIN IMMEDIATE;\n" +
-            "UPDATE source_checkpoint SET last_status = 'invalidated';\n" +
-            "COMMIT;\n");
+        ExecuteSchemaBody("UPDATE source_checkpoint SET last_status = 'invalidated';\n");
     }
 
     /// <summary>
@@ -185,21 +186,18 @@ public partial class SqliteRelationalStore
 
     private int? ProbeExistingDatabaseSchemaVersion()
     {
-        string probeOutput = ExecuteSqlite(
-            ".headers off\n" +
-            ".mode tabs\n" +
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('store_state', 'metadata');");
+        IReadOnlyList<string> tableNames = ReadNameRows(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('store_state', 'metadata');\n");
 
         bool hasStoreState = false;
         bool hasMetadata = false;
-        foreach (string line in TabLines(probeOutput))
+        foreach (string tableName in tableNames)
         {
-            string tableName = line.Trim();
-            if (string.Equals(tableName, "store_state", StringComparison.Ordinal))
+            if (string.Equals(tableName.Trim(), "store_state", StringComparison.Ordinal))
             {
                 hasStoreState = true;
             }
-            else if (string.Equals(tableName, "metadata", StringComparison.Ordinal))
+            else if (string.Equals(tableName.Trim(), "metadata", StringComparison.Ordinal))
             {
                 hasMetadata = true;
             }
@@ -220,12 +218,10 @@ public partial class SqliteRelationalStore
 
     private int? ReadStoredSchemaVersion()
     {
-        string output = ExecuteSqlite(
-            ".headers off\n" +
-            ".mode tabs\n" +
-            "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;");
+        IReadOnlyList<string> rows = ReadSchemaVersionRows(
+            "SELECT schema_version, detector_version FROM store_state WHERE singleton_id = 1 LIMIT 1;\n");
 
-        foreach (string line in TabLines(output))
+        foreach (string line in rows)
         {
             string[] cols = line.Split('\t', StringSplitOptions.None);
             if (cols.Length == 0 || !int.TryParse(cols[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int version) || version <= 0)
@@ -243,12 +239,10 @@ public partial class SqliteRelationalStore
 
     private int ReadLegacyMetadataSchemaVersion()
     {
-        string output = ExecuteSqlite(
-            ".headers off\n" +
-            ".mode tabs\n" +
-            "SELECT value FROM metadata WHERE key = 'schema_version' LIMIT 1;");
+        IReadOnlyList<string> rows = ReadValueRows(
+            "SELECT value FROM metadata WHERE key = 'schema_version' LIMIT 1;\n");
 
-        foreach (string line in TabLines(output))
+        foreach (string line in rows)
         {
             if (!int.TryParse(line.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int version) || version <= 0)
             {
@@ -281,25 +275,66 @@ public partial class SqliteRelationalStore
     private void ApplyWalPragmasAndStoreState()
     {
         string storeStateDdl = SchemaDdlGenerator.GenerateTableDdl(RelationalSchemaCatalog.GetTable("store_state"));
-        ExecuteSqlite(
-            "PRAGMA journal_mode = WAL;\n" +
-            "PRAGMA synchronous = NORMAL;\n" +
-            $"PRAGMA journal_size_limit = {IntSql(WalSizeLimitBytes)};\n" +
-            storeStateDdl);
+
+        // Journal mode cannot change inside a transaction, so the pragmas run without one and the
+        // table DDL that follows runs through the transactional statement path.
+        ExecuteStatementsWithoutTransaction(
+        [
+            SqlStatement.Of("PRAGMA journal_mode = WAL;\n"),
+            SqlStatement.Of("PRAGMA synchronous = NORMAL;\n"),
+            SqlStatement.Of($"PRAGMA journal_size_limit = {IntSql(WalSizeLimitBytes)};\n"),
+        ]);
+        ExecuteStatements([SqlStatement.Of(storeStateDdl)]);
     }
 
     private void ApplyFullSchemaAndStampState()
     {
-        StringBuilder script = new();
-        script.Append("PRAGMA foreign_keys = ON;\n");
-        script.Append("BEGIN IMMEDIATE;\n");
-        script.Append(SchemaDdlGenerator.GenerateSchemaDdl());
-        string schemaVersionSql = IntSql(SchemaVersion);
-        string detectorVersionSql = IntSql(DetectorVersion);
-        script.Append(
-            CultureInfo.InvariantCulture,
-            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, {schemaVersionSql}, {detectorVersionSql});\n");
-        script.Append("COMMIT;\n");
-        ExecuteSqlite(script.ToString());
+        string schemaDdl = SchemaDdlGenerator.GenerateSchemaDdl();
+        string stampSql =
+            $"INSERT OR IGNORE INTO store_state (singleton_id, schema_version, detector_version) VALUES (1, $schemaVersion, $detectorVersion);\n";
+
+        SqlStatement schemaStatement = SqlStatement.Of(schemaDdl);
+        SqlStatement stampStatement = new(
+            stampSql,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["$schemaVersion"] = SchemaVersion,
+                ["$detectorVersion"] = DetectorVersion,
+            });
+        ExecuteStatements([schemaStatement, stampStatement]);
     }
+
+    private IReadOnlyList<string> ReadNameRows(string sql) =>
+        QueryRows<string>(
+            sql,
+            EmptyParameters(),
+            static reader => reader.GetString(reader.GetOrdinal("name")));
+
+    private IReadOnlyList<string> ReadSchemaVersionRows(string sql) =>
+        QueryRows<string>(
+            sql,
+            EmptyParameters(),
+            static reader =>
+            {
+                object version = reader.GetValue(reader.GetOrdinal("schema_version"));
+                object detectorVersion = reader.GetValue(reader.GetOrdinal("detector_version"));
+                return Convert.ToString(version, CultureInfo.InvariantCulture) +
+                    "\t" +
+                    Convert.ToString(detectorVersion, CultureInfo.InvariantCulture);
+            });
+
+    private IReadOnlyList<string> ReadValueRows(string sql) =>
+        QueryRows<string>(
+            sql,
+            EmptyParameters(),
+            static reader => Convert.ToString(
+                reader.GetValue(reader.GetOrdinal("value")),
+                CultureInfo.InvariantCulture) ?? string.Empty);
+
+    private void ExecuteSchemaBody(string bodySql)
+    {
+        ExecuteStatements([SqlStatement.Of(bodySql)]);
+    }
+
+    private static Dictionary<string, object?> EmptyParameters() => new(StringComparer.Ordinal);
 }
