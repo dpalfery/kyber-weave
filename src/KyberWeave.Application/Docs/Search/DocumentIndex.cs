@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Text;
 using KyberWeave.Domain.CodeGraph;
 
@@ -372,7 +373,7 @@ public sealed partial class DocumentIndex
         HashSet<string> stated = new(StringComparer.Ordinal);
         foreach (DocumentModel candidate in candidates)
         {
-            foreach (DocumentSection section in candidate.Sections)
+            foreach (DocumentSection section in TopicSections(candidate))
             {
                 stated.UnionWith(SectionVector(section).Keys);
             }
@@ -809,7 +810,19 @@ public sealed partial class DocumentIndex
     }
 
     /// <summary>
-    /// Fills a document's share of the budget with its most relevant <c>##</c> sections.
+    /// The sections a topic is scored against, split by the corpus's one Markdown parser so a
+    /// nested heading is read here the same way <c>Explore</c> reads it.
+    /// </summary>
+    private static List<DocumentSection> TopicSections(DocumentModel doc)
+    {
+        return [.. DocumentMarkdown.SplitTopicSections(doc.Body)];
+    }
+
+    /// <summary>
+    /// Fills a document's share of the budget with its most relevant sections. A
+    /// <c>##</c> heading that contains <c>###</c> headings is scored at those
+    /// headings, so a sibling heading that shares one word of the topic cannot
+    /// crowd out the subsection that discusses it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -834,9 +847,10 @@ public sealed partial class DocumentIndex
         IReadOnlyDictionary<string, double> queryVector,
         int budget)
     {
-        if (doc.Sections.Count == 0) return DocumentExcerpt.Empty;
+        IReadOnlyList<DocumentSection> sections = TopicSections(doc);
+        if (sections.Count == 0) return DocumentExcerpt.Empty;
 
-        List<(DocumentSection Section, double Score)> ranked = doc.Sections
+        List<(DocumentSection Section, double Score)> ranked = sections
             .Select(section =>
             {
                 Dictionary<string, double> vector = SectionVector(section);

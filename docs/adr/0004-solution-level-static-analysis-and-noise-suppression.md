@@ -4,7 +4,7 @@ title: Solution-Level Static Analysis Configuration and Clean Code Policy
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-11-26
 ---
 
 # ADR 0004: Solution-Level Static Analysis Configuration and Clean Code Policy
@@ -52,3 +52,15 @@ We establish a unified solution-level static analysis and clean code policy:
 - The entire solution builds with zero warnings under `TreatWarningsAsErrors`.
 - Static analysis gates in CI and the review council run with high signal-to-noise ratio.
 - Production and test code maintain consistent, modern, readable C# idioms.
+
+## Amendment 2026-11-26: the analyzer ratchet
+
+The rejected alternative above is a solution-wide `<NoWarn>`, which turns analyzers off.
+Seven analyzers that enforce KW-STD-CS-002, KW-STD-CS-003, KW-STD-CS-004, KW-STD-CS-006 and
+KW-STD-CS-012 (CA1502, CA1506, CA2227, CA1062, CA1031, CA1001, CA1063) still have violations,
+so `analyzers/ratchet.globalconfig` holds each at `suggestion` until that analyzer reaches zero.
+Suggestion is not a suppression: the diagnostic still shows, and the id is not added to
+`<NoWarn>`. The change that brings an analyzer to zero deletes its line, and from then on it
+fails the build. A line is never added back. When none remain, the file and its `ItemGroup` in
+`Directory.Build.props` are deleted. That exit is what separates this ratchet from the
+`<NoWarn>` alternative this record rejects.

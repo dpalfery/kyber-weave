@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-11-25
+last-reviewed: 2026-11-26
 ---
 
 # Installing Kyber-Weave
@@ -348,6 +348,31 @@ gh attestation verify kyber-weave-linux-x64.tar.gz -R dpalfery/kyber-weave --pre
 The aggregate SBOM is attested once against all archives; each per-artifact
 SBOM is attested against its own archive. See
 [the SBOM asset](distribution.md#the-sbom-asset) for the maintainer view.
+
+### Verifying build provenance
+
+Every published archive also carries a signed SLSA build-provenance attestation,
+minted by the same release job (`actions/attest` in provenance mode, predicate
+type `https://slsa.dev/provenance/v1`). It binds the archive to this
+repository's release workflow — that the bytes were built there, from that
+workflow run — without making any claim about what is inside them:
+
+```bash
+gh attestation verify <archive> -R dpalfery/kyber-weave --predicate-type https://slsa.dev/provenance/v1
+```
+
+For example:
+
+```bash
+gh attestation verify kyber-weave-linux-x64.tar.gz -R dpalfery/kyber-weave --predicate-type https://slsa.dev/provenance/v1
+```
+
+The two predicates are not interchangeable: the SBOM check pins
+`https://cyclonedx.org/bom` and the provenance check pins
+`https://slsa.dev/provenance/v1`, so neither can be satisfied by the other
+attestation. A re-run of a release that publishes nothing new verifies both
+against the published archives — see
+[Re-running a release](distribution.md#re-running-a-release-the-chain-receipt).
 
 ### What the SBOMs do and do not tell you
 

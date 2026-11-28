@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: sqlite
 owner: dpalfery
-last-reviewed: 2026-11-23
+last-reviewed: 2026-11-26
 ---
 
 # SQLite coding standard
@@ -97,11 +97,16 @@ Generated foreign keys are `ON DELETE CASCADE`. The open script sets
 
 ### Binding values
 
-Text that did not come from the statement itself is bound with `TextExpr` (a
-`CAST(X'…' AS TEXT)` hex literal) or, in the analysis cache, a SQLite `BLOB` literal.
-Interpolating caller text into SQL is a finding, including text that looks like a
-number or an identifier. Integers the store itself formatted with `CultureInfo.InvariantCulture`
-may be inlined. Reads of text columns come back as `hex(CAST(column AS BLOB))`.
+Every value that did not come from the statement itself is a named parameter on the command
+(KW-STD-SQL-004), every statement is a named constant in the store's query catalogue
+(KW-STD-SQL-005), and every row is read by column name into a typed record (KW-STD-SQL-006).
+Parameters are the standard defence against injection and let SQLite reuse a prepared statement;
+the older `TextExpr` (`CAST(X'…' AS TEXT)`) and `BLOB` hex literals date from when statements went
+to the `sqlite3` CLI, which has no parameters. Interpolating caller text into SQL is a finding,
+including text that looks like a number or an identifier. The existing `TextExpr` call sites,
+the `hex(CAST(column AS BLOB))` reads and the analysis cache's CLI calls are debt that
+[the remediation plan](../../todo/csharp-standards-remediation.md) removes; new code
+does not add to them.
 
 ### Store reads are shaped to their consumer
 
@@ -181,7 +186,7 @@ them: the rebuild deletes the file it opened, and a leftover copy would be a bac
 owner rejected.
 
 A value from a harness, a request, or a file is treated as data. It enters SQL only
-through `TextExpr` or a blob literal. A path from a caller is not concatenated into a
+as a named parameter. A path from a caller is not concatenated into a
 `sqlite3` argument list.
 
 The analysis cache is local to the machine. It is not a source of canon history, and it

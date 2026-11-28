@@ -21,7 +21,7 @@ Every package branches from the integration base and is merged back by pull requ
 | Package | Scope | Order and notes |
 |---|---|---|
 | S Squad | `Core.Squad/**`, `Core/Squad/**`, plus `Configuration/McpServerNames.cs` and `McpConfig.cs` | Hub types first (`SquadTarget`, deployment scope and file, renderer contract), then Rendering, then Deployment stores and services |
-| D Docs | `Core.Docs/**`, `Core/Docs/**` | Pure models, analysis, search and validation to Domain; loaders, SQLite persistence, embeddings and `gh` delivery to Data; analyzer and scaffolder to Application |
+| D Docs | `Core.Docs/**`, `Core/Docs/**` | Pure models to Domain; analysis, search and validation to Application; loaders, SQLite persistence, embeddings and `gh` delivery to Data; analyzer and scaffolder to Application |
 | C Config, Review, Arbiter | `Core/Configuration/**` (minus S's two files), `Core/Review/**`, `Core/Arbiter/**` | These three reference each other; move pure records first, then I/O, then services. Largest and hardest package |
 | C2 Doctor and the rest of Core | `Core/{Doctor,CodeGraph,CopilotPrompt,Utilities}/**` and root files | Depends on C for configuration types |
 | E RunStart and CLI seams | `Core/RunStart/**`, RunStart and Utilities CLI commands, CLI composition | Builds the shared environment, file system and process contracts and the Spectre type registrar the rest of the CLI will reuse |
@@ -61,7 +61,7 @@ Move the legacy engine (`src/KyberWeave.Core`, `src/KyberWeave.Core.Docs`, `src/
 | Layer | Holds | May reference |
 |---|---|---|
 | `KyberWeave.Kernel` | primitives: processes, file helpers, text, parsing | nothing |
-| `KyberWeave.Domain` | pure logic, models, rules, validators, renderers' pure parts. No I/O | Kernel |
+| `KyberWeave.Domain` | data only: records, DTOs, enums, options, constants (`AGENTS.md`, ADR 0089). Logic goes in Application | Kernel |
 | `KyberWeave.Contracts` | interfaces only. `Repositories/` = I/O ports, `Services/` = what entry apps call | Domain, Kernel |
 | `KyberWeave.Data` | adapters that implement Contracts: file system, processes, sqlite, HTTP, credentials, git | Contracts, Domain, Kernel |
 | `KyberWeave.Application` | use cases and pipelines, `AddWeaveApplication` wiring (it wires Data) | Contracts, Data, Domain, Kernel |
