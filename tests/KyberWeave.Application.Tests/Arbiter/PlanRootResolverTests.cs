@@ -224,6 +224,47 @@ public sealed class PlanRootResolverTests
 
         public IReadOnlySet<string> GetChangedPathsSinceSnapshot(string workingDirectory, GitSnapshot snapshot, string gitExecutable = "git") => throw Unsupported();
 
+        public Task<string?> GetRootAsync(string workingDirectory, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlyList<string>> ListWorktreesAsync(
+            string workingDirectory,
+            string gitExecutable = "git",
+            CancellationToken cancellationToken = default) =>
+            failure is null
+                ? Task.FromResult(worktrees ?? (IReadOnlyList<string>)[])
+                : Task.FromException<IReadOnlyList<string>>(failure);
+
+        public Task<string?> GetCommonDirectoryAsync(string workingDirectory, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<string?> GetCurrentBranchAsync(string workingDirectory, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<bool> RefExistsAsync(string workingDirectory, string revision, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<string?> GetHeadAsync(string workingDirectory, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlyDictionary<string, string>> GetDirtyStatusesAsync(string workingDirectory, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlyDictionary<string, string>> GetBlobIdsAsync(string workingDirectory, IEnumerable<string> paths, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlySet<string>> GetChangedPathsSinceBaseAsync(string workingDirectory, string baseRevision, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlyList<HunkRange>> GetHunkRangesAsync(string workingDirectory, string baseRef, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlyList<ChangedHunk>?> GetChangedHunksAsync(string workingDirectory, string baseRef, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<ChangeSet?> GetChangeSetAsync(string workingDirectory, string baseRef, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<string?> GetDiffSummaryAsync(
+            string workingDirectory,
+            string baseRef,
+            IReadOnlyCollection<string> changedPaths,
+            string gitExecutable = "git",
+            CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<GitSnapshot?> CaptureSnapshotAsync(string workingDirectory, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
+        public Task<IReadOnlySet<string>> GetChangedPathsSinceSnapshotAsync(string workingDirectory, GitSnapshot snapshot, string gitExecutable = "git", CancellationToken cancellationToken = default) => throw Unsupported();
+
         private static NotSupportedException Unsupported() =>
             new("The plan root resolver asks git for its worktree list only.");
     }

@@ -88,4 +88,116 @@ internal sealed class FakeGitRepositoryFacts : IGitRepositoryFacts
         string workingDirectory,
         GitSnapshot snapshot,
         string gitExecutable = "git") => new HashSet<string>(StringComparer.Ordinal);
+
+    /// <inheritdoc />
+    public Task<string?> GetRootAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) => Task.FromResult(GetRoot(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ListWorktreesAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(ListWorktrees(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<string?> GetCommonDirectoryAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetCommonDirectory(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<string?> GetCurrentBranchAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetCurrentBranch(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<bool> RefExistsAsync(
+        string workingDirectory,
+        string revision,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(RefExists(workingDirectory, revision, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<string?> GetHeadAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) => Task.FromResult(GetHead(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<string, string>> GetDirtyStatusesAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetDirtyStatuses(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<string, string>> GetBlobIdsAsync(
+        string workingDirectory,
+        IEnumerable<string> paths,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetBlobIds(workingDirectory, paths, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlySet<string>> GetChangedPathsSinceBaseAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetChangedPathsSinceBase(workingDirectory, baseRef, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<HunkRange>> GetHunkRangesAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetHunkRanges(workingDirectory, baseRef, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<ChangedHunk>?> GetChangedHunksAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetChangedHunks(workingDirectory, baseRef, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<ChangeSet?> GetChangeSetAsync(
+        string workingDirectory,
+        string baseRef,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetChangeSet(workingDirectory, baseRef, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<string?> GetDiffSummaryAsync(
+        string workingDirectory,
+        string baseRef,
+        IReadOnlyCollection<string> changedPaths,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetDiffSummary(workingDirectory, baseRef, changedPaths, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<GitSnapshot?> CaptureSnapshotAsync(
+        string workingDirectory,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(CaptureSnapshot(workingDirectory, gitExecutable));
+
+    /// <inheritdoc />
+    public Task<IReadOnlySet<string>> GetChangedPathsSinceSnapshotAsync(
+        string workingDirectory,
+        GitSnapshot snapshot,
+        string gitExecutable = "git",
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(GetChangedPathsSinceSnapshot(workingDirectory, snapshot, gitExecutable));
 }

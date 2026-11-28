@@ -140,6 +140,120 @@ public sealed class PlanRootResolver(
         }
     }
 
+    /// <summary>
+    /// The root to evaluate <paramref name="prompt"/> against, without blocking a thread while the worktree list is read.
+    /// </summary>
+    public async Task<string> ResolveAsync(
+        string hookRoot,
+        string prompt,
+        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? listWorktrees = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hookRoot);
+        ArgumentNullException.ThrowIfNull(prompt);
+
+        HeaderBlock block = HeaderBlock.Parse(prompt);
+        string? planFile = block.Headers.TryGetValue(DispatchHeaders.PlanFile, out string? valid)
+            ? valid
+            : block.RawValues.TryGetValue(DispatchHeaders.PlanFile, out string? raw) ? raw : null;
+        return await ResolvePlanRootAsync(hookRoot, planFile, prompt, listWorktrees, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The root to read a dispatch's plan, task file and prompt against when its headers are already parsed,
+    /// without blocking a thread while the worktree list is read.
+    /// </summary>
+    public async Task<string> ResolvePlanRootAsync(
+        string hookRoot,
+        string? planFile,
+        string? text,
+        Func<string, CancellationToken, Task<IReadOnlyList<string>>>? listWorktrees = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(hookRoot);
+        listWorktrees ??= (root, token) => git.ListWorktreesAsync(root, cancellationToken: token);
+        text ??= string.Empty;
+
+        if (planFile is not null && Holds(hookRoot, planFile))
+        {
+            return hookRoot;
+        }
+
+        // Without a plan the only signal is a path in the text; skip the git call when the text holds neither a path
+        // nor the word, because a worktree need not live in a directory named after it.
+        if (planFile is null && !text.Contains("worktree", StringComparison.OrdinalIgnoreCase) && !HoldsAPath(text))
+        {
+            return hookRoot;
+        }
+
+        // A git call that cannot answer, or a worktree entry that is no full path, is no worktree list: the
+        // hook's own directory stands and the rules decide on the absence.
+        IReadOnlyList<string> others;
+        try
+        {
+            IReadOnlyList<string> listed = await listWorktrees(hookRoot, cancellationToken).ConfigureAwait(false);
+            others = [.. listed.Where(worktree => IsOtherRoot(worktree, hookRoot))];
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return hookRoot;
+        }
+
+        if (others.Count == 0)
+        {
+            return hookRoot;
+        }
+
+        if (planFile is null)
+        {
+            // A return whose headers were stripped: the worktree its body names, when exactly one is named.
+            List<string> named = [.. others.Where(worktree => Names(text, worktree))];
+            return named.Count == 1 ? named[0] : hookRoot;
+        }
+
+        List<string> holding = [.. others.Where(worktree => Holds(worktree, planFile))];
+        if (holding.Count == 0)
+        {
+            return hookRoot;
+        }
+
+        if (holding.Count == 1)
+        {
+            return holding[0];
+        }
+
+        List<string> namedHolding = [.. holding.Where(worktree => Names(text, worktree))];
+        if (namedHolding.Count == 1)
+        {
+            return namedHolding[0];
+        }
+
+        // Every worktree in `holding` holds the plan (its path resolves), so resolve each once and compare
+        // copies by their last write time; a copy whose metadata cannot be read is dropped, not picked.
+        List<(string Worktree, string Path)> copies = [];
+        foreach (string worktree in holding)
+        {
+            if (planPaths.Resolve(planFile, worktree) is { } path)
+                copies.Add((worktree, path));
+        }
+
+        if (copies.Count == 0)
+        {
+            return hookRoot;
+        }
+
+        try
+        {
+            return copies.OrderByDescending(copy => files.GetLastWriteTimeUtc(copy.Path)).First().Worktree;
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            // A copy whose metadata cannot be read cannot be compared with the others, so no copy is picked and
+            // the hook's own directory stands.
+            return hookRoot;
+        }
+    }
+
     /// <summary>Whether a listed worktree is another root this dispatch may be evaluated in.</summary>
     /// <remarks>An entry that is not a fully qualified path cannot be compared, so it is not one.</remarks>
     private bool IsOtherRoot(string worktree, string hookRoot)

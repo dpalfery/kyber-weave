@@ -1176,6 +1176,12 @@
       "text": "ProcessStartInfo startInfo = new(request.Program)",
       "count": 1,
       "bound": "Builds only; the test never starts it directly. The async role view passes it to the seam under test, whose own spawn site is allow-listed, and every run is bounded by the request timeout the test supplies."
+    },
+    {
+      "file": "src/KyberWeave.Application/Arbiter/Facts/GitFacts.cs",
+      "text": "ProcessStartInfo startInfo = new(gitExecutable)",
+      "count": 1,
+      "bound": "Builds only; the synchronous fact reader hands it to the injected process seam, which starts, drains and reaps the child, and the async twin runs the same git arguments under the sixty-second GitTimeout."
     }
   ]
 }
