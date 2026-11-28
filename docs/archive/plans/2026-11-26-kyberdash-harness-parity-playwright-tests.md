@@ -225,7 +225,7 @@ This plan adds no new application component or C# product API surface; it extend
 
 ## Review
 
-- Pending plan approval and implementation. Once tasks finish, run the code-review council (`code-review` skill) over the branch diff and capture any residual PR notes before closeout.
+- Completed (`T1`–`T4` implemented and verified; `docs-dev` closeout and archival completed 2026-11-28, followed by Kilo review remediation on PR #742).
 
 ## docs-dev closeout
 
