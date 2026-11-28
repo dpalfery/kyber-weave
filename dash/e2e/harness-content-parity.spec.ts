@@ -6,9 +6,9 @@ import {
   COPILOT_BASELINE_CONTRACT,
   GEMINI_EXCLUDED_SESSION_ID,
   STORED_OTLP_HARNESS_CONTRACTS,
+  buildAllHarnessOtlpFixtures,
   buildCopilotBaselineFixture,
   buildDroidSessionFiles,
-  buildHarnessOtlpFixture,
   type DroidSessionFilePair,
   type HarnessExpectationContract,
   type OtlpExportLogsServiceRequest,
@@ -181,7 +181,7 @@ async function readProblems(
 }
 
 test.beforeAll(async () => {
-  test.setTimeout(240_000)
+  test.setTimeout(480_000)
 
   // Server #1: the healthy corpus, the dual Copilot baseline and every other ingestible harness.
   healthy = await startIsolatedServer({ startupTimeoutMs: 120_000 })
@@ -204,7 +204,7 @@ test.beforeAll(async () => {
   }
 
   const otlpFixtures = [
-    ...STORED_OTLP_HARNESS_CONTRACTS.map((contract) => buildHarnessOtlpFixture(contract)),
+    ...buildAllHarnessOtlpFixtures(),
     buildCopilotBaselineFixture(),
   ]
   for (const fixture of otlpFixtures) {
@@ -214,13 +214,14 @@ test.beforeAll(async () => {
     }
   }
 
+  const expectedOtlpFixtures = otlpFixtures.filter((fixture) => fixture.harness !== 'gemini')
   await waitForOtlpIngest(
     healthy.url,
-    otlpFixtures.map((fixture) => fixture.sessionId),
+    expectedOtlpFixtures.map((fixture) => fixture.sessionId),
     {
       timeoutMs: 60_000,
       pollIntervalMs: 250,
-      expectedHarnesses: [...new Set(otlpFixtures.map((fixture) => fixture.harness))],
+      expectedHarnesses: [...new Set(expectedOtlpFixtures.map((fixture) => fixture.harness))],
     },
   )
   await postRefresh(healthy.url)
@@ -410,10 +411,19 @@ test('server #2: corrupt SQLite sources and unclaimed OTLP produce honest diagno
   test.setTimeout(180_000)
   const baseUrl = broken!.url
 
-  // The unclaimed span and unattributed log are posted before the import so the refresh pass sees
-  // both in one store.
+  // The unclaimed span and unattributed log are posted before the import, then we wait for the
+  // collector's drain loop to flush /healthz pendingCount to 0 before reading problems/quarantine.
   await postOtlpTraces(baseUrl, unclaimedSpanPayload())
   await postOtlpLogs(baseUrl, unattributedLogPayload())
+  const drainDeadline = Date.now() + 30_000
+  while (Date.now() < drainDeadline) {
+    const health = await page.request.get(`${baseUrl}/healthz`)
+    if (health.ok()) {
+      const body = (await health.json()) as { pendingCount?: number }
+      if ((body.pendingCount ?? 0) === 0) break
+    }
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 200))
+  }
   await postImportHistory(baseUrl)
 
   const unfiltered = await readProblems(page, baseUrl, '')

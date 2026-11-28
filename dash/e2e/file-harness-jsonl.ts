@@ -773,7 +773,7 @@ export function buildDroidParityFixture(): FileHarnessFixture {
                 message: {
                   role: 'assistant',
                   content: [
-                    { type: 'reasoning', text: `Parity step ${turn}: plan the change.` },
+                    { type: 'thinking', thinking: `Parity step ${turn}: plan the change.` },
                     { type: 'text', text: `Finished parity step ${turn}.` },
                   ],
                 },
