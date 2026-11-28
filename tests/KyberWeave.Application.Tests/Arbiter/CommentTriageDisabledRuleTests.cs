@@ -169,15 +169,15 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     /// <summary>The tool's inline JSON for a disabled rule carries status not-evaluated, and an answered call carries answered.</summary>
     [Fact]
-    public void TheToolJsonReportsNotEvaluatedForADisabledRuleAndAnsweredOtherwise()
+    public async Task TheToolJsonReportsNotEvaluatedForADisabledRuleAndAnsweredOtherwise()
     {
         WriteCitedFile();
 
-        using JsonDocument disabled = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, RulesWithCommentDisabled())
-            .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
-        using JsonDocument answered = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Real), Root,
+        using JsonDocument disabled = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, RulesWithCommentDisabled())
+            .ClassifyBotReviewCommentAsync(CitedPath, 12, "Rename this.", null));
+        using JsonDocument answered = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Real), Root,
                 KyberWeaveConfigAssembler.FromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
-            .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
+            .ClassifyBotReviewCommentAsync(CitedPath, 12, "Rename this.", null));
 
         Assert.Equal("real", disabled.RootElement.GetProperty("class").GetString());
         Assert.Equal("not-evaluated", disabled.RootElement.GetProperty("status").GetString());
@@ -187,12 +187,12 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     /// <summary>The tool's summary items for a disabled rule carry status not-evaluated.</summary>
     [Fact]
-    public void TheToolSummaryItemsReportNotEvaluatedForADisabledRule()
+    public async Task TheToolSummaryItemsReportNotEvaluatedForADisabledRule()
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, RulesWithCommentDisabled())
-            .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
+        using JsonDocument json = JsonDocument.Parse(await Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, RulesWithCommentDisabled())
+            .ClassifyBotReviewCommentAsync(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
         Assert.Equal("real", item.GetProperty("class").GetString());
