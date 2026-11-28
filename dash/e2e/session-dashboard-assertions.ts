@@ -294,6 +294,8 @@ export type ParityGapEvidence = {
   readonly sessionId: string
   readonly dimension: CopilotParityDimension
   readonly detail: string
+  /** Optional context block key (e.g. `system_prompt`) when a `content-part-drop` targets one block. */
+  readonly blockKey?: string
   /** The harness's documented gap markers; only a documented `content-part-drop` is tolerated. */
   readonly documentedGaps?: readonly string[]
   /** What the check did instead of the unreachable surface, for the annotation. */
@@ -336,11 +338,16 @@ export function classifyParityGap(
     )
   }
   const documentedGaps = evidence.documentedGaps ?? []
+  const markerAllows = (marker: string): boolean => {
+    if (marker === 'system_prompt_bucket_absent') {
+      return evidence.dimension === 'context-content' && evidence.blockKey === 'system_prompt'
+    }
+    return CONTENT_DROP_DIMENSIONS[marker]?.has(evidence.dimension) ?? false
+  }
   const documented =
     INTRINSIC_GAP_CODES.has(evidence.code) ||
     documentedGaps.includes(evidence.code) ||
-    (evidence.code === 'content-part-drop' &&
-      documentedGaps.some((marker) => CONTENT_DROP_DIMENSIONS[marker]?.has(evidence.dimension) ?? false))
+    (evidence.code === 'content-part-drop' && documentedGaps.some(markerAllows))
   if (!documented) {
     throw new Error(
       `Unannotated content drop [${evidence.code}] for ${evidence.harness} session ${evidence.sessionId}: ${evidence.detail} is not listed in the harness parity matrix`,
@@ -849,11 +856,12 @@ async function inspectChartDrawer(
   const droppedKeys = blocks
     .filter((block) => block.empty && nonEmptyByKey.has(block.key))
     .map((block) => block.key)
-  if (droppedKeys.length > 0) {
+  for (const droppedKey of droppedKeys) {
     record({
       code: 'content-part-drop',
       dimension: 'context-content',
-      detail: `turn ${inspectedTurn} served non-empty canonical parts for [${droppedKeys.join(', ')}] that rendered empty`,
+      blockKey: droppedKey,
+      detail: `turn ${inspectedTurn} served non-empty canonical part for '${droppedKey}' that rendered empty`,
     })
   }
 

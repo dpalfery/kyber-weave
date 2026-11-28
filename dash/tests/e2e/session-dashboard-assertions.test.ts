@@ -794,6 +794,29 @@ describe('assertHarnessFullContentParity', () => {
         documentedGaps: ['tool_call_input_text_absent'],
       }),
     ).toThrow(/Unannotated content drop/)
+
+    const sysDrop = classifyParityGap({
+      code: 'content-part-drop',
+      harness: 'claude-code',
+      sessionId: SESSION_ID,
+      dimension: 'context-content',
+      blockKey: 'system_prompt',
+      detail: 'system_prompt empty',
+      documentedGaps: ['system_prompt_bucket_absent'],
+    })
+    expect(sysDrop.documented).toBe(true)
+
+    expect(() =>
+      classifyParityGap({
+        code: 'content-part-drop',
+        harness: 'claude-code',
+        sessionId: SESSION_ID,
+        dimension: 'context-content',
+        blockKey: 'conversation_history',
+        detail: 'conversation_history empty',
+        documentedGaps: ['system_prompt_bucket_absent'],
+      }),
+    ).toThrow(/Unannotated content drop/)
   })
 
   it('detects a single-part drop even when other blocks render content', async () => {
