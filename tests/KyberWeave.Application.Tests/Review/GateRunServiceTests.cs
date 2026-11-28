@@ -165,13 +165,89 @@ public sealed class GateRunServiceTests
         Assert.Equal(["/repo/dash"], _programs.WorkingDirectories);
     }
 
+    [Fact]
+    public async Task RunAsyncRecordsGateDurationWithoutBlocking()
+    {
+        _programs.Takes("build", TimeSpan.FromMilliseconds(1500));
+
+        GateReport report = await _service.RunAsync(Config(Gate("build")), Root, cancellationToken: CancellationToken.None);
+
+        Assert.Equal(1500, Assert.Single(report.Gates).DurationMilliseconds);
+    }
+
+    [Fact]
+    public async Task RunAsyncCancelsStillRunningConcurrentGateWhenBlockingGateFails()
+    {
+        TaskCompletionSource<bool> concurrentStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool concurrentCancelled = false;
+
+        _programs.OnProgram("slow-concurrent", async (request, token) =>
+        {
+            concurrentStarted.TrySetResult(true);
+            TaskCompletionSource<bool> cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using CancellationTokenRegistration registration = token.Register(() =>
+            {
+                concurrentCancelled = true;
+                cancelled.TrySetResult(true);
+            });
+            await cancelled.Task;
+            token.ThrowIfCancellationRequested();
+            return new ProcessRunResult(0, string.Empty, false);
+        });
+        _programs.OnProgram("failing", async (request, token) =>
+        {
+            await concurrentStarted.Task;
+            return new ProcessRunResult(1, "failed", false);
+        });
+
+        ReviewGate concurrent = new("slow-concurrent", ["slow-concurrent"]) { Concurrent = true };
+        ReviewGate failing = new("failing", ["failing"], Blocking: true);
+
+        GateReport report = await _service.RunAsync(
+            Config(concurrent, failing),
+            Root,
+            stopOnBlockingFailure: true,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(concurrentCancelled);
+        GateResult only = Assert.Single(report.Gates);
+        Assert.Equal("failing", only.Id);
+        Assert.False(only.Passed);
+    }
+
+    [Fact]
+    public async Task RunTaskGatesAsyncResolvesWorkingDirectoryAndRunsWithoutBlocking()
+    {
+        _files.CreateDirectory("/repo/dash");
+
+        TaskGateRun run = await _service.RunTaskGatesAsync(
+            [new PlannedTaskGate("lint", true, 30, [], ["lint"], "dash")],
+            Root,
+            fix: false,
+            cancellationToken: CancellationToken.None);
+
+        Assert.Equal(["/repo/dash"], _programs.WorkingDirectories);
+        Assert.True(Assert.Single(run.Report.Gates).Passed);
+    }
+
+    [Fact]
+    public async Task RunAsyncPropagatesCallerCancellation()
+    {
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _service.RunAsync(Config(Gate("build")), Root, cancellationToken: cts.Token));
+    }
+
     private static ReviewConfig Config(params ReviewGate[] gates) => new() { Gates = gates };
 
     private static ReviewGate Gate(string id, int timeoutSeconds = 900) => new(id, [id], TimeoutSeconds: timeoutSeconds);
 
-    private sealed class RecordingPrograms(SleepingTimeProvider clock) : IProgramRunner
+    private sealed class RecordingPrograms(SleepingTimeProvider clock) : IProcessRunner
     {
         private readonly Dictionary<string, (TimeSpan Elapsed, bool TimeOut, TimeSpan Asleep)> _scripts = [];
+        private readonly Dictionary<string, Func<ProcessRunRequest, CancellationToken, Task<ProcessRunResult>>> _handlers = [];
 
         public List<string> Started { get; } = [];
 
@@ -185,22 +261,33 @@ public sealed class GateRunServiceTests
         public void TimesOut(string program, TimeSpan awake, TimeSpan asleep = default) =>
             _scripts[program] = (awake, true, asleep);
 
-        public ProcessResult Run(
+        public void OnProgram(
             string program,
-            IReadOnlyList<string> arguments,
-            string workingDirectory,
-            TimeSpan? timeout = null,
-            long? maxOutputBytes = null,
+            Func<ProcessRunRequest, CancellationToken, Task<ProcessRunResult>> handler) =>
+            _handlers[program] = handler;
+
+        public Task<ProcessRunResult> RunAsync(
+            ProcessRunRequest request,
             CancellationToken cancellationToken = default)
         {
-            Started.Add(program);
-            Timeouts.Add(timeout);
-            WorkingDirectories.Add(workingDirectory);
-            (TimeSpan elapsed, bool timeOut, TimeSpan asleep) = _scripts.GetValueOrDefault(program);
+            ArgumentNullException.ThrowIfNull(request);
+
+            Started.Add(request.Program);
+            Timeouts.Add(request.Timeout);
+            WorkingDirectories.Add(request.WorkingDirectory ?? string.Empty);
+
+            if (_handlers.TryGetValue(request.Program, out Func<ProcessRunRequest, CancellationToken, Task<ProcessRunResult>>? handler))
+                return handler(request, cancellationToken);
+
+            (TimeSpan elapsed, bool timeOut, TimeSpan asleep) = _scripts.GetValueOrDefault(request.Program);
             clock.Advance(elapsed);
             clock.Sleep(asleep);
-            return timeOut ? throw new TimeoutException($"{program} outlived its limit") : new ProcessResult(0, string.Empty, string.Empty);
+            return Task.FromResult(new ProcessRunResult(0, string.Empty, timeOut));
         }
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 
     /// <summary>A clock whose monotonic timestamp pauses while the machine sleeps, as the real one does.</summary>

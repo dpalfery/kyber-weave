@@ -142,4 +142,35 @@ public sealed class FileRepositoryFileListerTests
 
         Assert.Equal(["src/a.cs"], files);
     }
+
+    [Fact]
+    public async Task ListAsyncThrowsWhenTheRootDoesNotExist()
+    {
+        _ = await Assert.ThrowsAsync<DirectoryNotFoundException>(() => Lister().ListAsync(Root, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ListAsyncReturnsGitsFilesThatStillExistAndLeavesOutExcludedDirectories()
+    {
+        WriteFile("src/a.cs");
+        WriteFile("README.md");
+        WriteFile("node_modules/pkg/index.js");
+        ScriptGitListing("src/a.cs\0README.md\0node_modules/pkg/index.js\0gone.cs\0");
+
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
+
+        Assert.Equal(["src/a.cs", "README.md"], files);
+    }
+
+    [Fact]
+    public async Task ListAsyncWalksTheFileSystemWhenGitIsNotInstalled()
+    {
+        WriteFile("src/a.cs");
+        WriteFile("top.sln");
+        _ = _git.WithMissingProgram("git");
+
+        IReadOnlyList<string> files = await Lister().ListAsync(Root, CancellationToken.None);
+
+        Assert.Equal(["src/a.cs", "top.sln"], files.Order(StringComparer.Ordinal));
+    }
 }

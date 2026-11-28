@@ -73,5 +73,9 @@ internal static class DocsMemoryPortsC
     private sealed class NoTrackedFiles : IRepositoryFileLister
     {
         public IReadOnlyList<string> List(string repositoryRoot) => [];
+
+        public Task<IReadOnlyList<string>> ListAsync(
+            string repositoryRoot,
+            CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 }

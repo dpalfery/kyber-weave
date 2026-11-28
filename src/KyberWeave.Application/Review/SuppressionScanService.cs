@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -14,7 +15,7 @@ namespace KyberWeave.Application.Review;
 /// <param name="paths">Resolves the working directory the caller spelled.</param>
 /// <param name="environment">Names the working directory a relative one resolves against.</param>
 public sealed class SuppressionScanService(
-    IProgramRunner programs,
+    IProcessRunner programs,
     IFileSystem fileSystem,
     IBoundedFileReader files,
     IPathResolver paths,
@@ -22,13 +23,60 @@ public sealed class SuppressionScanService(
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
+    private static readonly string[] DiffPrefixArguments =
+        ["diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--relative", "--diff-filter=ACMRT"];
+
+    private static readonly string[] UntrackedArguments =
+        ["ls-files", "-z", "--others", "--exclude-standard", "--"];
+
     /// <inheritdoc />
     public SuppressionScanResult Scan(string workingDirectory, string baseRef)
+    {
+        if (!TryPrepareScan(workingDirectory, baseRef, out string root, out SuppressionScanResult? failure))
+            return failure;
+
+        GitRunResult diffResult = RunGit(root, SuppressionScan.MaxDiffBytes, [.. DiffPrefixArguments, baseRef, "--"]);
+        if (!TryParseDiff(baseRef, diffResult, out SuppressionCandidates? added, out SuppressionScanResult? diffFailure))
+            return diffFailure;
+
+        GitRunResult untrackedResult = RunGit(root, null, UntrackedArguments);
+        return FinishScan(root, added, untrackedResult);
+    }
+
+    /// <inheritdoc />
+    public async Task<SuppressionScanResult> ScanAsync(
+        string workingDirectory,
+        string baseRef,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryPrepareScan(workingDirectory, baseRef, out string root, out SuppressionScanResult? failure))
+            return failure;
+
+        GitRunResult diffResult = await RunGitAsync(
+            root,
+            SuppressionScan.MaxDiffBytes,
+            cancellationToken,
+            [.. DiffPrefixArguments, baseRef, "--"]).ConfigureAwait(false);
+        if (!TryParseDiff(baseRef, diffResult, out SuppressionCandidates? added, out SuppressionScanResult? diffFailure))
+            return diffFailure;
+
+        GitRunResult untrackedResult = await RunGitAsync(
+            root,
+            null,
+            cancellationToken,
+            UntrackedArguments).ConfigureAwait(false);
+        return FinishScan(root, added, untrackedResult);
+    }
+
+    private bool TryPrepareScan(
+        string workingDirectory,
+        string baseRef,
+        out string root,
+        [NotNullWhen(false)] out SuppressionScanResult? failure)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(baseRef);
 
-        string root;
         try
         {
             root = paths.GetFullPath(workingDirectory, environment.CurrentDirectory);
@@ -36,31 +84,52 @@ public sealed class SuppressionScanService(
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)
         {
-            return new SuppressionScanResult([], $"'{workingDirectory}' is not a usable path: {ex.Message}");
+            root = string.Empty;
+            failure = new SuppressionScanResult([], $"'{workingDirectory}' is not a usable path: {ex.Message}");
+            return false;
         }
 
         if (!fileSystem.DirectoryExists(root))
-            return new SuppressionScanResult([], $"'{root}' is not a directory");
-
-        if (GitChangeParsing.ValidateBase(baseRef) is { } baseProblem)
-            return new SuppressionScanResult([], baseProblem);
-
-        GitRunResult diffResult = RunGit(
-            root,
-            SuppressionScan.MaxDiffBytes,
-            "diff", "--no-color", "--no-ext-diff", "-U0", "-M", "--relative", "--diff-filter=ACMRT", baseRef, "--");
-        if (!diffResult.Succeeded)
         {
-            if (diffResult.ExceededBudget)
-                return new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget");
-
-            return new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diffResult.Output}");
+            failure = new SuppressionScanResult([], $"'{root}' is not a directory");
+            return false;
         }
 
-        SuppressionCandidates added = SuppressionScan.FromDiff(diffResult.Output);
+        if (GitChangeParsing.ValidateBase(baseRef) is { } baseProblem)
+        {
+            failure = new SuppressionScanResult([], baseProblem);
+            return false;
+        }
 
-        GitRunResult untrackedResult = RunGit(
-            root, null, "ls-files", "-z", "--others", "--exclude-standard", "--");
+        failure = null;
+        return true;
+    }
+
+    private static bool TryParseDiff(
+        string baseRef,
+        GitRunResult diffResult,
+        [NotNullWhen(true)] out SuppressionCandidates? added,
+        [NotNullWhen(false)] out SuppressionScanResult? failure)
+    {
+        if (!diffResult.Succeeded)
+        {
+            added = null;
+            failure = diffResult.ExceededBudget
+                ? new SuppressionScanResult([], $"the diff against '{baseRef}' exceeded the 10 MB scan budget")
+                : new SuppressionScanResult([], $"the change against '{baseRef}' could not be read: {diffResult.Output}");
+            return false;
+        }
+
+        added = SuppressionScan.FromDiff(diffResult.Output);
+        failure = null;
+        return true;
+    }
+
+    private SuppressionScanResult FinishScan(
+        string root,
+        SuppressionCandidates added,
+        GitRunResult untrackedResult)
+    {
         if (!untrackedResult.Succeeded)
             return new SuppressionScanResult([], $"the untracked files could not be listed: {untrackedResult.Output}");
 
@@ -91,11 +160,8 @@ public sealed class SuppressionScanService(
     {
         try
         {
-            ProcessResult result = programs.Run("git", arguments, workingDirectory, GitTimeout, maxOutputBytes);
-            return result.ExitCode == 0
-                ? new GitRunResult(true, result.StandardOutput)
-                : new GitRunResult(false, $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: " +
-                                          result.StandardError.Trim());
+            ProcessResult result = ((IProgramRunner)programs).Run("git", arguments, workingDirectory, GitTimeout, maxOutputBytes);
+            return ToGitRunResult(arguments, result);
         }
         catch (OutputLimitExceededException ex)
         {
@@ -106,4 +172,32 @@ public sealed class SuppressionScanService(
             return new GitRunResult(false, ex.Message.Trim());
         }
     }
+
+    private async Task<GitRunResult> RunGitAsync(
+        string workingDirectory,
+        long? maxOutputBytes,
+        CancellationToken cancellationToken,
+        params string[] arguments)
+    {
+        try
+        {
+            ProcessResult result = await programs.RunAsync(
+                "git", arguments, workingDirectory, GitTimeout, maxOutputBytes, cancellationToken).ConfigureAwait(false);
+            return ToGitRunResult(arguments, result);
+        }
+        catch (OutputLimitExceededException ex)
+        {
+            return new GitRunResult(false, ex.Message.Trim(), ExceededBudget: true);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or TimeoutException or IOException)
+        {
+            return new GitRunResult(false, ex.Message.Trim());
+        }
+    }
+
+    private static GitRunResult ToGitRunResult(string[] arguments, ProcessResult result) =>
+        result.ExitCode == 0
+            ? new GitRunResult(true, result.StandardOutput)
+            : new GitRunResult(false, $"git {string.Join(' ', arguments)} exited with code {result.ExitCode}: " +
+                                      result.StandardError.Trim());
 }
