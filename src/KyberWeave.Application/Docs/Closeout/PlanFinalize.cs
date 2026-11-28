@@ -123,15 +123,127 @@ public sealed partial class PlanFinalize
         ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
 
         DiagnosticReport report = new();
+        DraftPreparation prep = PrepareDraft(planPath, report);
+        if (prep.Outcome is { } early)
+            return early;
+        if (prep.AlreadyReady)
+            return AlreadyReady(prep.Plan, report, prep.TaskFile);
+
+        PlanFinalizeOutcome Refused() => new(report, false, false, prep.TaskFile);
+
+        if (HasOtherStaged(prep.Touched, prep.Plan, report))
+            return Refused();
+
+        if (PrepareApproval(mode, approval, date, prep.PlanText, prep.Plan, report) is not { } withApproval)
+            return Refused();
+
+        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _picker);
+        PlanTaskFileOutcome preview = generator.Run(prep.Plan, PlanTaskFileMode.Preview);
+        if (!TryPrepareDraftWrite(preview, prep, withApproval, date, report, out DraftWritePlan write))
+            return Refused();
+
+        try
+        {
+            WriteDraftTargets(prep.Plan, write.NewPlan, prep.PlanIndex, write.NewIndex);
+            PlanTaskFileOutcome written = generator.Run(prep.Plan, PlanTaskFileMode.Write);
+            if (!CompleteDraftValidation(prep, write.TaskFileBefore, written, report))
+                return Refused();
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            HandleFinalizeFailure(exception, prep, write.TaskFileBefore, report);
+            return Refused();
+        }
+
+        RecordDraftSuccess(report, prep, mode, write.NewIndex);
+        _files.Stage(prep.Touched, report, prep.Plan, Step);
+        _files.CommitOnly(prep.Touched, CommitMessage(prep.Plan), report, prep.Plan, Step);
+        return new PlanFinalizeOutcome(report, true, false, prep.TaskFile, ReadyQueue(prep.TaskFile, prep.Plan, report));
+    }
+
+    /// <summary>Finalizes the approved Draft plan at <paramref name="planPath"/> without blocking a thread, or refuses and changes nothing.</summary>
+    /// <param name="planPath">The plan, relative to the repository root.</param>
+    /// <param name="mode">Who approved it.</param>
+    /// <param name="approval">One line saying what approved it, recorded in the Decisions table.</param>
+    /// <param name="date">The approval date.</param>
+    /// <param name="cancellationToken">Cancels the model picks and git commands.</param>
+    public async Task<PlanFinalizeOutcome> RunAsync(
+        string planPath,
+        PlanApprovalMode mode,
+        string? approval,
+        DateOnly date,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planPath);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        DiagnosticReport report = new();
+        DraftPreparation prep = PrepareDraft(planPath, report);
+        if (prep.Outcome is { } early)
+            return early;
+        if (prep.AlreadyReady)
+            return await AlreadyReadyAsync(prep.Plan, report, prep.TaskFile, cancellationToken).ConfigureAwait(false);
+
+        PlanFinalizeOutcome Refused() => new(report, false, false, prep.TaskFile);
+
+        if (await HasOtherStagedAsync(prep.Touched, prep.Plan, report, cancellationToken).ConfigureAwait(false))
+            return Refused();
+
+        if (PrepareApproval(mode, approval, date, prep.PlanText, prep.Plan, report) is not { } withApproval)
+            return Refused();
+
+        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _picker);
+        PlanTaskFileOutcome preview = await generator.RunAsync(prep.Plan, PlanTaskFileMode.Preview, cancellationToken)
+            .ConfigureAwait(false);
+        if (!TryPrepareDraftWrite(preview, prep, withApproval, date, report, out DraftWritePlan write))
+            return Refused();
+
+        try
+        {
+            WriteDraftTargets(prep.Plan, write.NewPlan, prep.PlanIndex, write.NewIndex);
+            PlanTaskFileOutcome written = await generator.RunAsync(prep.Plan, PlanTaskFileMode.Write, cancellationToken)
+                .ConfigureAwait(false);
+            if (!CompleteDraftValidation(prep, write.TaskFileBefore, written, report))
+                return Refused();
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            HandleFinalizeFailure(exception, prep, write.TaskFileBefore, report);
+            return Refused();
+        }
+
+        RecordDraftSuccess(report, prep, mode, write.NewIndex);
+        await _files.StageAsync(prep.Touched, report, prep.Plan, Step, cancellationToken).ConfigureAwait(false);
+        await _files.CommitOnlyAsync(prep.Touched, CommitMessage(prep.Plan), report, prep.Plan, Step, cancellationToken)
+            .ConfigureAwait(false);
+        return new PlanFinalizeOutcome(report, true, false, prep.TaskFile, ReadyQueue(prep.TaskFile, prep.Plan, report));
+    }
+
+    private readonly record struct DraftPreparation(
+        string Plan,
+        string PlanText,
+        string? PlanIndex,
+        string? IndexText,
+        string TaskFile,
+        List<string> Touched,
+        bool AlreadyReady,
+        PlanFinalizeOutcome? Outcome);
+
+    private readonly record struct DraftWritePlan(string NewPlan, string? NewIndex, string? TaskFileBefore);
+
+    private DraftPreparation PrepareDraft(string planPath, DiagnosticReport report)
+    {
         string plan = planPath.Replace('\\', '/');
         string taskFile = PlanTaskFileGenerator.TaskFilePathOf(plan);
         PlanFinalizeOutcome Refused() => new(report, false, false, taskFile);
+
+        DraftPreparation Fail() => new(plan, string.Empty, null, null, taskFile, [], false, Refused());
 
         if (_files.CheckActivePlan(plan) is { } notActive)
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, notActive, plan, plan,
                 Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
-            return Refused();
+            return Fail();
         }
 
         AfterActivePlanCheck?.Invoke(_files.Absolute(plan));
@@ -144,26 +256,26 @@ public sealed partial class PlanFinalize
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' could not be read: {exception.Message}", plan, plan,
                 Hint: "Make the plan a readable file, then run the finalize again."));
-            return Refused();
+            return Fail();
         }
 
         if (planRead is not { } planText)
         {
             report.Add(new Diagnostic(NotAnActivePlan, Severity.Error, $"'{plan}' does not exist.", plan, plan,
                 Hint: "Name a plan file directly under the plans folder, not its index and not an archived plan."));
-            return Refused();
+            return Fail();
         }
 
         string? planStatus = PlanStatus.ParseBodyStatus(planText);
         if (PlanStatus.IsReady(planStatus))
-            return AlreadyReady(plan, report, taskFile);
+            return new DraftPreparation(plan, planText, null, null, taskFile, [], true, null);
 
         if (!PlanStatus.IsDraft(planStatus))
         {
             report.Add(new Diagnostic(NotDraft, Severity.Error,
                 $"'{plan}' is not a Draft plan: its body has no '**Status: Draft**' line.", plan, plan,
                 Hint: "Only an approved Draft plan is finalized. Ask architect to finish the Draft first."));
-            return Refused();
+            return Fail();
         }
 
         string? planIndex = _files.PlanIndexPath();
@@ -176,41 +288,53 @@ public sealed partial class PlanFinalize
         {
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                 $"The plan index could not be read, so nothing was changed: {exception.Message}", plan, plan, Hint: ArchitectHint));
-            return Refused();
+            return Fail();
         }
 
         List<string> touched = [plan, taskFile];
         if (indexText is not null)
             touched.Add(RequiredPlanIndex(planIndex));
-        if (HasOtherStaged(touched, plan, report))
-            return Refused();
 
+        return new DraftPreparation(plan, planText, planIndex, indexText, taskFile, touched, false, null);
+    }
+
+    private static string? PrepareApproval(
+        PlanApprovalMode mode,
+        string? approval,
+        DateOnly date,
+        string planText,
+        string plan,
+        DiagnosticReport report)
+    {
         string? line = ApprovalLine(approval, mode, planText, plan, report);
-        if (line is null)
-            return Refused();
+        return line is null ? null : WithApproval(planText, mode, line, date, plan, report);
+    }
 
-        string? withApproval = WithApproval(planText, mode, line, date, plan, report);
-        if (withApproval is null)
-            return Refused();
-
-        PlanTaskFileGenerator generator = new(_repoRoot, _config, _store, _picker);
-        PlanTaskFileOutcome preview = generator.Run(plan, PlanTaskFileMode.Preview);
+    private bool TryPrepareDraftWrite(
+        PlanTaskFileOutcome preview,
+        DraftPreparation prep,
+        string withApproval,
+        DateOnly date,
+        DiagnosticReport report,
+        out DraftWritePlan write)
+    {
+        write = default;
         if (preview.Report.HasErrors)
         {
             report.AddRange(preview.Report.Items);
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
-                "The task file cannot be written from this plan. Nothing was changed.", plan, plan, Hint: ArchitectHint));
-            return Refused();
+                "The task file cannot be written from this plan. Nothing was changed.", prep.Plan, prep.Plan, Hint: ArchitectHint));
+            return false;
         }
 
-        string? newIndex = indexText is null ? null : WithReadyIndexRow(indexText, Path.GetFileName(plan));
+        string? newIndex = prep.IndexText is null ? null : WithReadyIndexRow(prep.IndexText, Path.GetFileName(prep.Plan));
         string newPlan = WithReadyStatus(withApproval, date);
         if (!PlanStatus.IsReady(PlanStatus.ParseBodyStatus(newPlan)))
         {
             report.Add(new Diagnostic(NotDraft, Severity.Error,
-                $"The Draft status line of '{plan}' is not in a form this step can rewrite. Nothing was changed.", plan, plan,
+                $"The Draft status line of '{prep.Plan}' is not in a form this step can rewrite. Nothing was changed.", prep.Plan, prep.Plan,
                 Hint: "Write the body status line as '**Status: Draft.**' or '**Status:** Draft'."));
-            return Refused();
+            return false;
         }
 
         string? taskFileBefore;
@@ -218,63 +342,76 @@ public sealed partial class PlanFinalize
         {
             // One read answers both "is it there" and "what does it hold": null means absent at this read, and only then
             // may a restore delete it.
-            taskFileBefore = _store.ReadTextIfPresent(_files.Absolute(taskFile));
+            taskFileBefore = _store.ReadTextIfPresent(_files.Absolute(prep.TaskFile));
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
             // Nothing has been written yet, so there is nothing to restore; restoring from an unread copy would delete the file.
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
-                $"The existing task file could not be read, so nothing was changed: {exception.Message}", plan, plan, Hint: ArchitectHint));
-            return Refused();
+                $"The existing task file could not be read, so nothing was changed: {exception.Message}", prep.Plan, prep.Plan, Hint: ArchitectHint));
+            return false;
         }
 
-        foreach (string written in new[] { plan, planIndex }.OfType<string>().Where(file => IsLink(_store, _files.Absolute(file))))
+        foreach (string written in new[] { prep.Plan, prep.PlanIndex }.OfType<string>().Where(file => IsLink(_store, _files.Absolute(file))))
         {
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
-                $"'{written}' is a symbolic link, which this step does not write through. Nothing was changed.", plan, written, Hint: ArchitectHint));
-            return Refused();
+                $"'{written}' is a symbolic link, which this step does not write through. Nothing was changed.", prep.Plan, written, Hint: ArchitectHint));
+            return false;
         }
 
-        try
-        {
-            _store.WriteAllText(_files.Absolute(plan), newPlan);
-            if (newIndex is not null)
-                _store.WriteAllText(_files.Absolute(RequiredPlanIndex(planIndex)), newIndex);
+        write = new DraftWritePlan(newPlan, newIndex, taskFileBefore);
+        return true;
+    }
 
-            PlanTaskFileOutcome written = generator.Run(plan, PlanTaskFileMode.Write);
-            report.AddRange(written.Report.Items.Where(item => item.Severity == Severity.Error));
-            if (!report.HasErrors)
-                report.AddRange(Validate(plan, taskFile, planIndex));
+    private void WriteDraftTargets(string plan, string newPlan, string? planIndex, string? newIndex)
+    {
+        _store.WriteAllText(_files.Absolute(plan), newPlan);
+        if (newIndex is not null)
+            _store.WriteAllText(_files.Absolute(RequiredPlanIndex(planIndex)), newIndex);
+    }
 
-            if (report.HasErrors)
-            {
-                report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
-                    "The finalized plan failed validation, so every change was undone.", plan, plan, Hint: ArchitectHint));
-                IReadOnlyList<string> notUndone = Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
-                ReportNotUndone(report, plan, notUndone, taskFileBefore is null ? taskFile : null);
-                return Refused();
-            }
-        }
-        catch (Exception exception) when (FileFailure.Is(exception))
-        {
-            IReadOnlyList<string> notUndone = Restore(plan, planText, planIndex, indexText, taskFile, taskFileBefore);
-            report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
-                notUndone.Count == 0
-                    ? $"Finalizing failed and every change was undone: {exception.Message}"
-                    : $"Finalizing failed: {exception.Message}",
-                plan, plan));
-            ReportNotUndone(report, plan, notUndone, taskFileBefore is null ? taskFile : null);
-            return Refused();
-        }
+    private bool CompleteDraftValidation(
+        DraftPreparation prep,
+        string? taskFileBefore,
+        PlanTaskFileOutcome written,
+        DiagnosticReport report)
+    {
+        report.AddRange(written.Report.Items.Where(item => item.Severity == Severity.Error));
+        if (!report.HasErrors)
+            report.AddRange(Validate(prep.Plan, prep.TaskFile, prep.PlanIndex));
 
-        Say(report, plan, $"Recorded the {(mode == PlanApprovalMode.Autonomous ? "autonomous" : "owner")} approval in the Decisions table and set {plan} to Ready.");
-        Say(report, plan, newIndex is not null && !string.Equals(newIndex, indexText, StringComparison.Ordinal)
-            ? $"Set its row in {planIndex} to Ready."
-            : $"{planIndex} has no Draft row for it to change.");
-        Say(report, plan, $"Wrote {taskFile}.");
-        _files.Stage(touched, report, plan, Step);
-        _files.CommitOnly(touched, CommitMessage(plan), report, plan, Step);
-        return new PlanFinalizeOutcome(report, true, false, taskFile, ReadyQueue(taskFile, plan, report));
+        if (!report.HasErrors)
+            return true;
+
+        report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+            "The finalized plan failed validation, so every change was undone.", prep.Plan, prep.Plan, Hint: ArchitectHint));
+        IReadOnlyList<string> notUndone = Restore(prep.Plan, prep.PlanText, prep.PlanIndex, prep.IndexText, prep.TaskFile, taskFileBefore);
+        ReportNotUndone(report, prep.Plan, notUndone, taskFileBefore is null ? prep.TaskFile : null);
+        return false;
+    }
+
+    private void HandleFinalizeFailure(
+        Exception exception,
+        DraftPreparation prep,
+        string? taskFileBefore,
+        DiagnosticReport report)
+    {
+        IReadOnlyList<string> notUndone = Restore(prep.Plan, prep.PlanText, prep.PlanIndex, prep.IndexText, prep.TaskFile, taskFileBefore);
+        report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
+            notUndone.Count == 0
+                ? $"Finalizing failed and every change was undone: {exception.Message}"
+                : $"Finalizing failed: {exception.Message}",
+            prep.Plan, prep.Plan));
+        ReportNotUndone(report, prep.Plan, notUndone, taskFileBefore is null ? prep.TaskFile : null);
+    }
+
+    private static void RecordDraftSuccess(DiagnosticReport report, DraftPreparation prep, PlanApprovalMode mode, string? newIndex)
+    {
+        Say(report, prep.Plan, $"Recorded the {(mode == PlanApprovalMode.Autonomous ? "autonomous" : "owner")} approval in the Decisions table and set {prep.Plan} to Ready.");
+        Say(report, prep.Plan, newIndex is not null && !string.Equals(newIndex, prep.IndexText, StringComparison.Ordinal)
+            ? $"Set its row in {prep.PlanIndex} to Ready."
+            : $"{prep.PlanIndex} has no Draft row for it to change.");
+        Say(report, prep.Plan, $"Wrote {prep.TaskFile}.");
     }
 
     private static string RequiredPlanIndex(string? planIndex) =>
@@ -296,17 +433,49 @@ public sealed partial class PlanFinalize
     private PlanFinalizeOutcome AlreadyReady(string plan, DiagnosticReport report, string taskFile)
     {
         PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repoRoot, _config, _store).Run(plan, PlanTaskFileMode.Check);
+        if (!TryPrepareAlreadyReady(plan, report, taskFile, check, out List<string> own))
+            return new PlanFinalizeOutcome(report, false, false, taskFile);
+
+        if (!HasOtherStaged(own, plan, report))
+            _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
+        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile, plan, report));
+    }
+
+    private async Task<PlanFinalizeOutcome> AlreadyReadyAsync(
+        string plan,
+        DiagnosticReport report,
+        string taskFile,
+        CancellationToken cancellationToken)
+    {
+        PlanTaskFileOutcome check = await new PlanTaskFileGenerator(_repoRoot, _config, _store)
+            .RunAsync(plan, PlanTaskFileMode.Check, cancellationToken)
+            .ConfigureAwait(false);
+        if (!TryPrepareAlreadyReady(plan, report, taskFile, check, out List<string> own))
+            return new PlanFinalizeOutcome(report, false, false, taskFile);
+
+        if (!await HasOtherStagedAsync(own, plan, report, cancellationToken).ConfigureAwait(false))
+            await _files.CommitOnlyAsync(own, CommitMessage(plan), report, plan, Step, cancellationToken).ConfigureAwait(false);
+        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile, plan, report));
+    }
+
+    private bool TryPrepareAlreadyReady(
+        string plan,
+        DiagnosticReport report,
+        string taskFile,
+        PlanTaskFileOutcome check,
+        out List<string> own)
+    {
+        own = [plan, taskFile];
         if (check.Report.HasErrors)
         {
             report.AddRange(check.Report.Items);
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                 $"'{plan}' is already Ready but its task file is not current with it. Nothing was changed.", plan, plan,
                 Hint: ArchitectHint));
-            return new PlanFinalizeOutcome(report, false, false, taskFile);
+            return false;
         }
 
         Say(report, plan, $"{plan} is already Ready and {taskFile} is current; nothing changed.");
-        List<string> own = [plan, taskFile];
         string? index = _files.PlanIndexPath();
         try
         {
@@ -317,17 +486,25 @@ public sealed partial class PlanFinalize
         {
             report.Add(new Diagnostic(PlanNeedsArchitect, Severity.Error,
                 $"The plan index could not be read, so nothing was committed: {exception.Message}", plan, plan, Hint: ArchitectHint));
-            return new PlanFinalizeOutcome(report, false, false, taskFile);
+            return false;
         }
 
-        if (!HasOtherStaged(own, plan, report))
-            _files.CommitOnly(own, CommitMessage(plan), report, plan, Step);
-        return new PlanFinalizeOutcome(report, false, true, taskFile, ReadyQueue(taskFile, plan, report));
+        return true;
     }
 
-    private bool HasOtherStaged(IReadOnlyList<string> own, string plan, DiagnosticReport report)
+    private bool HasOtherStaged(IReadOnlyList<string> own, string plan, DiagnosticReport report) =>
+        ReportOtherStaged(_files.StagedOutside(own), plan, report);
+
+    private async Task<bool> HasOtherStagedAsync(
+        IReadOnlyList<string> own,
+        string plan,
+        DiagnosticReport report,
+        CancellationToken cancellationToken) =>
+        ReportOtherStaged(await _files.StagedOutsideAsync(own, cancellationToken).ConfigureAwait(false), plan, report);
+
+    private static bool ReportOtherStaged(IReadOnlyList<string>? stagedOutside, string plan, DiagnosticReport report)
     {
-        if (_files.StagedOutside(own) is not { Count: > 0 } others)
+        if (stagedOutside is not { Count: > 0 } others)
             return false;
 
         report.Add(new Diagnostic(OtherFilesStaged, Severity.Error,

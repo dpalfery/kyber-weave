@@ -147,6 +147,15 @@ public sealed class DocsCommandSeamTests : IDisposable
             ArchiveDate = archiveDate;
             return new PlanCloseoutOutcome(new DiagnosticReport(), false);
         }
+
+        public Task<PlanCloseoutOutcome> RunAsync(
+            string repoRoot,
+            KyberWeaveConfig config,
+            string planPath,
+            DateOnly archiveDate,
+            bool archive,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Run(repoRoot, config, planPath, archiveDate, archive));
     }
 
     private sealed class RecordingFinalize : IPlanFinalizeService
@@ -164,5 +173,15 @@ public sealed class DocsCommandSeamTests : IDisposable
             ApprovalDate = approvalDate;
             return new PlanFinalizeOutcome(new DiagnosticReport(), false, false, "tasks.yml");
         }
+
+        public Task<PlanFinalizeOutcome> RunAsync(
+            string repoRoot,
+            KyberWeaveConfig config,
+            string planPath,
+            PlanApprovalMode mode,
+            string? approval,
+            DateOnly approvalDate,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Run(repoRoot, config, planPath, mode, approval, approvalDate));
     }
 }
