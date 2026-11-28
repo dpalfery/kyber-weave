@@ -33,7 +33,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     public void Dispose() => _ansi.Dispose();
 
     [Fact]
-    public void Doctor_SourceLessInstalledLayout_DoesNotReportMissingCanonicalSource()
+    public async Task Doctor_SourceLessInstalledLayout_DoesNotReportMissingCanonicalSource()
     {
         string installedDir = CreateDirectory("sourceless-installed-layout");
 
@@ -41,7 +41,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
             .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(executor, installedDir, new SquadDoctorSettings
+        int exitCode = await Run(executor, installedDir, new SquadDoctorSettings
         {
             Path = installedDir,
             Global = false
@@ -53,14 +53,14 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_ReportsRendererCoverageAndMcpProbeStatus()
+    public async Task Doctor_ReportsRendererCoverageAndMcpProbeStatus()
     {
         string workingDir = CreateDirectory("doctor-workdir");
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(executor, workingDir, new SquadDoctorSettings
+        int exitCode = await Run(executor, workingDir, new SquadDoctorSettings
         {
             Path = workingDir,
             Global = false
@@ -92,7 +92,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     /// Doctor warns with the remedy but does not fail: both copies work.
     /// </summary>
     [Fact]
-    public void Doctor_DevinWorkspace_WarnsOnSkillsDevinWouldLoadTwice()
+    public async Task Doctor_DevinWorkspace_WarnsOnSkillsDevinWouldLoadTwice()
     {
         string workingDir = CreateDirectory("doctor-devin-overlap");
         foreach (string root in new[] { ".devin", ".claude" })
@@ -105,7 +105,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             workingDir,
             new SquadDoctorSettings
@@ -124,14 +124,14 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_WorkspaceWithoutDevin_SkipsTheDuplicateImportCheck()
+    public async Task Doctor_WorkspaceWithoutDevin_SkipsTheDuplicateImportCheck()
     {
         string workingDir = CreateDirectory("doctor-no-devin");
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(executor, workingDir, new SquadDoctorSettings
+        int exitCode = await Run(executor, workingDir, new SquadDoctorSettings
         {
             Path = workingDir,
             Global = false
@@ -141,14 +141,14 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_WhenMcpProbeFails_ReportsFailureReason()
+    public async Task Doctor_WhenMcpProbeFails_ReportsFailureReason()
     {
         string workingDir = CreateDirectory("doctor-missing-mcp");
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithFailure("kyber-weave-mcp", "The 'kyber-weave-mcp' executable is not available on PATH.");
 
-        int exitCode = Run(executor, workingDir, new SquadDoctorSettings
+        int exitCode = await Run(executor, workingDir, new SquadDoctorSettings
         {
             Path = workingDir,
             Global = false
@@ -164,7 +164,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_WhenInsideRepository_ValidatesLocalSource()
+    public async Task Doctor_WhenInsideRepository_ValidatesLocalSource()
     {
         string repoPath = CreateCanonicalRepository("doctor-repository");
 
@@ -172,7 +172,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
             .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(executor, repoPath, new SquadDoctorSettings
+        int exitCode = await Run(executor, repoPath, new SquadDoctorSettings
         {
             Path = repoPath,
             Global = false
@@ -183,7 +183,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_GlobalScope_WarnsOnUnmanagedNameCollidingFile()
+    public async Task Doctor_GlobalScope_WarnsOnUnmanagedNameCollidingFile()
     {
         string tempHome = CreateDirectory("doctor-global-home");
         string collidingRelative = Path.Combine("agents", "architect.md");
@@ -197,7 +197,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -221,7 +221,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     /// the expected agent files match what install wrote; without the resolved path the scan would expect the bare name.
     /// </summary>
     [Fact]
-    public void Doctor_GlobalScope_RendersAntigravityWithTheResolvedDocsServerCommand()
+    public async Task Doctor_GlobalScope_RendersAntigravityWithTheResolvedDocsServerCommand()
     {
         string resolved = Path.Combine(_state.Files.Root, "opt", "kyber", "bin", SquadDocsServerCommand.Executable);
         _state.Files.CreateDirectory(Path.GetDirectoryName(resolved)!);
@@ -234,18 +234,19 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         ScriptedProcessRunner processes = new ScriptedProcessRunner()
             .WithProgramOnPath(SquadDocsServerCommand.Executable, resolved);
 
-        SquadTestCommands.InMemoryDoctor(
+        await SquadTestCommands.InMemoryDoctor(
             _state,
             new FakeProcessExecutor().WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n"),
             repoPath,
             new SquadGlobalRoots(_ => null, tempHome, isWindows: false),
             renderer: renderer,
             output: _console,
-            processRunner: processes).Execute(null!, new SquadDoctorSettings
+            processRunner: processes).ExecuteAsync(null!, new SquadDoctorSettings
             {
                 Path = repoPath,
                 Global = true
-            });
+            },
+            CancellationToken.None);
 
         List<SquadRenderRequest> antigravity = renderer.Requests
             .Where(request => request.Scope == SquadDeploymentScope.Global
@@ -272,7 +273,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_GlobalScope_ReportsRelativeOverrideAndExitsNonZero()
+    public async Task Doctor_GlobalScope_ReportsRelativeOverrideAndExitsNonZero()
     {
         string tempHome = CreateDirectory("doctor-relative-override-home");
         string repoPath = CreateCanonicalRepository("doctor-relative-override-repository");
@@ -285,7 +286,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
                 : null,
             tempHome);
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -305,7 +306,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_GlobalScope_SkipsCollisionScanWhenCanonicalSourceIsInvalid()
+    public async Task Doctor_GlobalScope_SkipsCollisionScanWhenCanonicalSourceIsInvalid()
     {
         string repoPath = CreateDirectory("invalid-squad-repo");
         _state.Files.CreateDirectory(Path.Combine(repoPath, "products", "kyber-squad"));
@@ -317,7 +318,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -364,7 +365,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
             _state.Store.ResolveReceiptPath(tempHome, SquadDeploymentScope.Global),
             _state.Store.SerializeReceipt(receipt with { Files = updatedFiles }));
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -383,7 +384,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         string unmanagedFile = Path.Combine(tempHome, ".pi", "agent", "agents", "architect.md");
         WriteFile(unmanagedFile, "unmanaged-architect-content");
 
-        int unmanagedExitCode = Run(
+        int unmanagedExitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -401,7 +402,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_GlobalScope_CorruptSiblingReceipt_DoesNotCrash()
+    public async Task Doctor_GlobalScope_CorruptSiblingReceipt_DoesNotCrash()
     {
         string tempHome = CreateDirectory("doctor-corrupt-sibling-home");
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
@@ -415,7 +416,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -433,7 +434,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("   \n\t ")]
-    public void Doctor_GlobalScope_BlankSiblingReceipt_DoesNotCrash(string blankReceipt)
+    public async Task Doctor_GlobalScope_BlankSiblingReceipt_DoesNotCrash(string blankReceipt)
     {
         string tempHome = CreateDirectory($"doctor-blank-sibling-home-{blankReceipt.Length}");
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
@@ -447,7 +448,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -463,7 +464,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_GlobalScope_CorruptLocalReceipt_DoesNotCrash()
+    public async Task Doctor_GlobalScope_CorruptLocalReceipt_DoesNotCrash()
     {
         string tempHome = CreateDirectory("doctor-corrupt-local-home");
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
@@ -476,7 +477,7 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
-        int exitCode = Run(
+        int exitCode = await Run(
             executor,
             repoPath,
             new SquadDoctorSettings
@@ -515,17 +516,17 @@ public sealed class SquadDoctorCommandInMemoryTests : IDisposable
         Assert.Contains("agents/architect.md", exception.Message, StringComparison.Ordinal);
     }
 
-    private int Run(
+    private async Task<int> Run(
         FakeProcessExecutor executor,
         string workingDirectory,
         SquadDoctorSettings settings,
         ISquadGlobalRootResolver? globalRoots = null) =>
-        SquadTestCommands.InMemoryDoctor(
+        await SquadTestCommands.InMemoryDoctor(
             _state,
             executor,
             workingDirectory,
             globalRoots,
-            output: _console).Execute(null!, settings);
+            output: _console).ExecuteAsync(null!, settings, CancellationToken.None);
 
     private string Output() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 

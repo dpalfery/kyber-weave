@@ -256,7 +256,7 @@ public sealed class SquadTaskGateHintTests
                 isInteractive: false,
                 readAnswer: null,
                 globalRoots: global ? new CodexOnlyGlobalRoots(globalRoot) : null,
-                configs: ProjectConfigs).Execute(null!, new SquadInstallSettings
+                configs: ProjectConfigs).ExecuteAsync(null!, new SquadInstallSettings
                 {
                     Path = targetDir,
                     Targets = ["codex"],
@@ -264,7 +264,9 @@ public sealed class SquadTaskGateHintTests
                     DryRun = false,
                     Adopt = false,
                     Yes = global
-                }));
+                }, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult());
 
             PreparedCase prepared = new(
                 key,
@@ -306,14 +308,16 @@ public sealed class SquadTaskGateHintTests
                 releaseSource: releaseSource,
                 renderer: renderer,
                 isInteractive: false,
-                configs: ProjectConfigs).Execute(null!, new SquadUpdateSettings
+                configs: ProjectConfigs).ExecuteAsync(null!, new SquadUpdateSettings
                 {
                     Path = targetDir,
                     Targets = ["codex"],
                     Global = false,
                     DryRun = false,
                     ReplaceManaged = true
-                }));
+                }, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult());
 
             PreparedCase prepared = new(
                 key,

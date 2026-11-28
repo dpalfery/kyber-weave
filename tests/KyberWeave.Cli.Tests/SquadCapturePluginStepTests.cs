@@ -32,12 +32,12 @@ public sealed class SquadCapturePluginStepTests
     // ---- the step itself ----
 
     [Fact]
-    public void RunInvokesThePluginVerbWithPreserveAndTheResolvedConfigDir()
+    public async Task RunInvokesThePluginVerbWithPreserveAndTheResolvedConfigDir()
     {
         FakeProcessExecutor executor = new();
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out _);
+        (CapturePluginStepOutcome outcome, _) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
         ProcessStartInfo call = Assert.Single(executor.Calls);
@@ -51,12 +51,12 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void RunPassesDryRunThroughToTheVerb()
+    public async Task RunPassesDryRunThroughToTheVerb()
     {
         FakeProcessExecutor executor = new();
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        Capture(() => step.Run(FakeOpenCodeRoot, true), out _);
+        _ = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, true, CancellationToken.None));
 
         ProcessStartInfo call = Assert.Single(executor.Calls);
         Assert.Equal(
@@ -68,12 +68,12 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void RunWithoutKyberDashSkipsWithoutStartingAnything()
+    public async Task RunWithoutKyberDashSkipsWithoutStartingAnything()
     {
         FakeProcessExecutor executor = new();
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => null);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Skipped, outcome);
         Assert.Empty(executor.Calls);
@@ -89,14 +89,14 @@ public sealed class SquadCapturePluginStepTests
     [InlineData("installed")]
     [InlineData("upgraded")]
     [InlineData("kept-edited")]
-    public void RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string verdict)
+    public async Task RunRelaysTheVerbsHarnessGuidanceForEveryPluginVerdict(string verdict)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             $"opencode plugin: {verdict} /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
         Assert.Contains($"opencode plugin: {verdict}", output, StringComparison.Ordinal);
@@ -108,7 +108,7 @@ public sealed class SquadCapturePluginStepTests
     ///     verdict line, so a second guidance line was lost.
     /// </summary>
     [Fact]
-    public void RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
+    public async Task RunRelaysEveryHarnessOpenCodeLineThePluginVerbPrints()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
@@ -117,7 +117,7 @@ public sealed class SquadCapturePluginStepTests
             $"{HarnessPrefix}{GuidanceBeta}\n");
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (_, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Contains(GuidanceAlpha, output, StringComparison.Ordinal);
         Assert.Contains(GuidanceBeta, output, StringComparison.Ordinal);
@@ -131,14 +131,14 @@ public sealed class SquadCapturePluginStepTests
     [InlineData("installed")]
     [InlineData("upgraded")]
     [InlineData("kept-edited")]
-    public void RunNeverPrintsAHardCodedRestartOpenCodeLine(string verdict)
+    public async Task RunNeverPrintsAHardCodedRestartOpenCodeLine(string verdict)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             $"opencode plugin: {verdict} /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (_, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.DoesNotContain(
             output.Split('\n'),
@@ -150,7 +150,7 @@ public sealed class SquadCapturePluginStepTests
     ///     the prefix, are not relayed. A step that dumped all of stdout would fail this.
     /// </summary>
     [Fact]
-    public void RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
+    public async Task RunDoesNotRelayStdoutLinesWithoutTheHarnessPrefix()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
@@ -160,7 +160,7 @@ public sealed class SquadCapturePluginStepTests
             "verb note: harness opencode: mid-line mention\n");
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
         Assert.DoesNotContain("verb chatter that is not guidance", output, StringComparison.Ordinal);
@@ -168,14 +168,14 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void RunReportsAKeptPluginWithoutTheRestartLine()
+    public async Task RunReportsAKeptPluginWithoutTheRestartLine()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             "opencode plugin: kept-edited /fake/opencode/plugins/kyberdash-opencode.js\n");
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Completed, outcome);
         Assert.Contains("kept-edited", output, StringComparison.Ordinal);
@@ -183,7 +183,7 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void RunTreatsAnUnknownCommandAsANamedSkipNotAFailure()
+    public async Task RunTreatsAnUnknownCommandAsANamedSkipNotAFailure()
     {
         // An older KyberDash without the verb exits non-zero with commander's unknown-command message.
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
@@ -192,7 +192,7 @@ public sealed class SquadCapturePluginStepTests
             1);
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Skipped, outcome);
         Assert.Contains("predates", output, StringComparison.Ordinal);
@@ -200,12 +200,12 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void RunReportsANonZeroExitAsAWarningAndNamesTheExitCode()
+    public async Task RunReportsANonZeroExitAsAWarningAndNamesTheExitCode()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3);
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Warned, outcome);
         Assert.Contains("warning", output, StringComparison.Ordinal);
@@ -213,19 +213,19 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void RunWhenTheProcessCannotStartIsAWarningNotAnException()
+    public async Task RunWhenTheProcessCannotStartIsAWarningNotAnException()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithFailure("kyberdash", "cannot start kyberdash");
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Warned, outcome);
         Assert.Contains("warning", output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RunWhenTheProcessIsNotExecutableIsAWarningNotAnException()
+    public async Task RunWhenTheProcessIsNotExecutableIsAWarningNotAnException()
     {
         // chmod -x on kyberdash: the start is refused with an access error, not a missing file.
         FakeProcessExecutor executor = new FakeProcessExecutor().WithException(
@@ -233,7 +233,7 @@ public sealed class SquadCapturePluginStepTests
             new UnauthorizedAccessException("Access to the path '/fake/bin/kyberdash' is denied."));
         KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
-        CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
+        (CapturePluginStepOutcome outcome, string output) = await CaptureAsync(() => step.RunAsync(FakeOpenCodeRoot, false, CancellationToken.None));
 
         Assert.Equal(CapturePluginStepOutcome.Warned, outcome);
         Assert.Contains("warning", output, StringComparison.Ordinal);
@@ -247,9 +247,9 @@ public sealed class SquadCapturePluginStepTests
     // calls. The update cases install first, then run their update for real over what that install left.
 
     [Fact]
-    public void GlobalInstallWithOpenCodeRunsThePluginStepOnceAfterSuccess()
+    public async Task GlobalInstallWithOpenCodeRunsThePluginStepOnceAfterSuccess()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal());
+        InstallRun prepared = await RunInstall(OpenCodeGlobal());
 
         Assert.Equal(0, prepared.Record.ExitCode);
         ProcessStartInfo call = Assert.Single(prepared.Calls);
@@ -262,27 +262,27 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void GlobalInstallWithoutOpenCodeDoesNotRunThePluginStep()
+    public async Task GlobalInstallWithoutOpenCodeDoesNotRunThePluginStep()
     {
-        InstallRun prepared = RunInstall(new InstallSpec("codex-global", ["codex"], SquadDeploymentScope.Global));
+        InstallRun prepared = await RunInstall(new InstallSpec("codex-global", ["codex"], SquadDeploymentScope.Global));
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Empty(prepared.Calls);
     }
 
     [Fact]
-    public void GlobalInstallWithNoCapturePluginDoesNotRunThePluginStep()
+    public async Task GlobalInstallWithNoCapturePluginDoesNotRunThePluginStep()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal() with { NoCapturePlugin = true });
+        InstallRun prepared = await RunInstall(OpenCodeGlobal() with { NoCapturePlugin = true });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Empty(prepared.Calls);
     }
 
     [Fact]
-    public void GlobalInstallDryRunPassesDryRunThroughToThePluginStep()
+    public async Task GlobalInstallDryRunPassesDryRunThroughToThePluginStep()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal() with { DryRun = true });
+        InstallRun prepared = await RunInstall(OpenCodeGlobal() with { DryRun = true });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         ProcessStartInfo call = Assert.Single(prepared.Calls);
@@ -290,10 +290,10 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void ProjectInstallWithOpenCodeDoesNotRunThePluginStep()
+    public async Task ProjectInstallWithOpenCodeDoesNotRunThePluginStep()
     {
         // The plugin is global capture, so a project-scope install never touches the OpenCode global root.
-        InstallRun prepared = RunInstall(new InstallSpec(
+        InstallRun prepared = await RunInstall(new InstallSpec(
             "opencode-project",
             ["opencode"],
             SquadDeploymentScope.Project));
@@ -303,18 +303,18 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void DeclinedGlobalInstallDoesNotRunThePluginStep()
+    public async Task DeclinedGlobalInstallDoesNotRunThePluginStep()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal() with { Declined = true });
+        InstallRun prepared = await RunInstall(OpenCodeGlobal() with { Declined = true });
 
         Assert.Equal(2, prepared.Record.ExitCode);
         Assert.Empty(prepared.Calls);
     }
 
     [Fact]
-    public void PluginStepFailureLeavesTheSquadExitCodeUnchanged()
+    public async Task PluginStepFailureLeavesTheSquadExitCodeUnchanged()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal() with { Executor = "exit-3" });
+        InstallRun prepared = await RunInstall(OpenCodeGlobal() with { Executor = "exit-3" });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains("Successfully installed", prepared.Record.Output, StringComparison.Ordinal);
@@ -322,9 +322,9 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void PluginStepThatCannotBeExecutedLeavesTheSquadExitCodeUnchanged()
+    public async Task PluginStepThatCannotBeExecutedLeavesTheSquadExitCodeUnchanged()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal() with { Executor = "not-executable" });
+        InstallRun prepared = await RunInstall(OpenCodeGlobal() with { Executor = "not-executable" });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains("Successfully installed", prepared.Record.Output, StringComparison.Ordinal);
@@ -332,13 +332,14 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void GlobalUpdateWithOpenCodeRunsThePluginStepAfterTheDeploymentUpdates()
+    public async Task GlobalUpdateWithOpenCodeRunsThePluginStepAfterTheDeploymentUpdates()
     {
         using Harness h = new();
-        InstallOpenCodeGlobal(h);
+        await InstallOpenCodeGlobal(h);
         FakeProcessExecutor executor = new();
 
-        CommandExecution execution = Capture(() => h.UpdateCommand(executor).Execute(null!, GlobalUpdate(h)), out _);
+        CommandExecution execution = await Capture(() => h.UpdateCommand(executor).ExecuteAsync(null!, GlobalUpdate(h),
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         ProcessStartInfo call = Assert.Single(executor.Calls);
@@ -346,39 +347,41 @@ public sealed class SquadCapturePluginStepTests
     }
 
     [Fact]
-    public void GlobalUpdateWithNoCapturePluginDoesNotRunThePluginStep()
+    public async Task GlobalUpdateWithNoCapturePluginDoesNotRunThePluginStep()
     {
         using Harness h = new();
-        InstallOpenCodeGlobal(h);
+        await InstallOpenCodeGlobal(h);
         FakeProcessExecutor executor = new();
         SquadUpdateSettings settings = GlobalUpdate(h);
         settings.NoCapturePlugin = true;
 
-        CommandExecution execution = Capture(() => h.UpdateCommand(executor).Execute(null!, settings), out _);
+        CommandExecution execution = await Capture(() => h.UpdateCommand(executor).ExecuteAsync(null!, settings,
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Empty(executor.Calls);
     }
 
     [Fact]
-    public void GlobalInstallRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
+    public async Task GlobalInstallRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal() with { Executor = "guidance" });
+        InstallRun prepared = await RunInstall(OpenCodeGlobal() with { Executor = "guidance" });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains(GuidanceAlpha, prepared.Record.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void GlobalUpdateRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
+    public async Task GlobalUpdateRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
     {
         using Harness h = new();
-        InstallOpenCodeGlobal(h);
+        await InstallOpenCodeGlobal(h);
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             $"opencode plugin: upgraded /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
 
-        CommandExecution execution = Capture(() => h.UpdateCommand(executor).Execute(null!, GlobalUpdate(h)), out _);
+        CommandExecution execution = await Capture(() => h.UpdateCommand(executor).ExecuteAsync(null!, GlobalUpdate(h),
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains(GuidanceAlpha, execution.Output, StringComparison.Ordinal);
@@ -392,9 +395,9 @@ public sealed class SquadCapturePluginStepTests
     ///     harness's own root itself.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryRunsThePluginVerbForFactoryInPreserveMode()
+    public async Task GlobalInstallWithFactoryRunsThePluginVerbForFactoryInPreserveMode()
     {
-        InstallRun prepared = RunInstall(FactoryGlobal());
+        InstallRun prepared = await RunInstall(FactoryGlobal());
 
         Assert.Equal(0, prepared.Record.ExitCode);
         ProcessStartInfo call = Assert.Single(prepared.Calls);
@@ -413,9 +416,9 @@ public sealed class SquadCapturePluginStepTests
     ///     verb no directory of its own.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryNamesNoRootSoTheVerbResolvesTheFactoryTreeItself()
+    public async Task GlobalInstallWithFactoryNamesNoRootSoTheVerbResolvesTheFactoryTreeItself()
     {
-        InstallRun prepared = RunInstall(FactoryGlobal() with { FactoryHomeRoots = true });
+        InstallRun prepared = await RunInstall(FactoryGlobal() with { FactoryHomeRoots = true });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         // The repository resolves the Factory tree to ~/.factory: the tree the verb resolves for itself.
@@ -432,9 +435,9 @@ public sealed class SquadCapturePluginStepTests
     ///     never be handed the OpenCode one.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithOpenCodeAndFactoryGivesOnlyTheOpenCodeStepARoot()
+    public async Task GlobalInstallWithOpenCodeAndFactoryGivesOnlyTheOpenCodeStepARoot()
     {
-        InstallRun prepared = RunInstall(OpenCodeAndFactoryGlobal());
+        InstallRun prepared = await RunInstall(OpenCodeAndFactoryGlobal());
 
         Assert.Equal(0, prepared.Record.ExitCode);
         IReadOnlyList<ProcessStartInfo> calls = prepared.Calls;
@@ -455,9 +458,9 @@ public sealed class SquadCapturePluginStepTests
     ///     place in the deploy sequence and the new one follows it.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithOpenCodeAndFactoryRunsTheFactoryPluginStepAfterTheOpenCodeOne()
+    public async Task GlobalInstallWithOpenCodeAndFactoryRunsTheFactoryPluginStepAfterTheOpenCodeOne()
     {
-        InstallRun prepared = RunInstall(OpenCodeAndFactoryGlobal());
+        InstallRun prepared = await RunInstall(OpenCodeAndFactoryGlobal());
 
         Assert.Equal(0, prepared.Record.ExitCode);
         IReadOnlyList<ProcessStartInfo> calls = prepared.Calls;
@@ -471,9 +474,9 @@ public sealed class SquadCapturePluginStepTests
     ///     root and never runs the Factory plugin step.
     /// </summary>
     [Fact]
-    public void ProjectInstallWithFactoryDoesNotRunThePluginStep()
+    public async Task ProjectInstallWithFactoryDoesNotRunThePluginStep()
     {
-        InstallRun prepared = RunInstall(new InstallSpec(
+        InstallRun prepared = await RunInstall(new InstallSpec(
             "factory-project",
             ["factory"],
             SquadDeploymentScope.Project));
@@ -487,9 +490,9 @@ public sealed class SquadCapturePluginStepTests
     ///     else: the Factory plugin is installed only for a Factory target.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithoutFactoryRunsOnlyTheOpenCodePluginStep()
+    public async Task GlobalInstallWithoutFactoryRunsOnlyTheOpenCodePluginStep()
     {
-        InstallRun prepared = RunInstall(OpenCodeGlobal());
+        InstallRun prepared = await RunInstall(OpenCodeGlobal());
 
         Assert.Equal(0, prepared.Record.ExitCode);
         ProcessStartInfo call = Assert.Single(prepared.Calls);
@@ -501,9 +504,9 @@ public sealed class SquadCapturePluginStepTests
     ///     exit code and nothing is started.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryAndNoKyberDashSkipsThePluginStepAndKeepsTheExitCode()
+    public async Task GlobalInstallWithFactoryAndNoKyberDashSkipsThePluginStepAndKeepsTheExitCode()
     {
-        InstallRun prepared = RunInstall(FactoryGlobal() with { MissingKyberDash = true });
+        InstallRun prepared = await RunInstall(FactoryGlobal() with { MissingKyberDash = true });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Empty(prepared.Calls);
@@ -516,9 +519,9 @@ public sealed class SquadCapturePluginStepTests
     ///     optional surface and the owner can rerun the printed command.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryKeepsTheSquadExitCodeWhenThePluginStepFails()
+    public async Task GlobalInstallWithFactoryKeepsTheSquadExitCodeWhenThePluginStepFails()
     {
-        InstallRun prepared = RunInstall(FactoryGlobal() with { Executor = "exit-3" });
+        InstallRun prepared = await RunInstall(FactoryGlobal() with { Executor = "exit-3" });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains("Successfully installed", prepared.Record.Output, StringComparison.Ordinal);
@@ -530,9 +533,9 @@ public sealed class SquadCapturePluginStepTests
     ///     neutral marker and this test never pins what KyberDash actually says.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryRelaysTheVerbsVerdictLine()
+    public async Task GlobalInstallWithFactoryRelaysTheVerbsVerdictLine()
     {
-        InstallRun prepared = RunInstall(FactoryGlobal() with { Executor = "verdict" });
+        InstallRun prepared = await RunInstall(FactoryGlobal() with { Executor = "verdict" });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains("FACTORY-VERDICT-LINE", prepared.Record.Output, StringComparison.Ordinal);
@@ -543,9 +546,9 @@ public sealed class SquadCapturePluginStepTests
     ///     deployment must not report a failure it cannot fix.
     /// </summary>
     [Fact]
-    public void GlobalInstallWithFactoryNamesAPreVerbKyberDashAsASkipAndNotAWarning()
+    public async Task GlobalInstallWithFactoryNamesAPreVerbKyberDashAsASkipAndNotAWarning()
     {
-        InstallRun prepared = RunInstall(FactoryGlobal() with { Executor = "old-dash" });
+        InstallRun prepared = await RunInstall(FactoryGlobal() with { Executor = "old-dash" });
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains("capture plugin", prepared.Record.Output, StringComparison.OrdinalIgnoreCase);
@@ -608,18 +611,19 @@ public sealed class SquadCapturePluginStepTests
     /// Installs the OpenCode global deployment into <paramref name="harness"/> and checks that the install
     /// succeeded, so a passing update cannot come from a seed that wrote nothing.
     /// </summary>
-    private static void InstallOpenCodeGlobal(Harness harness)
+    private static async Task InstallOpenCodeGlobal(Harness harness)
     {
         FakeProcessExecutor executor = new();
         SquadInstallSettings settings = GlobalInstall(harness, ["opencode"]);
 
-        CommandExecution execution = Capture(() => harness.InstallCommand(executor).Execute(null!, settings), out _);
+        CommandExecution execution = await Capture(() => harness.InstallCommand(executor).ExecuteAsync(null!, settings,
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
     }
 
     /// <summary>Runs the install command for <paramref name="spec"/> over its own in-memory state.</summary>
-    private static InstallRun RunInstall(InstallSpec spec)
+    private static async Task<InstallRun> RunInstall(InstallSpec spec)
     {
         string? factoryHome = null;
         Harness? created = null;
@@ -644,14 +648,13 @@ public sealed class SquadCapturePluginStepTests
             settings.DryRun = spec.DryRun;
             settings.Yes = !spec.Declined;
 
-            CommandExecution execution = Capture(
+            CommandExecution execution = await Capture(
                 () => (spec.Declined
                         ? h.InstallCommand(executor, isInteractive: true, readAnswer: _ => false)
                         : h.InstallCommand(
                             executor,
                             locateKyberDash: spec.MissingKyberDash ? () => null : null))
-                    .Execute(null!, settings),
-                out _);
+                    .ExecuteAsync(null!, settings, CancellationToken.None));
 
             InstallRun run = new(
                 execution,
@@ -688,18 +691,17 @@ public sealed class SquadCapturePluginStepTests
         };
     }
 
-    private static CommandExecution Capture(Func<int> execute, out string output)
+    private static async Task<CommandExecution> Capture(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(execute);
-        output = captured.Output;
+        CapturedConsoleExecution<int> captured = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(captured.Result, captured.Output, captured.ErrorOutput);
     }
 
-    private static CapturePluginStepOutcome Capture(Func<CapturePluginStepOutcome> step, out string output)
+    private static async Task<(CapturePluginStepOutcome Outcome, string Output)> CaptureAsync(
+        Func<Task<CapturePluginStepOutcome>> step)
     {
-        CapturedConsoleExecution<CapturePluginStepOutcome> captured = ProcessConsoleCapture.Run(step);
-        output = captured.Output;
-        return captured.Result;
+        CapturedConsoleExecution<CapturePluginStepOutcome> captured = await ProcessConsoleCapture.RunAsync(step);
+        return (captured.Result, captured.Output);
     }
 
     private static SquadInstallSettings GlobalInstall(Harness h, string[] targets, string version = InstalledVersion)
@@ -810,7 +812,7 @@ public sealed class SquadCapturePluginStepTests
         }
 
         public SquadInstallCommand InstallCommand(
-            IProcessExecutor executor,
+            IProcessRunner runner,
             bool isInteractive = false,
             Func<string, bool>? readAnswer = null,
             Func<string?>? locateKyberDash = null)
@@ -822,10 +824,10 @@ public sealed class SquadCapturePluginStepTests
                 globalRoots: _globalRoots,
                 isInteractive: isInteractive,
                 readAnswer: readAnswer ?? (_ => true),
-                capturePluginStep: PluginStep(executor, locateKyberDash));
+                capturePluginStep: PluginStep(runner, locateKyberDash));
         }
 
-        public SquadUpdateCommand UpdateCommand(IProcessExecutor executor)
+        public SquadUpdateCommand UpdateCommand(IProcessRunner runner)
         {
             return SquadTestCommands.InMemoryUpdate(
                 _state,
@@ -834,14 +836,14 @@ public sealed class SquadCapturePluginStepTests
                 globalRoots: _globalRoots,
                 isInteractive: false,
                 readAnswer: _ => true,
-                capturePluginStep: PluginStep(executor));
+                capturePluginStep: PluginStep(runner));
         }
 
         private static KyberDashCapturePluginStep PluginStep(
-            IProcessExecutor executor,
+            IProcessRunner runner,
             Func<string?>? locateKyberDash = null)
         {
-            return SquadTestCommands.CapturePluginStep(executor, locateKyberDash ?? (() => FakeKyberDash));
+            return SquadTestCommands.CapturePluginStep(runner, locateKyberDash ?? (() => FakeKyberDash));
         }
     }
 

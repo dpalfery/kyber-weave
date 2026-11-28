@@ -35,7 +35,7 @@ public sealed class SquadRunCommandTests
     #region Successful Execution and Exit Code Pass-through
 
     [Fact]
-    public void SuccessfulRunCallsEnsureAndLaunchesHarnessPassingThroughExitCode()
+    public async Task SuccessfulRunCallsEnsureAndLaunchesHarnessPassingThroughExitCode()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
 
@@ -66,7 +66,8 @@ public sealed class SquadRunCommandTests
             Args = ["--model", "custom-model"]
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.True(ensureCalled, "EnsureAsync must be called before launching harness.");
         Assert.NotNull(capturedStartInfo);
@@ -81,7 +82,7 @@ public sealed class SquadRunCommandTests
     #region Acceptance Criterion 7.1: Concurrent Instance Execution
 
     [Fact]
-    public void ConcurrentRunsExecuteWithIsolatedInstanceRoots()
+    public async Task ConcurrentRunsExecuteWithIsolatedInstanceRoots()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         _selectionStore.Set(_projectDir, SquadTarget.Codex, "fast");
@@ -107,10 +108,10 @@ public sealed class SquadRunCommandTests
             name => $"/usr/bin/{name}",
             ensureOverride: EnsuredInstance);
 
-        CapturedConsoleExecution<int> exec1 = ProcessConsoleCapture.Run(() =>
-            claudeCommand.Execute(null!, new SquadRunSettings { Harness = "claude" }));
-        CapturedConsoleExecution<int> exec2 = ProcessConsoleCapture.Run(() =>
-            codexCommand.Execute(null!, new SquadRunSettings { Harness = "codex" }));
+        CapturedConsoleExecution<int> exec1 = await ProcessConsoleCapture.RunAsync(() =>
+            claudeCommand.ExecuteAsync(null!, new SquadRunSettings { Harness = "claude" }, CancellationToken.None));
+        CapturedConsoleExecution<int> exec2 = await ProcessConsoleCapture.RunAsync(() =>
+            codexCommand.ExecuteAsync(null!, new SquadRunSettings { Harness = "codex" }, CancellationToken.None));
 
         Assert.Equal(0, exec1.Result);
         Assert.Equal(0, exec2.Result);
@@ -130,7 +131,7 @@ public sealed class SquadRunCommandTests
     [InlineData("codex")]
     [InlineData("copilot")]
     [InlineData("pi")]
-    public void HarnessNeutralSyntaxSupportsAnyApprovedReadyTarget(string harnessToken)
+    public async Task HarnessNeutralSyntaxSupportsAnyApprovedReadyTarget(string harnessToken)
     {
         SquadTarget target = SquadTargetCatalog.Parse([harnessToken])[0];
         _selectionStore.Set(_projectDir, target, "fast");
@@ -150,7 +151,8 @@ public sealed class SquadRunCommandTests
             Harness = harnessToken
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(0, execution.Result);
         Assert.True(launched, $"Harness '{harnessToken}' must launch successfully via neutral syntax.");
@@ -161,7 +163,7 @@ public sealed class SquadRunCommandTests
     #region Preset Selection Enforcement
 
     [Fact]
-    public void NoSelectionRecordedForTargetExitsWithCodeTwoAndGuidance()
+    public async Task NoSelectionRecordedForTargetExitsWithCodeTwoAndGuidance()
     {
         SquadRunCommand command = CreateCommand();
         SquadRunSettings settings = new()
@@ -169,7 +171,8 @@ public sealed class SquadRunCommandTests
             Harness = "claude"
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(2, execution.Result);
         Assert.Contains(
@@ -179,7 +182,7 @@ public sealed class SquadRunCommandTests
     }
 
     [Fact]
-    public void MissingPresetFileOnDiskExitsWithCodeOneAndDoesNotCreateStubFile()
+    public async Task MissingPresetFileOnDiskExitsWithCodeOneAndDoesNotCreateStubFile()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "missing-preset");
         SquadRunCommand command = CreateCommand(
@@ -190,7 +193,8 @@ public sealed class SquadRunCommandTests
             Harness = "claude"
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("missing-preset", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -206,7 +210,7 @@ public sealed class SquadRunCommandTests
     #region Acceptance Criterion 7.7: Unsupported and SpikePending Harnesses Fail Cleanly
 
     [Fact]
-    public void UnsupportedHarnessExitsWithCodeTwoAndNamesReason()
+    public async Task UnsupportedHarnessExitsWithCodeTwoAndNamesReason()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Warp, "fast");
         SquadRunCommand command = CreateCommand();
@@ -215,7 +219,8 @@ public sealed class SquadRunCommandTests
             Harness = "warp"
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         SquadInstanceRow warpRow = SquadInstanceCatalog.GetRow(SquadTarget.Warp);
         Assert.Equal(2, execution.Result);
@@ -225,7 +230,7 @@ public sealed class SquadRunCommandTests
     }
 
     [Fact]
-    public void SpikePendingHarnessExitsWithCodeTwoAndNamesReason()
+    public async Task SpikePendingHarnessExitsWithCodeTwoAndNamesReason()
     {
         _selectionStore.Set(_projectDir, SquadTarget.OpenCode, "fast");
         SquadRunCommand command = CreateCommand();
@@ -234,7 +239,8 @@ public sealed class SquadRunCommandTests
             Harness = "opencode"
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(2, execution.Result);
         Assert.Contains("opencode cannot run on a preset instance:", execution.Output,
@@ -246,7 +252,7 @@ public sealed class SquadRunCommandTests
     #region PATH and Linking Failure Handling
 
     [Fact]
-    public void HarnessMissingFromPathExitsWithCodeOne()
+    public async Task HarnessMissingFromPathExitsWithCodeOne()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         SquadRunCommand command = CreateCommand(findOnPath: _ => null, ensureOverride: EnsuredInstance);
@@ -255,14 +261,15 @@ public sealed class SquadRunCommandTests
             Harness = "claude"
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void SquadLinkExceptionDuringEnsureExitsWithCodeOne()
+    public async Task SquadLinkExceptionDuringEnsureExitsWithCodeOne()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         SquadRunCommand command = CreateCommand(
@@ -272,14 +279,15 @@ public sealed class SquadRunCommandTests
             Harness = "claude"
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("Simulated link creation failed.", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ArgumentContainingShellMetacharacterExitsWithCodeTwo()
+    public async Task ArgumentContainingShellMetacharacterExitsWithCodeTwo()
     {
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         SquadRunCommand command = CreateCommand(ensureOverride: EnsuredInstance);
@@ -289,7 +297,8 @@ public sealed class SquadRunCommandTests
             Args = ["echo", "foo&bar"]
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(
+            () => command.ExecuteAsync(null!, settings, CancellationToken.None));
 
         Assert.Equal(2, execution.Result);
         Assert.Contains("dangerous characters", execution.Output, StringComparison.OrdinalIgnoreCase);

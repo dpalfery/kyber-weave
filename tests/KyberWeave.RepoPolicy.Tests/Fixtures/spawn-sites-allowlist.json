@@ -665,7 +665,13 @@
       "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs",
       "text": "ProcessStartInfo start = new(kyberdash)",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started through a ProcessExecutor built with WithTimeout(PluginVerbTimeout) = 120 s (KyberDashCapturePluginStep.cs:60); the tree is killed on expiry."
+      "bound": "Builds only; nothing starts on this line. Started through an IProcessRunner bounded with PluginVerbTimeout = 120 s (KyberDashCapturePluginStep.cs:55); the tree is killed on expiry."
+    },
+    {
+      "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
+      "count": 1,
+      "bound": "Builds only; started through ProcessRunner.RunAsync bounded by PluginVerbTimeout = 120 s (KyberDashCapturePluginStep.cs:55); the process tree is killed on expiry."
     },
     {
       "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/ProcessProbes.cs",
@@ -674,16 +680,10 @@
       "bound": "Builds only; nothing starts on this line. Started through IProcessExecutor.Run; every ProcessExecutor is bounded (DefaultTimeout 60 s, or the WithTimeout value) at IProcessExecutor.cs:45."
     },
     {
-      "file": "src/KyberWeave.Data/Utilities/StatusLineVersionProbeRunner.cs",
-      "text": "return static (startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput, VersionProbeTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with VersionProbeTimeout = 5 s (StatusLineVersionProbeRunner.cs:11); the process tree is killed on expiry."
-    },
-    {
       "file": "src/KyberWeave.Application/StatusLine/UtilitiesStatusLineHarnessProbe.cs",
       "text": "ProcessStartInfo startInfo = new(executable)",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. It is started only through the injected UtilitiesStatusLineProcessRunner, which production binds to StatusLineVersionProbeRunner.Create (5 s, StatusLineVersionProbeRunner.cs:11)."
+      "bound": "Builds only; nothing starts on this line. It is started only through the injected version-probe delegate, which production binds to StatusLineVersionProbeRunner.Create (5 s via ProcessRunner.RunAsync, StatusLineVersionProbeRunner.cs:10)."
     },
     {
       "file": "src/KyberWeave.Data/CodeGraph/CodeGraphResolverAdapter.cs",
@@ -1110,6 +1110,12 @@
       "text": "ProcessStartInfo startInfo = new(request.Program)",
       "count": 1,
       "bound": "Builds only; the fake answers from its script and starts no process."
+    },
+    {
+      "file": "tests/KyberWeave.Testing/Fakes/FakeProcessExecutor.cs",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
+      "count": 1,
+      "bound": "Builds only; the fake answers from its canned responses and starts no process."
     },
     {
       "file": "tests/KyberWeave.Cli.Tests/DoctorCommandSeamTests.cs",

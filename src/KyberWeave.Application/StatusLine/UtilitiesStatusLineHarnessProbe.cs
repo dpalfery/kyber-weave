@@ -2,8 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 
-using KyberWeave.Contracts.Repositories;
-
 namespace KyberWeave.Application.StatusLine;
 
 /// <summary>Best-effort version probe for a harness binary.</summary>
@@ -21,7 +19,10 @@ public static class UtilitiesStatusLineHarnessProbe
     ///     exception is folded into "unknown" because the exception text can echo <c>PATH</c> values
     ///     doctor must not print.
     /// </remarks>
-    public static string? TryVersion(UtilitiesStatusLineProcessRunner run, string executable)
+    public static async Task<string?> TryVersionAsync(
+        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> run,
+        string executable,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
@@ -38,7 +39,7 @@ public static class UtilitiesStatusLineHarnessProbe
 
         try
         {
-            ProcessResult result = run(startInfo, string.Empty);
+            ProcessResult result = await run(startInfo, string.Empty, cancellationToken).ConfigureAwait(false);
             return result.ExitCode == 0 ? FirstLine(result.StandardOutput) : null;
         }
         catch (Exception ex) when (ex is TimeoutException or IOException or InvalidOperationException or Win32Exception)

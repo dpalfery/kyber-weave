@@ -140,7 +140,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     }
 
     [Fact]
-    public void Install_GateTrue_ThenDoctorAndStatusReportNoDriftForTheSameEnvironment()
+    public async Task Install_GateTrue_ThenDoctorAndStatusReportNoDriftForTheSameEnvironment()
     {
         CliHarness h = NewHarness("install-then-doctor");
         InstalledChannel channel = Channel("true", SquadOperatorChannelFixture.ServerPresentConfig);
@@ -151,11 +151,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
             SquadOperatorChannelFixture.ToolEntries(ReadConductor(h)),
             entry => entry == SquadOperatorChannelFixture.ToolEntry);
 
-        CommandExecution doctor = Run(() => Doctor(h, "true").Execute(null!, new SquadDoctorSettings
+        CommandExecution doctor = await RunAsync(() => Doctor(h, "true").ExecuteAsync(null!, new SquadDoctorSettings
         {
             Path = h.Anchor,
             Global = true
-        }));
+        }, CancellationToken.None));
         AssertExit(doctor, 0);
         Assert.DoesNotContain("Unmanaged global file", doctor.Output, StringComparison.Ordinal);
 
@@ -169,7 +169,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     }
 
     [Fact]
-    public void Install_GateUnset_DoctorAndStatusReportNoDrift()
+    public async Task Install_GateUnset_DoctorAndStatusReportNoDrift()
     {
         CliHarness h = NewHarness("default-off-doctor");
         InstalledChannel channel = Channel(null, SquadOperatorChannelFixture.ServerPresentConfig);
@@ -177,11 +177,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
 
         AssertInstalled(channel);
 
-        CommandExecution doctor = Run(() => Doctor(h, null).Execute(null!, new SquadDoctorSettings
+        CommandExecution doctor = await RunAsync(() => Doctor(h, null).ExecuteAsync(null!, new SquadDoctorSettings
         {
             Path = h.Anchor,
             Global = true
-        }));
+        }, CancellationToken.None));
         AssertExit(doctor, 0);
         Assert.DoesNotContain("Unmanaged global file", doctor.Output, StringComparison.Ordinal);
 
@@ -195,7 +195,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     }
 
     [Fact]
-    public void Update_CopilotGlobal_GateTrueWithServerFound_AddsTheServerToolEntryToTheInstalledConductor()
+    public async Task Update_CopilotGlobal_GateTrueWithServerFound_AddsTheServerToolEntryToTheInstalledConductor()
     {
         CliHarness h = NewHarness("update-on");
         InstalledChannel channel = Channel(null, SquadOperatorChannelFixture.ServerPresentConfig);
@@ -203,14 +203,14 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         AssertInstalled(channel);
         Assert.DoesNotContain(SquadOperatorChannelFixture.ToolEntry, ReadConductor(h), StringComparison.Ordinal);
 
-        CommandExecution update = Run(() => Update(h, "true").Execute(null!, new SquadUpdateSettings
+        CommandExecution update = await RunAsync(() => Update(h, "true").ExecuteAsync(null!, new SquadUpdateSettings
         {
             Path = h.Anchor,
             Global = true,
             Targets = ["copilot"],
             Version = "1.2.4",
             Yes = true
-        }));
+        }, CancellationToken.None));
 
         AssertExit(update, 0);
         Assert.Single(
@@ -363,6 +363,12 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
 
     private static CommandExecution Run(Func<int> execute) => Capture(execute);
 
+    private static async Task<CommandExecution> RunAsync(Func<Task<int>> execute)
+    {
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
+        return new CommandExecution(execution.Result, execution.Output, execution.ErrorOutput);
+    }
+
     private static CommandExecution Capture(Func<int> execute)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
@@ -420,14 +426,16 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
                         _ => true,
                         harness.GlobalRoots,
                         environmentReader: harness.CreateEnvironmentReader(gateValue, serverName))
-                    .Execute(null!, new SquadInstallSettings
+                    .ExecuteAsync(null!, new SquadInstallSettings
                     {
                         Path = anchor,
                         Global = true,
                         Targets = ["copilot"],
                         Version = InstallVersion,
                         Yes = true
-                    }));
+                    }, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult());
 
                 InstalledChannel install = new(
                     key,

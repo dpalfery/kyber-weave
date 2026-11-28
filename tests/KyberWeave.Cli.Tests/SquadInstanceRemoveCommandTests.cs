@@ -27,11 +27,11 @@ public sealed class SquadInstanceRemoveCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_InstanceFound_RemovesItWithoutAskingWhenNotInteractive()
+    public async Task Execute_InstanceFound_RemovesItWithoutAskingWhenNotInteractive()
     {
         _files.Directories.Add(Home + "/.kyber-weave/squad/instances/claude/fast");
 
-        int exit = Run(new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" });
+        int exit = await Run(new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" });
 
         Assert.Equal(0, exit);
         Assert.Equal([(SquadTarget.Claude, "fast")], _instances.Removed);
@@ -39,9 +39,9 @@ public sealed class SquadInstanceRemoveCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_InstanceMissing_ReportsNotFound()
+    public async Task Execute_InstanceMissing_ReportsNotFound()
     {
-        int exit = Run(new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" });
+        int exit = await Run(new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" });
 
         Assert.Equal(2, exit);
         Assert.Empty(_instances.Removed);
@@ -49,12 +49,12 @@ public sealed class SquadInstanceRemoveCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_Interactive_DecliningLeavesTheInstance()
+    public async Task Execute_Interactive_DecliningLeavesTheInstance()
     {
         _files.Directories.Add(Home + "/.kyber-weave/squad/instances/claude/fast");
         _streams.ScriptInput("n\n");
 
-        int exit = Run(new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" }, interactive: true);
+        int exit = await Run(new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" }, interactive: true);
 
         Assert.Equal(2, exit);
         Assert.Empty(_instances.Removed);
@@ -62,18 +62,19 @@ public sealed class SquadInstanceRemoveCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_RelativeHome_IsResolvedAgainstTheWorkingDirectory()
+    public async Task Execute_RelativeHome_IsResolvedAgainstTheWorkingDirectory()
     {
         _files.Directories.Add("rel/.kyber-weave/squad/instances/claude/fast");
         SquadInstanceRemoveCommand command = Command("rel", interactive: false);
 
-        int exit = command.Execute(null!, new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" });
+        int exit = await command.ExecuteAsync(null!, new SquadInstanceRemoveSettings { Target = "claude", Preset = "fast" },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
     }
 
-    private int Run(SquadInstanceRemoveSettings settings, bool interactive = false) =>
-        Command(Home, interactive).Execute(null!, settings);
+    private async Task<int> Run(SquadInstanceRemoveSettings settings, bool interactive = false) =>
+        await Command(Home, interactive).ExecuteAsync(null!, settings, CancellationToken.None);
 
     private SquadInstanceRemoveCommand Command(string home, bool interactive) =>
         new(

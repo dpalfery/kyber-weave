@@ -8,9 +8,9 @@ using KyberWeave.Contracts.Repositories;
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
-/// Deterministic fake for <see cref="IProcessExecutor"/> that captures command calls and returns canned outputs.
+/// Deterministic fake for <see cref="IProcessExecutor"/> and <see cref="IProcessRunner"/> that captures command calls and returns canned outputs.
 /// </summary>
-public sealed class FakeProcessExecutor : IProcessExecutor
+public sealed class FakeProcessExecutor : IProcessRunner
 {
     private readonly Dictionary<string, ProcessResult> _cannedOutputs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Exception> _cannedExceptions = new(StringComparer.Ordinal);
@@ -61,4 +61,32 @@ public sealed class FakeProcessExecutor : IProcessExecutor
 
         return new ProcessResult(0, string.Empty, string.Empty);
     }
+
+    public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ProcessStartInfo startInfo = new(request.Program)
+        {
+            WorkingDirectory = request.WorkingDirectory ?? string.Empty,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in request.Arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        ProcessResult result = Run(startInfo, request.StandardInput ?? string.Empty);
+        return Task.FromResult(new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)
+        {
+            StandardOutput = result.StandardOutput,
+            StandardError = result.StandardError
+        });
+    }
+
+    public bool IsAlive(int processId) => false;
+
+    public string? FindOnPath(string program) => null;
 }

@@ -599,12 +599,12 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             homeDirectory: _home,
             tempDirectory: Path.GetTempPath(),
             readVariable: name => variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name));
-        UtilitiesStatusLineProcessRunner versionProbe = (startInfo, _) =>
+        Func<ProcessStartInfo, string, CancellationToken, Task<ProcessResult>> versionProbe = (startInfo, _, _) =>
         {
             // A child resolves its program against this process's PATH, so the stub on the case's PATH is named in full.
             startInfo.FileName = ResolveOnPath(startInfo.FileName, pathVariable) ?? startInfo.FileName;
             startInfo.Environment["PATH"] = pathVariable;
-            return Execute(startInfo);
+            return Task.FromResult(Execute(startInfo));
         };
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>

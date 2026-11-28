@@ -32,14 +32,14 @@ public sealed class SquadVersionOptionTests
     [Theory]
     [InlineData("v1.2.3+dev")]
     [InlineData("1.2.3+a.b.9")]
-    public void Install_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero(string version)
+    public async Task Install_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero(string version)
     {
         string targetDir = _state.CreateRoot("install-pinned");
         using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -49,7 +49,8 @@ public sealed class SquadVersionOptionTests
                 DryRun = false,
                 Adopt = false,
                 Version = version
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadReleaseRequest request = Assert.Single(releaseSource.Requests);
@@ -57,7 +58,7 @@ public sealed class SquadVersionOptionTests
     }
 
     [Fact]
-    public void Update_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero()
+    public async Task Update_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero()
     {
         string targetDir = _state.CreateRoot("update-pinned");
         using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
@@ -65,7 +66,7 @@ public sealed class SquadVersionOptionTests
         SeedDeployment(targetDir);
         SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -75,7 +76,8 @@ public sealed class SquadVersionOptionTests
                 DryRun = false,
                 ReplaceManaged = true,
                 Version = "v1.2.3+dev"
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadReleaseRequest request = Assert.Single(releaseSource.Requests);
@@ -83,14 +85,14 @@ public sealed class SquadVersionOptionTests
     }
 
     [Fact]
-    public void Install_WithoutPinnedVersion_RequestsTheRunningAssemblyVersionWithoutMetadata()
+    public async Task Install_WithoutPinnedVersion_RequestsTheRunningAssemblyVersionWithoutMetadata()
     {
         string targetDir = _state.CreateRoot("install-default-version");
         using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -99,7 +101,8 @@ public sealed class SquadVersionOptionTests
                 Global = false,
                 DryRun = false,
                 Adopt = false
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadReleaseRequest request = Assert.Single(releaseSource.Requests);
@@ -107,7 +110,7 @@ public sealed class SquadVersionOptionTests
     }
 
     [Fact]
-    public void Update_WithoutPinnedVersion_RequestsTheRunningAssemblyVersionWithoutMetadata()
+    public async Task Update_WithoutPinnedVersion_RequestsTheRunningAssemblyVersionWithoutMetadata()
     {
         string targetDir = _state.CreateRoot("update-default-version");
         using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
@@ -115,7 +118,7 @@ public sealed class SquadVersionOptionTests
         SeedDeployment(targetDir);
         SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -124,7 +127,8 @@ public sealed class SquadVersionOptionTests
                 Global = false,
                 DryRun = false,
                 ReplaceManaged = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, execution.ExitCode);
         SquadReleaseRequest request = Assert.Single(releaseSource.Requests);
@@ -145,7 +149,7 @@ public sealed class SquadVersionOptionTests
     // rejected as client input, not silently fall through to the omitted-flag default.
     [InlineData(" ", "--version")]
     [InlineData("\t", "--version")]
-    public void Install_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
+    public async Task Install_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
         string version,
         string expectedMessageFragment)
     {
@@ -155,7 +159,7 @@ public sealed class SquadVersionOptionTests
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
         IReadOnlyDictionary<string, SquadTreeEntry> before = _state.Capture();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -165,7 +169,8 @@ public sealed class SquadVersionOptionTests
                 DryRun = false,
                 Adopt = false,
                 Version = version
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -188,7 +193,7 @@ public sealed class SquadVersionOptionTests
     // rejected as client input, not silently fall through to the omitted-flag default.
     [InlineData(" ", "--version")]
     [InlineData("\t", "--version")]
-    public void Update_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
+    public async Task Update_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
         string version,
         string expectedMessageFragment)
     {
@@ -199,7 +204,7 @@ public sealed class SquadVersionOptionTests
         SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer);
         IReadOnlyDictionary<string, SquadTreeEntry> before = _state.Capture();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadUpdateSettings
             {
@@ -209,7 +214,8 @@ public sealed class SquadVersionOptionTests
                 DryRun = false,
                 ReplaceManaged = true,
                 Version = version
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -219,7 +225,7 @@ public sealed class SquadVersionOptionTests
     }
 
     [Fact]
-    public void Install_WithPinnedVersionThatHasNoGitHubRelease_FailsWithTheTargetedDiagnosticAndExitOne()
+    public async Task Install_WithPinnedVersionThatHasNoGitHubRelease_FailsWithTheTargetedDiagnosticAndExitOne()
     {
         string targetDir = _state.CreateRoot("install-missing-release");
         using StatusCodeHandler handler = new StatusCodeHandler(HttpStatusCode.NotFound);
@@ -227,7 +233,7 @@ public sealed class SquadVersionOptionTests
         FakeSquadRenderer renderer = new();
         SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
 
-        CommandExecution execution = Capture(() => command.Execute(
+        CommandExecution execution = await Capture(() => command.ExecuteAsync(
             null!,
             new SquadInstallSettings
             {
@@ -237,7 +243,8 @@ public sealed class SquadVersionOptionTests
                 DryRun = false,
                 Adopt = false,
                 Version = "9.9.9"
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -320,9 +327,9 @@ public sealed class SquadVersionOptionTests
         _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private static async Task<CommandExecution> Capture(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

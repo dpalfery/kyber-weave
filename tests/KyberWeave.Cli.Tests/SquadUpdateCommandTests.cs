@@ -26,11 +26,11 @@ public sealed class SquadUpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NoDeployment_SaysWhereAndHowToCreateOne()
+    public async Task Execute_NoDeployment_SaysWhereAndHowToCreateOne()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUpdateSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUpdateSettings(), CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Equal([WorkingDirectory], _migration.InvokingDirectories);
@@ -41,12 +41,13 @@ public sealed class SquadUpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_RelativePath_ResolvesAgainstTheWorkingDirectoryTheEnvironmentNames()
+    public async Task Execute_RelativePath_ResolvesAgainstTheWorkingDirectoryTheEnvironmentNames()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _state.Add(Receipt("/kw/work/app"));
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUpdateSettings { PathOption = "app" });
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUpdateSettings { PathOption = "app" },
+            CancellationToken.None);
 
         Assert.Equal(0, exit);
         SquadUpdateRequest request = Assert.Single(lifecycle.Updates);
@@ -55,7 +56,7 @@ public sealed class SquadUpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
+    public async Task Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
     {
         FakeSquadLifecycleService lifecycle = new(_state)
         {
@@ -63,7 +64,7 @@ public sealed class SquadUpdateCommandTests : IDisposable
         };
         _state.Add(Receipt(WorkingDirectory));
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUpdateSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUpdateSettings(), CancellationToken.None);
 
         Assert.Equal(0, exit);
         Assert.Contains(
@@ -74,17 +75,17 @@ public sealed class SquadUpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_InteractiveAndDeclined_StopsBeforeTheLifecycle()
+    public async Task Execute_InteractiveAndDeclined_StopsBeforeTheLifecycle()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _state.Add(Receipt(WorkingDirectory));
         List<string> questions = [];
 
-        int exit = Command(lifecycle, interactive: true, readAnswer: question =>
+        int exit = await Command(lifecycle, interactive: true, readAnswer: question =>
         {
             questions.Add(question);
             return false;
-        }).Execute(null!, new SquadUpdateSettings());
+        }).ExecuteAsync(null!, new SquadUpdateSettings(), CancellationToken.None);
 
         Assert.Equal(2, exit);
         Assert.Empty(lifecycle.Updates);
@@ -93,7 +94,7 @@ public sealed class SquadUpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_NoTargetsResolved_NamesTheRecoveryCommandAndUsesItsExitCode()
+    public async Task Execute_NoTargetsResolved_NamesTheRecoveryCommandAndUsesItsExitCode()
     {
         FakeSquadLifecycleService lifecycle = new(_state);
         _state.Add(Receipt(WorkingDirectory));
@@ -106,7 +107,7 @@ public sealed class SquadUpdateCommandTests : IDisposable
             RecoveryCommand = "--target claude"
         };
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUpdateSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUpdateSettings(), CancellationToken.None);
 
         Assert.Equal(3, exit);
         Assert.Equal(
@@ -115,12 +116,12 @@ public sealed class SquadUpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_LifecycleFails_PrintsEachErrorAndExitsOne()
+    public async Task Execute_LifecycleFails_PrintsEachErrorAndExitsOne()
     {
         FakeSquadLifecycleService lifecycle = new(_state) { Result = new SquadLifecycleResult(false, Errors: ["broken [x]"]) };
         _state.Add(Receipt(WorkingDirectory));
 
-        int exit = Command(lifecycle).Execute(null!, new SquadUpdateSettings());
+        int exit = await Command(lifecycle).ExecuteAsync(null!, new SquadUpdateSettings(), CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.EndsWith("kyber-weave squad: error: broken [x]\n", Output(), StringComparison.Ordinal);

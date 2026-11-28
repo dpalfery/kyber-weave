@@ -25,7 +25,7 @@ public sealed class SquadDoctorRetiredSkillTests
     /// steps, and the new Kyber-Docs home. A warning, not a failure: the stale copy works.
     /// </summary>
     [Fact]
-    public void Doctor_ProjectWorkspaceWithUnmanagedRetiredSkillDir_WarnsWithPathsAndCleanupSteps()
+    public async Task Doctor_ProjectWorkspaceWithUnmanagedRetiredSkillDir_WarnsWithPathsAndCleanupSteps()
     {
         string workingDir = _state.CreateRoot("doctor-retired-unmanaged");
         string staleDir = Path.Combine(workingDir, ".claude", "skills", "second-brain");
@@ -33,7 +33,7 @@ public sealed class SquadDoctorRetiredSkillTests
         _state.Files.WriteAllText(
             Path.Combine(staleDir, "SKILL.md"), "---\nname: second-brain\n---\nStale.\n");
 
-        CommandExecution execution = RunProjectDoctor(workingDir);
+        CommandExecution execution = await RunProjectDoctor(workingDir);
         string normalizedOutput = Normalize(execution.Output);
 
         Assert.Equal(0, execution.ExitCode);
@@ -52,7 +52,7 @@ public sealed class SquadDoctorRetiredSkillTests
     /// and the new Kyber-Docs home.
     /// </summary>
     [Fact]
-    public void Doctor_ProjectWorkspaceWithRetainedRetiredReceiptEntry_WarnsAndNamesNewHome()
+    public async Task Doctor_ProjectWorkspaceWithRetainedRetiredReceiptEntry_WarnsAndNamesNewHome()
     {
         string workingDir = _state.CreateRoot("doctor-retired-retained");
         string staleDir = Path.Combine(workingDir, ".claude", "skills", "second-brain");
@@ -61,7 +61,7 @@ public sealed class SquadDoctorRetiredSkillTests
         _state.Files.WriteAllBytes(Path.Combine(staleDir, "SKILL.md"), staleBytes);
         SeedProjectReceipt(workingDir, ".claude/skills/second-brain/SKILL.md", staleBytes);
 
-        CommandExecution execution = RunProjectDoctor(workingDir);
+        CommandExecution execution = await RunProjectDoctor(workingDir);
         string normalizedOutput = Normalize(execution.Output);
 
         Assert.Equal(0, execution.ExitCode);
@@ -80,7 +80,7 @@ public sealed class SquadDoctorRetiredSkillTests
     /// failure: the stale copy works and the registry check below still runs.
     /// </summary>
     [Fact]
-    public void Doctor_ProjectWorkspaceWithCorruptReceipt_WarnsAboutUnreadableReceipt()
+    public async Task Doctor_ProjectWorkspaceWithCorruptReceipt_WarnsAboutUnreadableReceipt()
     {
         string workingDir = _state.CreateRoot("doctor-retired-corrupt");
         _state.Files.CreateDirectory(workingDir);
@@ -89,14 +89,14 @@ public sealed class SquadDoctorRetiredSkillTests
         _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         _state.Files.WriteAllText(receiptPath, "{ not json");
 
-        CommandExecution execution = RunProjectDoctor(workingDir);
+        CommandExecution execution = await RunProjectDoctor(workingDir);
         string normalizedOutput = Normalize(execution.Output);
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("receipt", normalizedOutput, StringComparison.OrdinalIgnoreCase);
     }
 
-    private CommandExecution RunProjectDoctor(string workingDir)
+    private async Task<CommandExecution> RunProjectDoctor(string workingDir)
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
@@ -105,13 +105,14 @@ public sealed class SquadDoctorRetiredSkillTests
             executor,
             workingDirectory: workingDir);
 
-        return Capture(() => command.Execute(
+        return await Capture(() => command.ExecuteAsync(
             null!,
             new SquadDoctorSettings
             {
                 Path = workingDir,
                 Global = false
-            }));
+            },
+            CancellationToken.None));
     }
 
     private void SeedProjectReceipt(string targetRoot, string relativePath, byte[] content)
@@ -146,9 +147,9 @@ public sealed class SquadDoctorRetiredSkillTests
         _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private static async Task<CommandExecution> Capture(Func<Task<int>> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = await ProcessConsoleCapture.RunAsync(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

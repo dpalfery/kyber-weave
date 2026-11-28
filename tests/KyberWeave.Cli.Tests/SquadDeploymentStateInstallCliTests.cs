@@ -17,7 +17,7 @@ public sealed class SquadDeploymentStateInstallCliTests
     ///     the planned removals with their target, and remove nothing.
     /// </summary>
     [Fact]
-    public void UninstallDryRunListsPlannedRemovalsWithTargetsAndRemovesNothing()
+    public async Task UninstallDryRunListsPlannedRemovalsWithTargetsAndRemovesNothing()
     {
         InMemorySquadState state = new();
         string root = Path.Combine(state.Files.Root, "dry-run-project");
@@ -46,13 +46,14 @@ public sealed class SquadDeploymentStateInstallCliTests
             releaseSource,
             FakeSquadRenderer.Empty());
 
-        CapturedConsoleExecution<int> dryRun = ProcessConsoleCapture.Run(() => command.Execute(
+        CapturedConsoleExecution<int> dryRun = await ProcessConsoleCapture.RunAsync(() => command.ExecuteAsync(
             null!,
             new SquadUninstallSettings
             {
                 PathOption = root,
                 DryRun = true
-            }));
+            },
+            CancellationToken.None));
 
         Assert.Equal(0, dryRun.Result);
         Assert.Contains("would uninstall 1 files", dryRun.Output, StringComparison.Ordinal);
