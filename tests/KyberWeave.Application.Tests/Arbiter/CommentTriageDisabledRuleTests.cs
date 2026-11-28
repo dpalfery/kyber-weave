@@ -201,14 +201,15 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     /// <summary>The CLI prints a status line for a disabled rule, and none for an answered comment.</summary>
     [Fact]
-    public void TheCliShowsNotEvaluatedForADisabledRuleAndNoStatusLineWhenAnswered()
+    public async Task TheCliShowsNotEvaluatedForADisabledRuleAndNoStatusLineWhenAnswered()
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n");
         ArbiterCommentCommand disabledCommand = _host.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick));
-        CommandExecution disabled = Capture(() => disabledCommand.Execute(
+        CommandExecution disabled = await CaptureAsync(token => disabledCommand.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." },
+            token));
 
         Assert.Equal(0, disabled.ExitCode);
         Assert.Contains("class real", disabled.Output, StringComparison.Ordinal);
@@ -216,9 +217,10 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
         _host.Files.DeleteFile(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
         ArbiterCommentCommand answeredCommand = _host.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Real));
-        CommandExecution answered = Capture(() => answeredCommand.Execute(
+        CommandExecution answered = await CaptureAsync(token => answeredCommand.ExecuteAsync(
             null!,
-            new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." },
+            token));
 
         Assert.Equal(0, answered.ExitCode);
         Assert.Contains("class real", answered.Output, StringComparison.Ordinal);
@@ -230,9 +232,9 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         _ = _host.WriteRepoConfig(yaml, Root);
     }
 
-    private CommandExecution Capture(Func<int> execute)
+    private async Task<CommandExecution> CaptureAsync(Func<CancellationToken, Task<int>> execute)
     {
-        ArbiterCommandRun run = _host.Run(execute);
+        ArbiterCommandRun run = await _host.RunAsync(execute);
         return new CommandExecution(run.ExitCode, run.Output);
     }
 

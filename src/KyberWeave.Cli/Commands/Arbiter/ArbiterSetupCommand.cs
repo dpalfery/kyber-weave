@@ -27,7 +27,7 @@ public sealed class ArbiterSetupCommand(
     IOllamaProbe ollama,
     IArbiterKeyInput keyInput,
     ICredentialStore credentials,
-    IAnsiConsole console) : Command<ArbiterSettings>
+    IAnsiConsole console) : AsyncCommand<ArbiterSettings>
 {
     /// <summary>The TypeSafe cloud endpoint written when no <c>--endpoint</c> is given.</summary>
     internal const string TypeSafeEndpoint = "https://api.typesafe.ai/v1";
@@ -45,7 +45,7 @@ public sealed class ArbiterSetupCommand(
     /// write (with a hint to use <c>TYPESAFE_API_KEY</c>); detection failures only
     /// silence the suggestion, never the run.
     /// </summary>
-    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
@@ -113,10 +113,10 @@ public sealed class ArbiterSetupCommand(
         console.MarkupLine($"  Model: [bold]{Markup.Escape(model)}[/]");
         console.MarkupLine($"  Override: [bold]{Markup.Escape(overridePath)}[/]");
 
-        ReportOllama(settings, endpoint, model);
+        await ReportOllamaAsync(settings, endpoint, model, cancellationToken).ConfigureAwait(false);
 
         if (kind == ArbiterProviderKind.Systemone && !ArbiterKeyResolver.IsLoopbackEndpoint(endpoint)
-            && !StoreKey(settings, endpoint, report))
+            && !await StoreKeyAsync(settings, endpoint, report, cancellationToken).ConfigureAwait(false))
         {
             CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
@@ -126,11 +126,7 @@ public sealed class ArbiterSetupCommand(
         return report.HasErrors ? 1 : 0;
     }
 
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
-
-    private void ReportOllama(ArbiterSettings settings, string endpoint, string model)
+    private async Task ReportOllamaAsync(ArbiterSettings settings, string endpoint, string model, CancellationToken cancellationToken)
     {
         string probeBase = !string.IsNullOrWhiteSpace(settings.Ollama)
             ? settings.Ollama.Trim()
@@ -139,11 +135,14 @@ public sealed class ArbiterSetupCommand(
                 : OllamaBaseUrl;
 
         Uri? versionUri = BuildOllamaVersionUri(probeBase);
-        if (versionUri is not null
-            && ollama.TryDetect(versionUri, out string? version))
+        if (versionUri is not null)
         {
-            console.MarkupLine(
-                $"  [green]ok[/] Ollama {Markup.Escape(version ?? "0.35")} detected at {Markup.Escape(probeBase)}; suggested model: [bold]nimble[/].");
+            OllamaProbeResult probe = await ollama.TryDetectAsync(versionUri, cancellationToken).ConfigureAwait(false);
+            if (probe.Detected)
+            {
+                console.MarkupLine(
+                    $"  [green]ok[/] Ollama {Markup.Escape(probe.Version ?? "0.35")} detected at {Markup.Escape(probeBase)}; suggested model: [bold]nimble[/].");
+            }
         }
 
         if (model.StartsWith("tev1", StringComparison.Ordinal))
@@ -158,7 +157,7 @@ public sealed class ArbiterSetupCommand(
             ? uri
             : null;
 
-    private bool StoreKey(ArbiterSettings settings, string endpoint, DiagnosticReport report)
+    private async Task<bool> StoreKeyAsync(ArbiterSettings settings, string endpoint, DiagnosticReport report, CancellationToken cancellationToken)
     {
         // The key travels on stdin or through a masked prompt, and is stored for the
         // endpoint origin only. It is never printed, so diagnostics and summaries name
@@ -179,7 +178,7 @@ public sealed class ArbiterSetupCommand(
 
         try
         {
-            credentials.Write(origin, key);
+            await credentials.WriteAsync(origin, key, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException
             or IOException

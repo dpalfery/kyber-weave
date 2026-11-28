@@ -22,11 +22,11 @@ public sealed class ArbiterCommentBodyLimitCliTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Comment_BodyOverTheTextLimit_IsRefused(bool summary)
+    public async Task Comment_BodyOverTheTextLimit_IsRefused(bool summary)
     {
         WriteDocument();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -36,7 +36,8 @@ public sealed class ArbiterCommentBodyLimitCliTests : IDisposable
                 Summary = summary,
                 Author = "dave",
                 Body = new string('x', TextLimit + 1),
-            }));
+            },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("larger than", execution.Output, StringComparison.Ordinal);

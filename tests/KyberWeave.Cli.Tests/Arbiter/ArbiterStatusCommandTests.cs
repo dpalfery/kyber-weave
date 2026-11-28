@@ -17,7 +17,7 @@ public sealed class ArbiterStatusCommandTests : IDisposable
     public void Dispose() => _host.Dispose();
 
     [Fact]
-    public void Status_ReportsGlobalAndProjectScope_WithProjectOverride()
+    public async Task Status_ReportsGlobalAndProjectScope_WithProjectOverride()
     {
         _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi", "copilot", "commandcode"]);
         WriteProjectConfig(
@@ -31,9 +31,10 @@ public sealed class ArbiterStatusCommandTests : IDisposable
                 kind: none
             """);
 
-        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => _host.Command<ArbiterStatusCommand>().ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = _host.WorkingDirectory }));
+            new ArbiterSettings { Path = _host.WorkingDirectory },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("GLOBAL scope", execution.Output, StringComparison.OrdinalIgnoreCase);

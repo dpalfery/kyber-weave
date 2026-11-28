@@ -24,7 +24,7 @@ public sealed class ArbiterCommentCommand(
     IArbiterDryRunService dryRun,
     IPathResolver paths,
     IProcessEnvironment environment,
-    IAnsiConsole console) : Command<ArbiterCommentSettings>
+    IAnsiConsole console) : AsyncCommand<ArbiterCommentSettings>
 {
     /// <summary>
     /// Builds the provider for a repository root. The command uses the root's configuration; a test substitutes one that
@@ -34,7 +34,7 @@ public sealed class ArbiterCommentCommand(
         (root, report) => ProviderFor(configs, dryRun, root, report);
 
     /// <summary>Prints the class and the decision id. Exits 2 on a usage error, and 1 when the document or the configured provider cannot be used.</summary>
-    public override int Execute(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterCommentSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -80,7 +80,7 @@ public sealed class ArbiterCommentCommand(
         using IDisposable? owner = provider as IDisposable;
         if (settings.Summary)
         {
-            CommentSummaryResult summary = triageFactory.Create(
+            CommentSummaryResult summary = await triageFactory.Create(
                     provider,
                     root,
                     ArbiterStateDirectory.ForProject(root),
@@ -88,8 +88,7 @@ public sealed class ArbiterCommentCommand(
                     BotLoginsFor(configs, root),
                     RulesFor(configs, root))
                 .ClassifySummaryAsync(new CommentSummaryRequest(settings.Body, settings.Author), cancellationToken)
-                .GetAwaiter()
-                .GetResult();
+                .ConfigureAwait(false);
             foreach (CommentSummaryItem item in summary.Items)
             {
                 string shadowNote = item.Shadow
@@ -102,14 +101,13 @@ public sealed class ArbiterCommentCommand(
             return 0;
         }
 
-        CommentTriageResult result = triageFactory.Create(
+        CommentTriageResult result = await triageFactory.Create(
                 provider,
                 root,
                 ArbiterStateDirectory.ForProject(root),
                 rules: RulesFor(configs, root))
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
-            .GetAwaiter()
-            .GetResult();
+            .ConfigureAwait(false);
         console.MarkupLine($"class [bold]{Markup.Escape(result.Class)}[/]");
         if (result.Shadow)
         {
@@ -149,10 +147,6 @@ public sealed class ArbiterCommentCommand(
     /// </summary>
     private static IReadOnlyList<ArbiterRule> RulesFor(IArbiterConfigResolver configs, string root) =>
         configs.TryLoadRepository(root) is { } config ? config.Arbiter.Rules : ArbiterConfigDefaults.Product.Rules;
-
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterCommentSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     /// <summary>
     /// The provider the root's configuration names. A root with no loadable configuration answers with

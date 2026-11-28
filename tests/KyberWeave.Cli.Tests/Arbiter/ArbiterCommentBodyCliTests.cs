@@ -18,11 +18,11 @@ public sealed class ArbiterCommentBodyCliTests : IDisposable
         _host.Write(_host.InWork("docs", "guide.md"), "# Guide\nIntro.\n## Install\nSteps.\n");
 
     [Fact]
-    public void Comment_SingleRun_DoesNotEchoTheBody()
+    public async Task Comment_SingleRun_DoesNotEchoTheBody()
     {
         WriteDocument();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -30,7 +30,8 @@ public sealed class ArbiterCommentBodyCliTests : IDisposable
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = "BODY-MARKER-7f3a review text",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("BODY-MARKER-7f3a", execution.Output, StringComparison.Ordinal);

@@ -36,12 +36,13 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     private string WriteDocument() => _host.Write(_host.InWork("docs", "guide.md"), GuideText);
 
     [Fact]
-    public void Sections_PrintsEachSectionIdAndItsLineRange()
+    public async Task Sections_PrintsEachSectionIdAndItsLineRange()
     {
         ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSectionsSettings { Path = WriteDocumentUnderRoot(), Task = "Change the install steps." }));
+            new ArbiterSectionsSettings { Path = WriteDocumentUnderRoot(), Task = "Change the install steps." },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("guide/install", execution.Output, StringComparison.Ordinal);
@@ -50,12 +51,13 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
 
     /// <summary>A document outside the repository root is refused with a clear message and prints no sections.</summary>
     [Fact]
-    public void Sections_PathOutsideTheRoot_ExitsNonZeroWithAMessageAndPrintsNoSections()
+    public async Task Sections_PathOutsideTheRoot_ExitsNonZeroWithAMessageAndPrintsNoSections()
     {
         ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSectionsSettings { Path = WriteDocumentOutsideRoot(), Task = "Change the install steps." }));
+            new ArbiterSectionsSettings { Path = WriteDocumentOutsideRoot(), Task = "Change the install steps." },
+            token));
 
         Assert.NotEqual(0, execution.ExitCode);
         ConsoleOutputAssert.ContainsUnwrapped("not found under the repository root", execution.Output);
@@ -63,23 +65,24 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Sections_MissingDocument_ExitsOne()
+    public async Task Sections_MissingDocument_ExitsOne()
     {
         ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSectionsSettings { Path = _host.InWork("absent.md"), Task = "Anything." }));
+            new ArbiterSectionsSettings { Path = _host.InWork("absent.md"), Task = "Anything." },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
     }
 
     /// <summary>With no provider configured the comment prints as real, so the operator is never told a comment is a nitpick on no evidence.</summary>
     [Fact]
-    public void Comment_NoProvider_PrintsRealAndTheDecisionId()
+    public async Task Comment_NoProvider_PrintsRealAndTheDecisionId()
     {
         WriteDocument();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -87,7 +90,8 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = "Shorten this heading.",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("real", execution.Output, StringComparison.Ordinal);
@@ -99,11 +103,11 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     /// exit code and the class and decision lines rather than the body text (see <c>ArbiterCommentBodyCliTests</c>).
     /// </summary>
     [Fact]
-    public void Comment_BodyWithMarkupCharacters_DoesNotThrow()
+    public async Task Comment_BodyWithMarkupCharacters_DoesNotThrow()
     {
         WriteDocument();
         ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterCommentSettings
             {
@@ -111,7 +115,8 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = "Use [red]this[/] and [bogus",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("decision", execution.Output, StringComparison.Ordinal);

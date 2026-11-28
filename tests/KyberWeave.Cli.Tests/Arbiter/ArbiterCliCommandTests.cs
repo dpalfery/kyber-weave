@@ -442,7 +442,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Eval_DryRun_PrintsOutcomeAndWritesNothing()
+    public async Task Eval_DryRun_PrintsOutcomeAndWritesNothing()
     {
         string host = NewDir("arbiter-eval");
         string eventFile = Path.Combine(host, "event.json");
@@ -457,7 +457,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
         }));
 
         ArbiterEvalCommand command = _host.Command<ArbiterEvalCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
             new ArbiterSettings
             {
@@ -465,7 +465,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
                 Trigger = "delegate",
                 Event = eventFile,
                 Provider = "none",
-            }));
+            },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.True(
@@ -478,7 +479,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Audit_MissingDecision_ReportsAudit001()
+    public async Task Audit_MissingDecision_ReportsAudit001()
     {
         string host = SeedLedger("arbiter-audit-001", ledger =>
         {
@@ -496,15 +497,16 @@ public sealed class ArbiterCliCommandTests : IDisposable
         });
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains("KW-ARB-AUDIT-001", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Audit_UnmarkedDispatchWithNullTarget_ReportsAudit002()
+    public async Task Audit_UnmarkedDispatchWithNullTarget_ReportsAudit002()
     {
         // A Devin dispatch whose profile argument is missing has no target. The adapter
         // promises audit reports it, so a null target must be flagged too (review 20.1, b).
@@ -524,15 +526,16 @@ public sealed class ArbiterCliCommandTests : IDisposable
         });
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains("KW-ARB-AUDIT-002", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Audit_MalformedLedgerLine_ReportsRatherThanEscaping()
+    public async Task Audit_MalformedLedgerLine_ReportsRatherThanEscaping()
     {
         // A truncated or hand-edited line is malformed JSON, which throws JsonException --
         // not an IOException, so the read's catch never saw it and the exception escaped
@@ -554,9 +557,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
         AppendRawLine(host, "ledger.jsonl", "{\"id\": \"broken\", \"phase\": ");
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("1 error", execution.Output, StringComparison.Ordinal);
@@ -564,7 +568,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Audit_MalformedDecisionLine_ReportsRatherThanEscaping()
+    public async Task Audit_MalformedDecisionLine_ReportsRatherThanEscaping()
     {
         string host = SeedLedger("arbiter-audit-malformed-decision", ledger =>
         {
@@ -582,9 +586,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
         AppendRawLine(host, "decisions.jsonl", "not json at all");
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("1 error", execution.Output, StringComparison.Ordinal);
@@ -592,7 +597,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Audit_ListsAttestationsAsInformation()
+    public async Task Audit_ListsAttestationsAsInformation()
     {
         string host = SeedLedger("arbiter-audit-attested", ledger =>
         {
@@ -624,9 +629,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
         });
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("T1=complete", execution.Output, StringComparison.Ordinal);
@@ -639,7 +645,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     /// crashed hook, which is the one thing this id is supposed to mean.
     /// </summary>
     [Fact]
-    public void Audit_APassThroughEventWithNoTrigger_ReportsNoMissingDecision()
+    public async Task Audit_APassThroughEventWithNoTrigger_ReportsNoMissingDecision()
     {
         string host = SeedLedger("arbiter-audit-pass-through", ledger =>
         {
@@ -657,9 +663,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
         });
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("KW-ARB-AUDIT-001", execution.Output, StringComparison.Ordinal);
@@ -670,7 +677,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     /// still has to produce a decision, or the hook did die mid-evaluation.
     /// </summary>
     [Fact]
-    public void Audit_ATriggeredEventWithNoDecision_StillReportsTheMissingDecision()
+    public async Task Audit_ATriggeredEventWithNoDecision_StillReportsTheMissingDecision()
     {
         string host = SeedLedger("arbiter-audit-triggered-no-decision", ledger =>
         {
@@ -689,9 +696,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
         });
 
         ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
-        ArbiterCommandRun execution = _host.Run(() => command.Execute(
+        ArbiterCommandRun execution = await _host.RunAsync(token => command.ExecuteAsync(
             null!,
-            new ArbiterSettings { Path = host }));
+            new ArbiterSettings { Path = host },
+            token));
 
         Assert.Contains("KW-ARB-AUDIT-001", execution.Output, StringComparison.Ordinal);
     }

@@ -19,7 +19,7 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// </remarks>
 public sealed class ArbiterDoctorCommand(
     IArbiterDoctorService doctor,
-    IAnsiConsole console) : Command<ArbiterSettings>
+    IAnsiConsole console) : AsyncCommand<ArbiterSettings>
 {
     /// <summary><c>artifacts/arbiter/</c> is not ignored by git.</summary>
     public const string LogNotIgnored = IArbiterDoctorService.LogNotIgnored;
@@ -54,20 +54,16 @@ public sealed class ArbiterDoctorCommand(
     /// still leaves the product defaults to diagnose, so one bad file never hides
     /// the remaining checks. Writes nothing. Exits 1 only on error findings.
     /// </summary>
-    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
-        ArbiterDoctorReport inspected = doctor.Inspect(settings.Path, settings.Config, report);
+        ArbiterDoctorReport inspected = await doctor.InspectAsync(settings.Path, settings.Config, report, cancellationToken).ConfigureAwait(false);
         CommandHelpers.WriteUnfolded(console, () => Print(inspected));
 
         CommandHelpers.Finish(console, report, settings, "arbiter doctor", "Rule");
         return report.HasErrors ? 1 : 0;
     }
-
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     private void Print(ArbiterDoctorReport inspected)
     {

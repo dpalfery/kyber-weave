@@ -20,7 +20,7 @@ public sealed class ArbiterAuditCommand(
     IRepositoryFileStore files,
     IPathResolver paths,
     IAnsiConsole console,
-    PlanArguments plans) : Command<ArbiterSettings>
+    PlanArguments plans) : AsyncCommand<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = ArbiterAuditService.MissingDecision;
@@ -57,7 +57,7 @@ public sealed class ArbiterAuditCommand(
     /// observed leaves no record, so <c>audit</c> cannot report it. Exits 1 on
     /// an unreadable filter or configuration; findings alone do not fail the run.
     /// </summary>
-    public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -90,7 +90,7 @@ public sealed class ArbiterAuditCommand(
             since = parsed;
         }
 
-        string repositoryRoot = locator.ResolveRepositoryRoot(settings.Path);
+        string repositoryRoot = await locator.ResolveRepositoryRootAsync(settings.Path, cancellationToken).ConfigureAwait(false);
         Func<string?, bool>? matchesPlan = null;
         if (!string.IsNullOrWhiteSpace(settings.Plan))
         {
@@ -105,7 +105,9 @@ public sealed class ArbiterAuditCommand(
             matchesPlan = new PlanFilter(repositoryRoot, plans.ResolverFor(repositoryRoot, config, files), relative, paths).Matches;
         }
 
-        if (audits.Audit(repositoryRoot, config, since, settings.Session, matchesPlan, report) is not { } audited)
+        ArbiterAuditReport? audited = await audits.AuditAsync(
+            repositoryRoot, config, since, settings.Session, matchesPlan, report, cancellationToken).ConfigureAwait(false);
+        if (audited is null)
         {
             CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
             return 1;
@@ -123,10 +125,6 @@ public sealed class ArbiterAuditCommand(
         CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
         return report.HasErrors ? 1 : 0;
     }
-
-    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
-    public int Execute(CommandContext context, ArbiterSettings settings) =>
-        Execute(context, settings, CancellationToken.None);
 
     /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
     private sealed class PlanFilter(string root, PlanFileResolver resolver, string relative, IPathResolver paths)
