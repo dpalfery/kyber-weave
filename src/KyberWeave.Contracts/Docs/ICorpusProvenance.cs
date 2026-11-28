@@ -7,5 +7,10 @@ public interface ICorpusProvenance
     /// <param name="repositoryRoot">The bound repository root.</param>
     /// <param name="documentCount">The live document count for the corpus, or null if unavailable.</param>
     /// <param name="corpusStamp">The host's corpus stamp, used with the git fingerprint to expire the cache.</param>
-    string Line(string repositoryRoot, int? documentCount, int corpusStamp);
+    /// <param name="cancellationToken">Cancels the git child.</param>
+    Task<string> LineAsync(
+        string repositoryRoot,
+        int? documentCount,
+        int corpusStamp,
+        CancellationToken cancellationToken = default);
 }

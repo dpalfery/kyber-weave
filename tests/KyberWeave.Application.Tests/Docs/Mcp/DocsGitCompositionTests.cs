@@ -27,7 +27,7 @@ public sealed class DocsGitCompositionTests : IDisposable
     }
 
     [Fact]
-    public void TheWorktreeIdentityResolvesAndRunsGitThroughTheRealProcessRunner()
+    public async Task TheWorktreeIdentityResolvesAndRunsGitThroughTheRealProcessRunner()
     {
         ServiceCollection services = [];
         _ = services.AddWeaveApplication();
@@ -35,7 +35,7 @@ public sealed class DocsGitCompositionTests : IDisposable
 
         IGitWorktreeIdentity identity = provider.GetRequiredService<IGitWorktreeIdentity>();
 
-        bool named = identity.TryRoots(_root.FullName, out string? top, out _, out string? failure);
-        Assert.True(named ? top is not null : failure is not null);
+        GitWorktreeRoots roots = await identity.TryRootsAsync(_root.FullName);
+        Assert.True(roots.Found ? roots.TopLevel is not null : roots.Failure is not null);
     }
 }

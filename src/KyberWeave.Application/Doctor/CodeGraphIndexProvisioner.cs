@@ -123,8 +123,36 @@ public sealed class CodeGraphIndexProvisioner(
             return new CodeGraphOutcome(checks, BinaryMissing: false, initialised);
         }
 
-        checks.Add(Provision(root, options, executor, lockDirectory, options.IndexTimeout));
+        checks.Add(ProvisionCore(root, options, executor, lockDirectory, options.IndexTimeout));
         return new CodeGraphOutcome(checks, BinaryMissing: false);
+    }
+
+    /// <summary>Brings the index up to date under the cross-process lock for the synchronous run.</summary>
+    private DoctorCheck ProvisionCore(
+        string root,
+        DoctorOptions options,
+        IProcessExecutor executor,
+        string lockDirectory,
+        TimeSpan lockWait)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(executor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(lockDirectory);
+
+        using IDisposable? lockFile = workspace.TryAcquireLock(CodeGraphIndexRules.LockPathFor(paths.GetFullPath(root, environment.CurrentDirectory), lockDirectory), lockWait, out string? lockFailure);
+        if (lockFile is null)
+            return LockRefused(lockFailure, ProvisionFlag);
+
+        string indexDirectory = Path.Combine(root, IndexDirectoryName);
+        if (files.DirectoryExists(indexDirectory) && !workspace.IsWritable(indexDirectory))
+            return Unwritable();
+
+        // Verb choice follows the directory's presence as it stands now, not as it stood before the lock:
+        // a concurrent run may have created the index while this one waited, and re-running init over an
+        // existing directory would be the wrong verb. Both run from the root so the index lands there.
+        string verb = files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb;
+        return VerbCheck(PrepareIndex(root, verb, options, executor), options, IndexCheckId, ProvisionFlag);
     }
 
     /// <summary>Runs the CodeGraph checks without blocking a thread, preparing the index in every mode except <see cref="DoctorMode.Check"/>.</summary>
@@ -187,50 +215,6 @@ public sealed class CodeGraphIndexProvisioner(
 
         checks.Add(await ProvisionAsync(root, options, executor, lockDirectory, options.IndexTimeout, cancellationToken).ConfigureAwait(false));
         return new CodeGraphOutcome(checks, BinaryMissing: false);
-    }
-
-    /// <summary>
-    ///     Brings the index up to date under the cross-process lock: <c>codegraph init</c> when <c>.codegraph/</c> is
-    ///     absent and <c>codegraph sync</c> otherwise.
-    /// </summary>
-    /// <remarks>
-    ///     Exposed so that a caller which needs the index refreshed can take the same lock and run the same verbs,
-    ///     rather than writing a second, subtly different preparation path.
-    /// </remarks>
-    /// <param name="root">The repository root, which is also the child's working directory.</param>
-    /// <param name="options">The CodeGraph executable and index budget.</param>
-    /// <param name="executor">Runs the CodeGraph child.</param>
-    /// <param name="lockDirectory">Where the lock file lives.</param>
-    /// <param name="lockWait">
-    ///     How long to wait for a lock another run holds. <see cref="TimeSpan.Zero"/> tries once and reports the index
-    ///     busy instead of waiting, which is what a caller inside a tool call needs.
-    /// </param>
-    /// <returns>The <c>codegraph.index</c> check.</returns>
-    public DoctorCheck Provision(
-        string root,
-        DoctorOptions options,
-        IProcessExecutor executor,
-        string lockDirectory,
-        TimeSpan lockWait)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(executor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(lockDirectory);
-
-        using IDisposable? lockFile = workspace.TryAcquireLock(CodeGraphIndexRules.LockPathFor(paths.GetFullPath(root, environment.CurrentDirectory), lockDirectory), lockWait, out string? lockFailure);
-        if (lockFile is null)
-            return LockRefused(lockFailure, ProvisionFlag);
-
-        string indexDirectory = Path.Combine(root, IndexDirectoryName);
-        if (files.DirectoryExists(indexDirectory) && !workspace.IsWritable(indexDirectory))
-            return Unwritable();
-
-        // Verb choice follows the directory's presence as it stands now, not as it stood before the lock:
-        // a concurrent run may have created the index while this one waited, and re-running init over an
-        // existing directory would be the wrong verb. Both run from the root so the index lands there.
-        string verb = files.DirectoryExists(indexDirectory) ? SyncVerb : InitVerb;
-        return VerbCheck(PrepareIndex(root, verb, options, executor), options, IndexCheckId, ProvisionFlag);
     }
 
     /// <summary>

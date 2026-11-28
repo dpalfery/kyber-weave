@@ -1,6 +1,7 @@
 using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -209,8 +210,11 @@ internal static class DocsTestCommands
     /// <param name="executor">Runs the CodeGraph child; null for the bounded production runner.</param>
     /// <param name="refreshEnabled">False to model <c>--no-codegraph-refresh</c>.</param>
     /// <param name="pause">Waits between sync attempts on a held CodeGraph lock; null to really wait.</param>
-    public static CodeGraphFreshness Freshness(
-        string root, IProcessExecutor? executor = null, bool refreshEnabled = true, Action<TimeSpan>? pause = null)
+    public static ICodeGraphFreshnessGate Freshness(
+        string root,
+        IProcessRunner? executor = null,
+        bool refreshEnabled = true,
+        Func<TimeSpan, CancellationToken, Task>? pause = null)
     {
         IServiceProvider provider = Services();
         return new CodeGraphFreshness(
@@ -223,7 +227,6 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IPathResolver>(),
             provider.GetRequiredService<IProcessEnvironment>(),
             provider.GetRequiredService<IProcessRunner>(),
-            provider.GetRequiredService<IBoundedProcessExecutor>(),
             executor,
             pause);
     }

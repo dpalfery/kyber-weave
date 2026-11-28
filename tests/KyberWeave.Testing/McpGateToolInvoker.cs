@@ -15,14 +15,14 @@ internal static class McpGateToolInvoker
     internal const string ValidateToolName = "docs_validate_governed_document_schema";
     internal const string DriftToolName = "docs_detect_drift_between_documents_and_code";
 
-    internal static string InvokeValidate(
+    internal static async Task<string> InvokeValidateAsync(
         DocsTools tools,
         bool mergeReady,
         string? gitBase = null,
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
         MethodInfo method = FindMcpTool(ValidateToolName);
-        return InvokeByParameterNames(
+        return await InvokeByParameterNamesAsync(
             tools,
             method,
             new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -33,16 +33,16 @@ internal static class McpGateToolInvoker
             });
     }
 
-    internal static string InvokeDrift(DocsTools tools, int charBudget = DocumentIndex.DefaultCharBudget)
+    internal static async Task<string> InvokeDriftAsync(DocsTools tools, int charBudget = DocumentIndex.DefaultCharBudget)
     {
         MethodInfo method = FindMcpTool(DriftToolName);
-        return InvokeByParameterNames(
+        return await InvokeByParameterNamesAsync(
             tools,
             method,
             new Dictionary<string, object?>(StringComparer.Ordinal) { ["charBudget"] = charBudget });
     }
 
-    internal static string InvokeByParameterNames(
+    internal static async Task<string> InvokeByParameterNamesAsync(
         DocsTools tools,
         MethodInfo method,
         IReadOnlyDictionary<string, object?> arguments)
@@ -60,7 +60,8 @@ internal static class McpGateToolInvoker
                 $"Missing argument '{parameter.Name}' for MCP tool '{method.GetCustomAttribute<McpServerToolAttribute>()?.Name}'.");
         }).ToArray();
 
-        return (string)method.Invoke(tools, args)!;
+        Task<string> call = (Task<string>)method.Invoke(tools, args)!;
+        return await call;
     }
 
     internal static MethodInfo FindMcpTool(string toolName)

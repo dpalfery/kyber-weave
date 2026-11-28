@@ -13,12 +13,14 @@ public interface IRunDeliveryService
     /// <param name="draft">Whether a new pull request opens as a draft.</param>
     /// <param name="documentationImpact">The documentation-impact outcome as docs-dev returned it, or null.</param>
     /// <param name="planFile">The archived plan's file name, only when the branch archived more than one, or null.</param>
+    /// <param name="cancellationToken">Cancels the provenance read.</param>
     /// <returns>The tool's complete response text.</returns>
-    string DeliverRun(
+    Task<string> DeliverRunAsync(
         string summary,
         string? notes,
         string? title,
         bool draft,
         string? documentationImpact,
-        string? planFile);
+        string? planFile,
+        CancellationToken cancellationToken = default);
 }
