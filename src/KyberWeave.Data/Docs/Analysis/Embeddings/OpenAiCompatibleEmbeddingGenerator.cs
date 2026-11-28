@@ -76,6 +76,85 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         IReadOnlyCollection<string> inputs,
         DocsAnalysisEmbeddingConfig config)
     {
+        PlannedRequests? plan = PrepareRequests(keys, inputs, config);
+        if (plan is null)
+            return new EmbeddingGenerationResult([], EmbeddingUsage.None);
+
+        List<StoredEmbedding> result = new List<StoredEmbedding>(plan.OrderedKeys.Length);
+        int promptTokens = 0;
+        int totalTokens = 0;
+        for (int offset = 0; offset < plan.OrderedInputs.Length; offset += plan.BatchSize)
+        {
+            int count = Math.Min(plan.BatchSize, plan.OrderedInputs.Length - offset);
+            string[] batchInputs = plan.OrderedInputs.AsSpan(offset, count).ToArray();
+            ParsedBatch parsed = SendBatch(
+                plan.Endpoint,
+                plan.Model,
+                plan.Dimensions,
+                batchInputs,
+                plan.BearerToken,
+                plan.TimeoutSeconds);
+            for (int index = 0; index < parsed.Vectors.Count; index++)
+                result.Add(new StoredEmbedding(plan.OrderedKeys[offset + index], parsed.Vectors[index]));
+            promptTokens = checked(promptTokens + parsed.Usage.PromptTokens);
+            totalTokens = checked(totalTokens + parsed.Usage.TotalTokens);
+        }
+
+        return new EmbeddingGenerationResult(result, new EmbeddingUsage(promptTokens, totalTokens));
+    }
+
+    /// <summary>
+    /// Generates a vector for every input without blocking a thread.
+    /// </summary>
+    /// <param name="keys">The cache keys the vectors store under, in request order.</param>
+    /// <param name="inputs">The texts to embed; input <c>i</c> stores under key <c>i</c>.</param>
+    /// <param name="config">The endpoint, model, dimensions, batch size and timeout to send under.</param>
+    /// <param name="cancellationToken">Cancels the in-flight endpoint calls.</param>
+    /// <returns>The vectors in request order with the usage the endpoint reported.</returns>
+    public async Task<EmbeddingGenerationResult> GenerateAsync(
+        IReadOnlyCollection<EmbeddingCacheKey> keys,
+        IReadOnlyCollection<string> inputs,
+        DocsAnalysisEmbeddingConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        PlannedRequests? plan = PrepareRequests(keys, inputs, config);
+        if (plan is null)
+            return new EmbeddingGenerationResult([], EmbeddingUsage.None);
+
+        List<StoredEmbedding> result = new List<StoredEmbedding>(plan.OrderedKeys.Length);
+        int promptTokens = 0;
+        int totalTokens = 0;
+        for (int offset = 0; offset < plan.OrderedInputs.Length; offset += plan.BatchSize)
+        {
+            int count = Math.Min(plan.BatchSize, plan.OrderedInputs.Length - offset);
+            string[] batchInputs = plan.OrderedInputs.AsSpan(offset, count).ToArray();
+            ParsedBatch parsed = await SendBatchAsync(
+                plan.Endpoint,
+                plan.Model,
+                plan.Dimensions,
+                batchInputs,
+                plan.BearerToken,
+                plan.TimeoutSeconds,
+                cancellationToken).ConfigureAwait(false);
+            for (int index = 0; index < parsed.Vectors.Count; index++)
+                result.Add(new StoredEmbedding(plan.OrderedKeys[offset + index], parsed.Vectors[index]));
+            promptTokens = checked(promptTokens + parsed.Usage.PromptTokens);
+            totalTokens = checked(totalTokens + parsed.Usage.TotalTokens);
+        }
+
+        return new EmbeddingGenerationResult(result, new EmbeddingUsage(promptTokens, totalTokens));
+    }
+
+    /// <summary>
+    /// Validates a generation request and resolves everything a batch send needs: the endpoint
+    /// and its loopback confinement, the model, the bearer token and the batch bounds.
+    /// </summary>
+    /// <returns>The resolved request, or null when there is nothing to send.</returns>
+    private PlannedRequests? PrepareRequests(
+        IReadOnlyCollection<EmbeddingCacheKey> keys,
+        IReadOnlyCollection<string> inputs,
+        DocsAnalysisEmbeddingConfig config)
+    {
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(config);
@@ -85,7 +164,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         if (orderedKeys.Length != orderedInputs.Length)
             throw new ArgumentException("Embedding keys and inputs must have the same count.", nameof(inputs));
         if (orderedKeys.Length == 0)
-            return new EmbeddingGenerationResult([], EmbeddingUsage.None);
+            return null;
         if (config.BatchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(config), "Embedding batch size must be positive.");
         if (config.TimeoutSeconds <= 0)
@@ -100,32 +179,18 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
             ? null
             : _readEnvironment(config.ApiKeyEnv);
 
-        List<StoredEmbedding> result = new List<StoredEmbedding>(orderedKeys.Length);
-        int promptTokens = 0;
-        int totalTokens = 0;
-        for (int offset = 0; offset < orderedInputs.Length; offset += config.BatchSize)
-        {
-            int count = Math.Min(config.BatchSize, orderedInputs.Length - offset);
-            string[] batchInputs = orderedInputs.AsSpan(offset, count).ToArray();
-            ParsedBatch parsed = SendBatchAsync(
-                    endpoint,
-                    model,
-                    config.Dimensions,
-                    batchInputs,
-                    bearerToken,
-                    config.TimeoutSeconds)
-                .GetAwaiter()
-                .GetResult();
-            for (int index = 0; index < parsed.Vectors.Count; index++)
-                result.Add(new StoredEmbedding(orderedKeys[offset + index], parsed.Vectors[index]));
-            promptTokens = checked(promptTokens + parsed.Usage.PromptTokens);
-            totalTokens = checked(totalTokens + parsed.Usage.TotalTokens);
-        }
-
-        return new EmbeddingGenerationResult(result, new EmbeddingUsage(promptTokens, totalTokens));
+        return new PlannedRequests(
+            endpoint,
+            model,
+            config.Dimensions,
+            bearerToken,
+            config.BatchSize,
+            config.TimeoutSeconds,
+            orderedKeys,
+            orderedInputs);
     }
 
-    private async Task<ParsedBatch> SendBatchAsync(
+    private ParsedBatch SendBatch(
         Uri endpoint,
         string model,
         int? dimensions,
@@ -135,6 +200,36 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
     {
         using HttpRequestMessage request = CreateRequest(endpoint, model, dimensions, inputs, bearerToken);
         using CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds), _clock);
+        using HttpResponseMessage response = _client.Send(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellation.Token);
+        if (IsRedirect(response.StatusCode))
+            throw new InvalidOperationException("The local embedding endpoint returned a redirect; redirects are disabled.");
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"The local embedding endpoint returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).");
+        }
+
+        using Stream stream = response.Content.ReadAsStream();
+        using JsonDocument json = JsonDocument.Parse(stream);
+        return ParseBatch(json.RootElement, inputs.Count, dimensions);
+    }
+
+    private async Task<ParsedBatch> SendBatchAsync(
+        Uri endpoint,
+        string model,
+        int? dimensions,
+        IReadOnlyList<string> inputs,
+        string? bearerToken,
+        int timeoutSeconds,
+        CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = CreateRequest(endpoint, model, dimensions, inputs, bearerToken);
+        using CancellationTokenSource timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds), _clock);
+        using CancellationTokenSource cancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancellationToken);
         using HttpResponseMessage response = await _client.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
@@ -298,4 +393,15 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
     private sealed record ParsedBatch(
         IReadOnlyList<IReadOnlyList<float>> Vectors,
         EmbeddingUsage Usage);
+
+    /// <summary>Everything a generation needs once the request validated: one endpoint for every batch.</summary>
+    private sealed record PlannedRequests(
+        Uri Endpoint,
+        string Model,
+        int? Dimensions,
+        string? BearerToken,
+        int BatchSize,
+        int TimeoutSeconds,
+        EmbeddingCacheKey[] OrderedKeys,
+        string[] OrderedInputs);
 }

@@ -1187,6 +1187,13 @@ public sealed class DocumentationAnalyzerTests
                 keys.Select(key => new StoredEmbedding(key, [1f, 0f])).ToArray(),
                 EmbeddingUsage.None);
         }
+
+        public async Task<EmbeddingGenerationResult> GenerateAsync(
+            IReadOnlyCollection<EmbeddingCacheKey> keys,
+            IReadOnlyCollection<string> inputs,
+            DocsAnalysisEmbeddingConfig config,
+            CancellationToken cancellationToken = default) =>
+            await Task.FromResult(Generate(keys, inputs, config)).ConfigureAwait(false);
     }
 
     private sealed class EmbeddingPersistence : IAnalysisPersistence
