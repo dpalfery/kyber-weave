@@ -1055,13 +1055,7 @@
       "file": "src/KyberWeave.Data/Hooks/KernelProcessRunner.cs",
       "text": "ProcessStartInfo startInfo = new(request.Program)",
       "count": 1,
-      "bound": "Built only for the ProcessRunner.Run call below, never started on its own; the run is bounded by the hook's remaining time budget (rule timeout capped by it), output is capped at 4 MiB, and cancellation kills the process tree."
-    },
-    {
-      "file": "src/KyberWeave.Data/Hooks/KernelProcessRunner.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(",
-      "count": 1,
-      "bound": "ProcessRunner timeout is the request timeout capped by the hook's remaining budget; when MaxOutputBytes is set each stream is capped and the tree is killed; the cancellation token kills the child process tree on expiry or cancel."
+      "bound": "Built only for the ProcessRunner.RunAsync call below, never started on its own; the run is bounded by the hook's remaining time budget (rule timeout capped by it), output is capped at 4 MiB, and cancellation kills the process tree."
     },
     {
       "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
@@ -1170,6 +1164,12 @@
       "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp repository."
+    },
+    {
+      "file": "tests/KyberWeave.Testing/Processes/ProcessRunnerContractTests.cs",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
+      "count": 1,
+      "bound": "Builds only; the test never starts it directly. The async role view passes it to the seam under test, whose own spawn site is allow-listed, and every run is bounded by the request timeout the test supplies."
     }
   ]
 }

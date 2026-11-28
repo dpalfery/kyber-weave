@@ -134,3 +134,104 @@ public interface IProcessRunner : IProgramRunner, IBoundedProcessExecutor, IProc
             ? $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds."
             : "The process did not exit in time.";
 }
+
+/// <summary>The asynchronous twins of the role views over <see cref="IProcessRunner"/>.</summary>
+/// <remarks>
+/// Each awaits <see cref="IProcessRunner.RunAsync(ProcessRunRequest, CancellationToken)"/> and keeps the exception
+/// contract of the synchronous role view it twins: a program that could not be started is a
+/// <see cref="Win32Exception"/>, and a run killed for running too long is a <see cref="TimeoutException"/>. A caller
+/// moving to these methods keeps every catch clause it had.
+/// </remarks>
+public static class ProcessRunnerAsyncViews
+{
+    /// <summary>Runs a configured process to completion without blocking a thread.</summary>
+    /// <param name="runner">The process seam to run through.</param>
+    /// <param name="startInfo">The configured program; its argument list is copied, never its argument string.</param>
+    /// <param name="standardInput">The text written to standard input.</param>
+    /// <param name="timeout">The longest the process may run; null for no limit.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    /// <exception cref="Win32Exception">The program could not be started.</exception>
+    /// <exception cref="TimeoutException">The program outlived <paramref name="timeout"/>.</exception>
+    public static async Task<ProcessResult> RunAsync(
+        this IProcessRunner runner,
+        ProcessStartInfo startInfo,
+        string standardInput,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+
+        ProcessRunRequest request = ProcessRunRequest.FromStartInfo(startInfo, standardInput, timeout);
+        return await ToProcessResultAsync(runner, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs a program with argv to completion without blocking a thread.</summary>
+    /// <param name="runner">The process seam to run through.</param>
+    /// <param name="program">The program to start.</param>
+    /// <param name="arguments">One element per argument.</param>
+    /// <param name="workingDirectory">The directory to run in.</param>
+    /// <param name="timeout">Longest the program may run before its process tree is killed; null for no limit.</param>
+    /// <param name="maxOutputBytes">When set, the most bytes of output read before the process tree is killed.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    /// <exception cref="Win32Exception">The program could not be started.</exception>
+    /// <exception cref="TimeoutException">The program outlived <paramref name="timeout"/>.</exception>
+    public static async Task<ProcessResult> RunAsync(
+        this IProcessRunner runner,
+        string program,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        TimeSpan? timeout,
+        long? maxOutputBytes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+
+        ProcessRunRequest request = new()
+        {
+            Program = program,
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory,
+            Timeout = timeout,
+            MaxOutputBytes = maxOutputBytes
+        };
+
+        return await ToProcessResultAsync(runner, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs one request and translates its result the way the synchronous role views do.</summary>
+    /// <param name="runner">The process seam to run through.</param>
+    /// <param name="request">The program, its arguments, and the conditions of the run.</param>
+    /// <param name="cancellationToken">Cancels the run and kills the process tree.</param>
+    /// <returns>The exit code and both output streams.</returns>
+    private static async Task<ProcessResult> ToProcessResultAsync(
+        IProcessRunner runner,
+        ProcessRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        ProcessRunResult result;
+        try
+        {
+            result = await runner.RunAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // These role views have always reported a start failure as Win32Exception, and their callers
+            // tell "the program is not installed" apart from a timeout by catching exactly that type.
+            throw new Win32Exception(2, exception.Message);
+        }
+
+        if (result.TimedOut)
+        {
+            throw new TimeoutException(TimeoutMessage(request.Timeout));
+        }
+
+        return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
+    }
+
+    private static string TimeoutMessage(TimeSpan? timeout) =>
+        timeout is { } limit
+            ? $"The process did not exit within {limit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)} seconds."
+            : "The process did not exit in time.";
+}
