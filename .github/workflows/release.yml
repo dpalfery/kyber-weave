@@ -35,6 +35,15 @@
 # (including pre-releases) to GitHub Packages.
 #
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.
+#
+# A version-bound chain receipt lets a re-run of the same release skip the whole
+# build chain: every build, SBOM and publish job restores one shared cache key
+# (release-chain-<version>) and gates its heavy work on one verdict step that
+# compares the receipt's saved_at_epoch against RECEIPT_MAX_AGE_SECONDS. On a
+# hit the publish jobs do not re-publish; they verify the published release and
+# packages instead. The receipt is written only after the release job verified
+# the published release, and never on a hit, so a skip can never refresh the
+# receipt into permanence.
 
 name: Release
 
@@ -61,6 +70,7 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   CONFIGURATION: Release
+  RECEIPT_MAX_AGE_SECONDS: "14400"
 
 jobs:
   authorize:
@@ -259,12 +269,52 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Publish CLI (self-contained single-file)
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: >
@@ -280,6 +330,7 @@ jobs:
           -o ./publish/cli/${{ matrix.rid }}
 
       - name: Publish MCP (self-contained single-file)
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: >
@@ -295,6 +346,7 @@ jobs:
           -o ./publish/mcp/${{ matrix.rid }}
 
       - name: Publish Arbiter (self-contained single-file)
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: >
@@ -310,6 +362,7 @@ jobs:
           -o ./publish/arbiter/${{ matrix.rid }}
 
       - name: Package archives
+        if: steps.verdict.outputs.skip != 'true'
         env:
           RID: ${{ matrix.rid }}
         run: |
@@ -330,6 +383,7 @@ jobs:
           ls -la dist/
 
       - name: Upload RID archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binaries-${{ matrix.rid }}
@@ -365,17 +419,58 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Setup Node (for building and packing the embedded web UI)
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build and pack embedded web dashboard
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         run: |
           set -euo pipefail
@@ -385,6 +480,7 @@ jobs:
           test -f dist-sea/web.json || { echo "pack-sea-web did not emit dist-sea/web.json" >&2; exit 1; }
 
       - name: Publish KyberDash single-file for ${{ matrix.rid }}
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash
         env:
           RID: ${{ matrix.rid }}
@@ -476,6 +572,7 @@ jobs:
           cat "${BIN_DIR}/SHA256SUMS.txt"
 
       - name: Upload KyberDash archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binaries-kyberdash-${{ matrix.rid }}
@@ -496,12 +593,52 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build CLI
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: >
@@ -510,6 +647,7 @@ jobs:
           -p:Version="${VERSION}"
 
       - name: Pack Squad (APM and Plugins)
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: >
@@ -517,6 +655,7 @@ jobs:
           squad pack --format all --out ./dist-squad --version "${VERSION}"
 
       - name: Upload Squad archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: squad-archives
@@ -555,6 +694,44 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       # Every macOS secret is checked before anything is built, so a missing
       # one costs seconds rather than a full signed build that silently is not
       # notarized (Requirements 12.2, 12.3).
@@ -566,7 +743,7 @@ jobs:
       # it do not exist yet, which is why this job cannot go green. See
       # docs/todo/macos-developer-id-signing.md, part A.
       - name: Require the signing secrets
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.verdict.outputs.skip != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
@@ -589,29 +766,33 @@ jobs:
           echo "all signing secrets present"
 
       - name: Setup Node
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Rust
+        if: steps.verdict.outputs.skip != 'true'
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Cache Rust
+        if: steps.verdict.outputs.skip != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: dash/tray/src-tauri
 
       - name: Install tray UI dependencies
+        if: steps.verdict.outputs.skip != 'true'
         working-directory: dash/tray/ui
         run: npm ci --no-audit --no-fund
 
       # A temporary keychain, deleted in the cleanup step, so the certificate
       # never joins the runner's login keychain and cannot outlive the job.
       - name: Import the Developer ID certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.verdict.outputs.skip != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
@@ -638,7 +819,7 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
 
       - name: Write the App Store Connect key
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.verdict.outputs.skip != 'true'
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: |
@@ -649,7 +830,7 @@ jobs:
           echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Build and sign the tray (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.verdict.outputs.skip != 'true'
         # cwd is dash/tray, not dash/tray/ui: the Tauri CLI looks for
         # tauri.conf.json in a SUBfolder of the working directory and never
         # walks up, so from ui/ the sibling src-tauri/ is invisible and the CLI
@@ -671,7 +852,7 @@ jobs:
         run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app --config "{\"version\":\"${TRAY_VERSION}\"}"
 
       - name: Build the tray (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.verdict.outputs.skip != 'true'
         # cwd is dash/tray and the CLI is invoked through node for the reason
         # given on the macOS step above.
         working-directory: dash/tray
@@ -685,7 +866,7 @@ jobs:
       # Requirement 12.3: the bundler's own success is not evidence of
       # notarization, so each property is asserted against the built app.
       - name: Verify the signature, the team and the notarization
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           APP="dash/tray/src-tauri/target/${{ matrix.target }}/release/bundle/macos/KyberDash.app"
@@ -706,7 +887,7 @@ jobs:
           xcrun stapler validate "$APP"
 
       - name: Pack the app (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.verdict.outputs.skip != 'true'
         run: |
           set -euo pipefail
           APP="dash/tray/src-tauri/target/${{ matrix.target }}/release/bundle/macos/KyberDash.app"
@@ -716,7 +897,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$APP" "dist-tray/${{ matrix.asset }}"
 
       - name: Collect the installer (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.verdict.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -727,6 +908,7 @@ jobs:
           cp "$SETUP" "dist-tray/${{ matrix.asset }}"
 
       - name: Upload the tray asset
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: tray-${{ matrix.rid }}
@@ -766,21 +948,62 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       # The generator caches the pinned Syft tarball under the documented cache root
       # and re-verifies its SHA-256 on every run, so a restored cache is checked
       # before it is used rather than trusted.
       - name: Cache the pinned Syft tarball
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/kyber-weave
           key: syft-1.55.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Generate the SBOM
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -789,6 +1012,7 @@ jobs:
           bash scripts/generate-sbom.sh sbom-out "${VERSION}"
 
       - name: Validate the SBOM against the CycloneDX schema
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -801,6 +1025,7 @@ jobs:
             --require-ecosystems npm,cargo,nuget
 
       - name: Upload SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom
@@ -827,10 +1052,49 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       # The generator caches the pinned Syft tarball under the documented cache root
       # and re-verifies its SHA-256 on every run, so a restored cache is checked
       # before it is used rather than trusted (same as the `sbom` job).
       - name: Cache the pinned Syft tarball
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/kyber-weave
@@ -840,6 +1104,7 @@ jobs:
       # generator scans *.tar.gz/*.zip/*.exe and ignores anything else, and an
       # explicit pattern avoids racing the parallel `sbom` job's upload.
       - name: Download CLI/MCP/KyberDash archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: binaries-*
@@ -847,6 +1112,7 @@ jobs:
           merge-multiple: true
 
       - name: Download tray archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: tray-*
@@ -854,6 +1120,7 @@ jobs:
           merge-multiple: true
 
       - name: Download Squad archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: squad-archives
@@ -861,6 +1128,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate per-artifact SBOMs
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -871,6 +1139,7 @@ jobs:
           ls -la per-artifact-assets/
 
       - name: Upload per-artifact SBOMs
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifact-sboms
@@ -897,9 +1166,48 @@ jobs:
       artifact-metadata: write
       contents: read
     steps:
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       # All needs are complete here, so a full download races nothing: the subjects
       # (archives) and the predicates (aggregate + per-artifact SBOMs) arrive together.
       - name: Download all release assets and SBOMs
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: "*"
@@ -907,150 +1215,175 @@ jobs:
           merge-multiple: true
 
       - name: Attest kyber-weave-linux-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-linux-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-linux-x64.cdx.json
 
       - name: Attest kyber-weave-linux-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-linux-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-linux-arm64.cdx.json
 
       - name: Attest kyber-weave-osx-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-osx-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-osx-x64.cdx.json
 
       - name: Attest kyber-weave-osx-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-osx-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-osx-arm64.cdx.json
 
       - name: Attest kyber-weave-win-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-win-x64.zip
           sbom-path: attest-assets/kyber-weave-win-x64.cdx.json
 
       - name: Attest kyber-weave-mcp-linux-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-linux-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-linux-x64.cdx.json
 
       - name: Attest kyber-weave-mcp-linux-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-linux-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-linux-arm64.cdx.json
 
       - name: Attest kyber-weave-mcp-osx-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-osx-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-osx-x64.cdx.json
 
       - name: Attest kyber-weave-mcp-osx-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-osx-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-mcp-osx-arm64.cdx.json
 
       - name: Attest kyber-weave-mcp-win-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-mcp-win-x64.zip
           sbom-path: attest-assets/kyber-weave-mcp-win-x64.cdx.json
 
       - name: Attest kyber-weave-arbiter-linux-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-arbiter-linux-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-arbiter-linux-x64.cdx.json
 
       - name: Attest kyber-weave-arbiter-linux-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-arbiter-linux-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-arbiter-linux-arm64.cdx.json
 
       - name: Attest kyber-weave-arbiter-osx-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-arbiter-osx-x64.tar.gz
           sbom-path: attest-assets/kyber-weave-arbiter-osx-x64.cdx.json
 
       - name: Attest kyber-weave-arbiter-osx-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-arbiter-osx-arm64.tar.gz
           sbom-path: attest-assets/kyber-weave-arbiter-osx-arm64.cdx.json
 
       - name: Attest kyber-weave-arbiter-win-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-weave-arbiter-win-x64.zip
           sbom-path: attest-assets/kyber-weave-arbiter-win-x64.cdx.json
 
       - name: Attest kyberdash-darwin-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-darwin-arm64.tar.gz
           sbom-path: attest-assets/kyberdash-darwin-arm64.cdx.json
 
       - name: Attest kyberdash-darwin-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-darwin-x64.tar.gz
           sbom-path: attest-assets/kyberdash-darwin-x64.cdx.json
 
       - name: Attest kyberdash-linux-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-linux-arm64.tar.gz
           sbom-path: attest-assets/kyberdash-linux-arm64.cdx.json
 
       - name: Attest kyberdash-linux-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-linux-x64.tar.gz
           sbom-path: attest-assets/kyberdash-linux-x64.cdx.json
 
       - name: Attest kyberdash-win-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-win-x64.zip
           sbom-path: attest-assets/kyberdash-win-x64.cdx.json
 
       - name: Attest kyberdash-tray-darwin-arm64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-tray-darwin-arm64.zip
           sbom-path: attest-assets/kyberdash-tray-darwin-arm64.cdx.json
 
       - name: Attest kyberdash-tray-darwin-x64 SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-tray-darwin-x64.zip
           sbom-path: attest-assets/kyberdash-tray-darwin-x64.cdx.json
 
       - name: Attest kyberdash-tray-win-x64-setup SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyberdash-tray-win-x64-setup.exe
           sbom-path: attest-assets/kyberdash-tray-win-x64-setup.cdx.json
 
       - name: Attest kyber-squad SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.zip
           sbom-path: attest-assets/kyber-squad-${{ needs.version.outputs.version }}.cdx.json
 
       - name: Attest kyber-squad-plugin SBOM
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/kyber-squad-plugin-${{ needs.version.outputs.version }}.zip
@@ -1061,10 +1394,20 @@ jobs:
       # The glob matches only archives (*.tar.gz/*.zip/*.exe), never the *.cdx.json
       # predicates beside them.
       - name: Attest aggregate SBOM against all archives
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe
           sbom-path: attest-assets/kyber-weave-sbom-${{ needs.version.outputs.version }}.cdx.json
+
+      # SLSA build provenance for every archive: no sbom-path and no predicate,
+      # so actions/attest runs in provenance mode over the same subject set the
+      # aggregate SBOM attestation covers.
+      - name: Attest build provenance for all archives
+        if: steps.verdict.outputs.skip != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: attest-assets/*.tar.gz, attest-assets/*.zip, attest-assets/*.exe
 
   release:
     name: Publish GitHub Release
@@ -1079,10 +1422,49 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       # Pattern "*" downloads every build output plus both SBOM artifacts (`sbom`
       # and `artifact-sboms`): the checksum manifest covers all 41, and the
       # attestation verify step below checks each archive against its SBOM.
       - name: Download all release assets
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: "*"
@@ -1090,6 +1472,7 @@ jobs:
           merge-multiple: true
 
       - name: Verify and compute checksums
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -1102,6 +1485,7 @@ jobs:
       # Fails closed: no continue-on-error, so a notes failure stops the job
       # before any tag or Release exists. One retry covers a transient API error.
       - name: Generate release notes
+        if: steps.verdict.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
@@ -1143,6 +1527,10 @@ jobs:
           exit 1
 
       - name: Create tag and GitHub Release
+        # id: the always-on report step reads this step's outcome to tell a
+        # published-but-unverified release from one that never published.
+        id: publish
+        if: steps.verdict.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
@@ -1279,17 +1667,24 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
           VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ github.token }}
+          CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
         run: |
           set -euo pipefail
 
-          # Get the expected asset list from the script. This ensures the
-          # post-publish check uses the same authoritative list as the pre-publish
-          # check, with no hand-copied duplication.
-          EXPECTED_ASSET_LIST=$(bash scripts/verify-release-checksums.sh --list release-assets "${VERSION}")
+          # Expected asset inventory: on a chain hit the receipt's recorded list
+          # (there is no local build tree to ask), otherwise the same
+          # authoritative list the pre-publish check uses.
           declare -a expected_assets=()
-          while read -r asset; do
+          if [[ "${CHAIN_HIT}" == "true" ]]; then
+            while read -r asset; do
               expected_assets+=("$asset")
-          done <<< "$EXPECTED_ASSET_LIST"
+            done < <(jq -r '.assets[]' .release-chain/receipt.json)
+          else
+            EXPECTED_ASSET_LIST=$(bash scripts/verify-release-checksums.sh --list release-assets "${VERSION}")
+            while read -r asset; do
+              expected_assets+=("$asset")
+            done <<< "$EXPECTED_ASSET_LIST"
+          fi
 
           # Fetch the published release's asset names.
           ASSETS_JSON="$(gh release view "${TAG}" --json assets --jq '.assets[].name')"
@@ -1299,8 +1694,8 @@ jobs:
           done <<< "$ASSETS_JSON"
 
           # Compare expected vs. published as sorted sets: both must contain
-          # exactly the 51 expected assets plus SHA256SUMS.txt (52 total).
-          # Sort and compare to catch both missing and extra assets.
+          # exactly the same names. Sort and compare to catch both missing and
+          # extra assets.
           echo "Performing asset inventory verification..."
           declare -a expected_with_manifest=("${expected_assets[@]}" "SHA256SUMS.txt")
           EXPECTED_SORTED=$(printf '%s\n' "${expected_with_manifest[@]}" | sort)
@@ -1318,9 +1713,17 @@ jobs:
               exit 1
           fi
 
-          # Download the published manifest and compare with the local copy.
+          # Download the published manifest and compare it byte-for-byte: with
+          # the local copy on a miss, with the manifest the chain receipt
+          # recorded on a hit.
           gh release download "${TAG}" --pattern "SHA256SUMS.txt" --dir /tmp/release-verify
-          if ! diff -q /tmp/release-verify/SHA256SUMS.txt release-assets/SHA256SUMS.txt; then
+          if [[ "${CHAIN_HIT}" == "true" ]]; then
+              jq -r '.sha256sums' .release-chain/receipt.json > /tmp/release-verify/expected-SHA256SUMS.txt
+              if ! diff /tmp/release-verify/SHA256SUMS.txt /tmp/release-verify/expected-SHA256SUMS.txt; then
+                  echo "::error::published SHA256SUMS.txt does not match the manifest recorded in the chain receipt" >&2
+                  exit 1
+              fi
+          elif ! diff -q /tmp/release-verify/SHA256SUMS.txt release-assets/SHA256SUMS.txt; then
               echo "::error::published SHA256SUMS.txt does not match local copy" >&2
               echo "Expected:" >&2
               cat release-assets/SHA256SUMS.txt >&2
@@ -1332,10 +1735,26 @@ jobs:
           echo "Asset inventory verification passed: all ${#expected_assets[@]} expected assets + manifest present"
           echo "Manifest byte-comparison verification passed"
 
+      # A chain hit built nothing, so the attestation verifies below need the
+      # published bytes: download them from the release the receipt names.
+      - name: Download the published archives (chain hit)
+        if: steps.verdict.outputs.skip == 'true'
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p hit-verify-archives
+          gh release download "${TAG}" \
+            --pattern '*.tar.gz' --pattern '*.zip' --pattern '*.exe' \
+            --dir hit-verify-archives
+          ls -la hit-verify-archives/
+
       - name: Verify SBOM attestations
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
         run: |
           set -euo pipefail
           # Every published archive carries a CycloneDX SBOM attestation created by
@@ -1348,9 +1767,21 @@ jobs:
           # attestation briefly invisible to `gh attestation verify`. Each archive
           # gets 3 attempts with a short sleep; a persistent miss still exits 1,
           # so the step stays fail-closed and the inventory checks above are unchanged.
-          for archive in release-assets/*.tar.gz release-assets/*.zip release-assets/*.exe; do
+          # On a chain hit the archives come from the published release, not a
+          # local build tree; an empty download fails below rather than passing
+          # vacuously.
+          if [[ "${CHAIN_HIT}" == "true" ]]; then
+            ARCHIVES_DIR=hit-verify-archives
+          else
+            ARCHIVES_DIR=release-assets
+          fi
+          verified_count=0
+          for archive in "${ARCHIVES_DIR}"/*.tar.gz "${ARCHIVES_DIR}"/*.zip "${ARCHIVES_DIR}"/*.exe; do
             [[ -f "$archive" ]] || continue
             echo "Verifying SBOM attestation for ${archive}"
+            # WHY starts false: only a successful verify inside the retry loop
+            # raises it, so a persistent miss reaches the exit 1 below instead
+            # of passing vacuously.
             verified=false
             for attempt in 1 2 3; do
               if gh attestation verify "${archive}" --repo "${REPO}" --predicate-type "https://cyclonedx.org/bom"; then
@@ -1366,8 +1797,163 @@ jobs:
               echo "::error::no verified CycloneDX SBOM attestation for ${archive} after 3 attempts" >&2
               exit 1
             fi
+            verified_count=$((verified_count + 1))
           done
-          echo "All published archives carry a verified CycloneDX SBOM attestation"
+          if (( verified_count == 0 )); then
+            echo "::error::no archives found in ${ARCHIVES_DIR} to verify SBOM attestations against" >&2
+            exit 1
+          fi
+          echo "All ${verified_count} published archives carry a verified CycloneDX SBOM attestation"
+
+      - name: Verify provenance attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
+        run: |
+          set -euo pipefail
+          # Every published archive also carries SLSA build provenance minted by
+          # the attest-sbom job (actions/attest in provenance mode: subject-path
+          # only). Same bounded retry as the SBOM verify above; a persistent
+          # miss still exits 1.
+          # On a chain hit the archives come from the published release, not a
+          # local build tree; an empty download fails below rather than passing
+          # vacuously.
+          if [[ "${CHAIN_HIT}" == "true" ]]; then
+            ARCHIVES_DIR=hit-verify-archives
+          else
+            ARCHIVES_DIR=release-assets
+          fi
+          verified_count=0
+          for archive in "${ARCHIVES_DIR}"/*.tar.gz "${ARCHIVES_DIR}"/*.zip "${ARCHIVES_DIR}"/*.exe; do
+            [[ -f "$archive" ]] || continue
+            echo "Verifying provenance attestation for ${archive}"
+            # Same shape as the SBOM loop above: the flag starts false so a
+            # persistent miss reaches the exit 1 below instead of passing
+            # vacuously.
+            verified=false
+            for attempt in 1 2 3; do
+              if gh attestation verify "${archive}" --repo "${REPO}" --predicate-type "https://slsa.dev/provenance/v1"; then
+                verified=true
+                break
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                echo "::warning::provenance attestation not yet visible for ${archive} (attempt ${attempt}/3); retrying after Sigstore propagation delay"
+                sleep 15
+              fi
+            done
+            if [[ "${verified}" != "true" ]]; then
+              echo "::error::no verified SLSA provenance attestation for ${archive} after 3 attempts" >&2
+              exit 1
+            fi
+            verified_count=$((verified_count + 1))
+          done
+          if (( verified_count == 0 )); then
+            echo "::error::no archives found in ${ARCHIVES_DIR} to verify provenance against" >&2
+            exit 1
+          fi
+          echo "All ${verified_count} published archives carry a verified SLSA provenance attestation"
+
+      # Runs even when a verify step above failed: on a chain hit the proving
+      # run's URL is the only lead an operator has for what published the
+      # release that mismatched, and a skipped report would take it with it.
+      # Each branch claims only what actually happened: a hit whose receipt
+      # recorded no run_url points at the verdict log; a green miss names
+      # this run as the publisher; a miss whose publish step completed but
+      # whose verification failed reports a live, unverified release; a miss
+      # whose publish step failed looks the tag up by HTTP status. Only 404
+      # says no release exists. A 2xx says a release for the tag already
+      # exists and this run did not complete publishing it — not that this
+      # run created the release, and not that the release is partial. Any
+      # other status says the lookup failed and does not claim the release
+      # is absent.
+      - name: Report the run that published this release
+        if: always()
+        env:
+          PRIOR_RUN_URL: ${{ steps.verdict.outputs.run_url }}
+          CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
+          JOB_STATUS: ${{ job.status }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          TAG: ${{ needs.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PRIOR_RUN_URL}" ]]; then
+            echo "Chain hit: this release was published by ${PRIOR_RUN_URL}"
+            echo "Published by ${PRIOR_RUN_URL}" >> "${GITHUB_STEP_SUMMARY}"
+          elif [[ "${CHAIN_HIT}" == "true" ]]; then
+            echo "Chain hit: the run that published this release is unrecorded (the receipt carries no run_url); see the 'Decide whether the release chain can skip' step log for the verdict."
+          elif [[ "${JOB_STATUS}" == "success" ]]; then
+            echo "This run published the release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          elif [[ "${PUBLISH_OUTCOME}" == "success" ]]; then
+            echo "This run published the release but verification failed (${JOB_STATUS}); the release is live and unverified: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo "Published but unverified by this run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            # Only a 404 proves the tag has no release. A 2xx proves some
+            # release carries the tag, not that this run created it. Any other
+            # status, including an empty one when the call never connected,
+            # proves nothing about absence.
+            lookup_headers="$(gh api --include --silent "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" || true)"
+            lookup_status="$(printf '%s\n' "${lookup_headers}" | awk 'NR==1 { print $2; exit }')"
+            run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            if [[ "${lookup_status}" == "404" ]]; then
+              echo "This run published nothing (${JOB_STATUS}): the 'Create tag and GitHub Release' step ended '${PUBLISH_OUTCOME}', and no release exists for ${TAG}; see the failed steps above."
+            elif [[ "${lookup_status}" =~ ^2[0-9][0-9]$ ]]; then
+              echo "A release for ${TAG} already exists; this run did not complete publishing it (${JOB_STATUS}, step outcome '${PUBLISH_OUTCOME}'): ${run_url}"
+              echo "A release for ${TAG} already exists; this run did not complete publishing it: ${run_url}" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              echo "This run did not complete publishing (${JOB_STATUS}, step outcome '${PUBLISH_OUTCOME}'), and the release lookup for ${TAG} failed (HTTP ${lookup_status:-none}); whether a release exists was not established. See the failed steps above."
+            fi
+          fi
+
+      # Miss-only, and only after the verification above: a hit must never
+      # refresh the receipt's age, and a half-published release has no receipt.
+      - name: Record the release chain receipt
+        if: steps.verdict.outputs.skip != 'true'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .release-chain
+          # SHA256SUMS.txt is appended to the expected list at verify time, so the
+          # receipt records the archives without it, matching --list on a miss.
+          assets="$(gh release view "${TAG}" --json assets --jq '[.assets[].name | select(. != "SHA256SUMS.txt")] | sort')"
+          sha256sums="$(cat release-assets/SHA256SUMS.txt)"
+          package_versions=()
+          for csproj in src/*/*.csproj; do
+            if grep -q '<IsPackable>false</IsPackable>' "${csproj}"; then
+              continue
+            fi
+            pkgid="$(sed -n 's/.*<PackageId>\(.*\)<\/PackageId>.*/\1/p' "${csproj}" | head -n 1)"
+            if [[ -z "${pkgid}" ]]; then
+              pkgid="$(basename "${csproj}" .csproj)"
+            fi
+            package_versions+=("${pkgid}@${VERSION}")
+          done
+          jq -n \
+            --argjson saved_at_epoch "$(date +%s)" \
+            --arg version "${VERSION}" \
+            --arg tag "${TAG}" \
+            --arg run_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --argjson assets "${assets}" \
+            --arg sha256sums "${sha256sums}" \
+            --argjson package_versions "$(printf '%s\n' "${package_versions[@]}" | sort | jq -Rn '[inputs]')" \
+            '{saved_at_epoch: $saved_at_epoch, version: $version, tag: $tag, run_url: $run_url, assets: $assets, sha256sums: $sha256sums, package_versions: $package_versions}' \
+            > .release-chain/receipt.json
+          cat .release-chain/receipt.json
+
+      # Miss-only and failure-tolerant: a hit never refreshes the receipt into
+      # permanence, and a cache-reserve race on the shared key must not fail a
+      # publish that already succeeded.
+      - name: Save the release chain receipt
+        if: steps.verdict.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
 
   gh-packages:
     name: Publish GitHub Packages
@@ -1383,12 +1969,52 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the release chain receipt
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .release-chain
+          key: release-chain-${{ needs.version.outputs.version }}
+
+      - name: Decide whether the release chain can skip
+        id: verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt=".release-chain/receipt.json"
+          skip=false
+          run_url=""
+          if [[ -f "${receipt}" ]]; then
+            saved_at_epoch="$(jq -r '.saved_at_epoch // ""' "${receipt}" 2>/dev/null || true)"
+            if [[ "${saved_at_epoch}" =~ ^[0-9]+$ ]]; then
+              age=$(( $(date +%s) - saved_at_epoch ))
+              if (( age < 0 )); then
+                echo "chain receipt is dated in the future (age ${age}s); rebuilding the chain"
+              elif (( age <= RECEIPT_MAX_AGE_SECONDS )); then
+                skip=true
+                run_url="$(jq -r '.run_url // ""' "${receipt}" 2>/dev/null || true)"
+                echo "chain receipt is fresh (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling, published by ${run_url:-an unrecorded run}); skipping the build chain"
+              else
+                echo "chain receipt is stale (age ${age}s of the ${RECEIPT_MAX_AGE_SECONDS}s ceiling); rebuilding the chain"
+              fi
+            else
+              echo "chain receipt has no numeric saved_at_epoch; rebuilding the chain"
+            fi
+          else
+            echo "no chain receipt restored; rebuilding the chain"
+          fi
+          {
+            echo "skip=${skip}"
+            echo "run_url=${run_url}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Setup .NET
+        if: steps.verdict.outputs.skip != 'true'
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Pack tools
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: >
@@ -1398,6 +2024,7 @@ jobs:
           -o ./artifacts/nupkg
 
       - name: Push to GitHub Packages (secondary channel)
+        if: steps.verdict.outputs.skip != 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -1409,3 +2036,38 @@ jobs:
             --api-key "${{ github.token }}" \
             --skip-duplicate
 
+      # Runs on both paths: on a miss it proves the push above landed; on a hit
+      # it proves the receipt's recorded package versions are still published,
+      # instead of re-packing and re-pushing them.
+      - name: Verify the published package versions
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ github.token }}
+          CHAIN_HIT: ${{ steps.verdict.outputs.skip }}
+        run: |
+          set -euo pipefail
+          declare -a expected=()
+          if [[ "${CHAIN_HIT}" == "true" ]]; then
+            mapfile -t expected < <(jq -r '.package_versions[]' .release-chain/receipt.json)
+          else
+            shopt -s nullglob
+            for nupkg in artifacts/nupkg/*.nupkg; do
+              expected+=("$(basename "${nupkg}" ".${VERSION}.nupkg")@${VERSION}")
+            done
+          fi
+          if (( ${#expected[@]} == 0 )); then
+            echo "::error::no package versions to verify" >&2
+            exit 1
+          fi
+          for expected_package in "${expected[@]}"; do
+            name="${expected_package%@*}"
+            version="${expected_package#*@}"
+            echo "Verifying ${name} ${version} is published to GitHub Packages"
+            published_versions="$(gh api --paginate "/users/${OWNER}/packages/nuget/${name}/versions" --jq '.[].name')"
+            if ! grep -qxF "${version}" <<< "${published_versions}"; then
+              echo "::error::${name} ${version} is not published to GitHub Packages" >&2
+              exit 1
+            fi
+          done
+          echo "All ${#expected[@]} package versions are published to GitHub Packages"
